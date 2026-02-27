@@ -1,0 +1,61 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify builds
+        run: cargo build --workspace
+
+      - name: Publish crates (dependency order)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -e
+
+          publish() {
+            local crate=$1
+            echo "Publishing $crate..."
+            cargo publish -p "$crate" --no-verify
+            echo "Waiting for crates.io to index $crate..."
+            sleep 30
+          }
+
+          # Layer 1: no internal deps
+          publish codemem-core
+
+          # Layer 2: depends on codemem-core only
+          publish codemem-storage
+          publish codemem-vector
+          publish codemem-embeddings
+          publish codemem-watch
+
+          # Layer 3: depends on layers 1-2
+          publish codemem-graph
+          publish codemem-viz
+          publish codemem-index
+
+          # Layer 4: depends on layers 1-3
+          publish codemem-hooks
+          publish codemem-mcp
+
+          # Layer 5: depends on everything
+          publish codemem-cli
+
+          echo "All crates published successfully!"

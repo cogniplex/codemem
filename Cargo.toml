@@ -1,0 +1,107 @@
+[workspace]
+members = [
+    "crates/codemem-core",
+    "crates/codemem-storage",
+    "crates/codemem-vector",
+    "crates/codemem-graph",
+    "crates/codemem-embeddings",
+    "crates/codemem-mcp",
+    "crates/codemem-hooks",
+    "crates/codemem-cli",
+    "crates/codemem-bench",
+    "crates/codemem-viz",
+    "crates/codemem-index",
+    "crates/codemem-watch",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Codemem Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/cogniplex/codemem"
+homepage = "https://github.com/cogniplex/codemem"
+readme = "README.md"
+keywords = ["memory", "embeddings", "vector-search", "knowledge-graph", "mcp"]
+categories = ["command-line-utilities", "database", "science"]
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Internal crates
+codemem-core = { path = "crates/codemem-core" }
+codemem-storage = { path = "crates/codemem-storage" }
+codemem-vector = { path = "crates/codemem-vector" }
+codemem-graph = { path = "crates/codemem-graph" }
+codemem-embeddings = { path = "crates/codemem-embeddings" }
+codemem-mcp = { path = "crates/codemem-mcp" }
+codemem-hooks = { path = "crates/codemem-hooks" }
+codemem-cli = { path = "crates/codemem-cli" }
+codemem-viz = { path = "crates/codemem-viz" }
+codemem-index = { path = "crates/codemem-index" }
+codemem-watch = { path = "crates/codemem-watch" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Vector search
+usearch = "2"
+
+# Graph
+petgraph = "0.6"
+
+# Embeddings
+candle-core = { version = "0.9", default-features = false }
+candle-nn = { version = "0.9", default-features = false }
+candle-transformers = { version = "0.9", default-features = false }
+tokenizers = { version = "0.21", features = ["http"] }
+ndarray = "0.16"
+hf-hub = "0.4"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+thiserror = "1"
+anyhow = "1"
+dirs = "5"
+lru = "0.12"
+chrono = { version = "0.4", features = ["serde"] }
+similar = "2"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+openssl = { version = "0.10", features = ["vendored"] }
+
+# File watching
+notify = "7"
+notify-debouncer-mini = "0.5"
+crossbeam-channel = "0.5"
+
+# Indexing
+tree-sitter = "0.24"
+walkdir = "2"
+ignore = "0.4"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.bench]
+debug = true

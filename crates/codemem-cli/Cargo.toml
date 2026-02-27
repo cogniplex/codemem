@@ -1,0 +1,48 @@
+[package]
+name = "codemem-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "CLI entry point for the Codemem memory engine"
+publish = true
+
+[features]
+default = []
+metal = ["codemem-embeddings/metal"]
+cuda = ["codemem-embeddings/cuda"]
+accelerate = ["codemem-embeddings/accelerate"]
+
+[[bin]]
+name = "codemem"
+path = "src/main.rs"
+
+[dependencies]
+codemem-core = { workspace = true }
+codemem-storage = { workspace = true }
+codemem-vector = { workspace = true }
+codemem-graph = { workspace = true }
+codemem-embeddings = { workspace = true }
+codemem-mcp = { workspace = true }
+codemem-hooks = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+codemem-viz = { workspace = true }
+codemem-index = { workspace = true }
+codemem-watch = { workspace = true }
+reqwest = { workspace = true }
+openssl = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+codemem-embeddings = { workspace = true, features = ["metal", "accelerate"] }

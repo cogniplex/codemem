@@ -1,0 +1,3082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codemem — Memory Visualizer</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/force-graph@1/dist/force-graph.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0c0e1a;
+  color: #c8cad0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Header --- */
+#header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  height: 52px;
+  background: linear-gradient(135deg, #10132a 0%, #161b35 100%);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+  z-index: 10;
+}
+#brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+#brand svg { width: 22px; height: 22px; }
+#brand span {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: linear-gradient(135deg, #7c6cf0, #47c9e5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.tab-group {
+  display: flex;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.tab-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7094;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: all .2s;
+  white-space: nowrap;
+}
+.tab-btn.active {
+  background: rgba(124,108,240,0.15);
+  color: #b4adff;
+  box-shadow: 0 0 0 1px rgba(124,108,240,0.25);
+}
+.tab-btn:hover:not(.active) { color: #9498b8; }
+
+.stats-pills {
+  display: flex;
+  gap: 8px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+.stat-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.04);
+  font-size: 11.5px;
+  color: #6b7094;
+  white-space: nowrap;
+}
+.stat-pill .num {
+  color: #a8adc6;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.header-spacer { flex: 1; }
+
+#namespace-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+#namespace-wrap label { font-size: 11.5px; color: #4e5275; }
+#namespace-select {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+  color: #a8adc6;
+  padding: 4px 10px;
+  font-size: 12px;
+  outline: none;
+  max-width: 220px;
+}
+#namespace-select:focus { border-color: rgba(124,108,240,0.4); }
+#namespace-select option { background: #161b35; }
+
+#search-box {
+  position: relative;
+  flex-shrink: 0;
+}
+#search-input {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 6px 12px 6px 32px;
+  color: #c8cad0;
+  font-size: 12.5px;
+  width: 240px;
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+#search-input::placeholder { color: #3e4260; }
+#search-input:focus {
+  border-color: rgba(124,108,240,0.4);
+  box-shadow: 0 0 0 3px rgba(124,108,240,0.08);
+}
+#search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #3e4260;
+  pointer-events: none;
+}
+#search-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #1a1f38;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  max-height: 360px;
+  overflow-y: auto;
+  z-index: 30;
+  display: none;
+}
+#search-dropdown.visible { display: block; }
+.search-result {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  transition: background .15s;
+}
+.search-result:hover { background: rgba(124,108,240,0.08); }
+.search-result:last-child { border-bottom: none; }
+.search-result .sr-type {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-right: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.search-result .sr-content {
+  font-size: 12px;
+  color: #8b90b0;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Main layout --- */
+#main-area {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* --- 3D view container --- */
+#view-container {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+#vector-view, #graph-view, #explorer-view {
+  position: absolute;
+  inset: 0;
+}
+#vector-view canvas, #graph-view canvas { display: block; }
+.view-hidden { display: none !important; }
+
+/* --- Loading overlay --- */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(12, 14, 26, 0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+.loading-overlay.hidden { display: none; }
+.spinner {
+  width: 32px; height: 32px;
+  border: 2px solid rgba(124,108,240,0.15);
+  border-top-color: #7c6cf0;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-overlay p { margin-top: 10px; font-size: 12px; color: #4e5275; }
+
+/* --- Empty state --- */
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #3e4260;
+  font-size: 14px;
+}
+.empty-state.hidden { display: none; }
+.empty-state .icon { font-size: 40px; margin-bottom: 10px; opacity: 0.3; }
+
+/* --- Legend overlay (Neo4j Bloom-style interactive) --- */
+#legend {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  background: rgba(15, 18, 37, 0.92);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 10px 14px;
+  z-index: 6;
+  backdrop-filter: blur(12px);
+  min-width: 150px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+#legend h4 {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #4e5275;
+  margin-bottom: 6px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  margin: 0 -6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #6b7094;
+  cursor: pointer;
+  transition: all .15s;
+  user-select: none;
+}
+.legend-item:hover { background: rgba(255,255,255,0.05); }
+.legend-item.disabled { opacity: 0.25; text-decoration: line-through; }
+.legend-count {
+  font-size: 9px;
+  color: #3e4260;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: transform .2s;
+}
+.legend-item:hover .legend-dot { transform: scale(1.3); }
+
+/* --- Tooltip (Neo4j Bloom-style rich card) --- */
+#tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: rgba(18, 22, 45, 0.97);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 0;
+  font-size: 11.5px;
+  max-width: 300px;
+  z-index: 20;
+  display: none;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
+  overflow: hidden;
+}
+.tt-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.tt-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.tt-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #d0d2dc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tt-body {
+  padding: 8px 12px;
+}
+.tt-content {
+  font-size: 11px;
+  color: #8b90b0;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tt-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  font-size: 10px;
+  color: #4e5275;
+}
+.tt-stat { display: flex; align-items: center; gap: 3px; }
+.tt-stat .num { color: #8b90b0; font-weight: 600; }
+
+/* --- Right panel: Details --- */
+#side-panel {
+  width: 320px;
+  min-width: 280px;
+  max-width: 400px;
+  background: #0f1225;
+  border-left: 1px solid rgba(255,255,255,0.05);
+  overflow-y: auto;
+  padding: 16px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#side-panel.empty {
+  align-items: center;
+  justify-content: center;
+  color: #3e4260;
+  font-size: 13px;
+}
+
+.detail-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.detail-card .label {
+  font-size: 10px;
+  color: #3e4260;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.detail-card .value {
+  font-size: 12.5px;
+  color: #b0b4cc;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.detail-card .value.id {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10.5px;
+  color: #555880;
+}
+
+/* Tags */
+.tags-container { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  background: rgba(124,108,240,0.08);
+  border: 1px solid rgba(124,108,240,0.12);
+  color: #8b8ec0;
+}
+
+/* Progress bar */
+.progress-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.progress-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-bar .fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .3s;
+}
+.progress-value {
+  font-size: 11px;
+  color: #555880;
+  min-width: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Edge list */
+.edge-list { list-style: none; }
+.edge-list li {
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: color .15s;
+  color: #6b7094;
+}
+.edge-list li:hover { color: #b4adff; }
+.edge-list .rel-type {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  margin-right: 5px;
+  letter-spacing: 0.3px;
+}
+
+/* --- Bottom bar --- */
+#bottom-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  background: #0c0e1a;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+#filter-toggle-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 5px;
+  color: #555880;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all .15s;
+}
+#filter-toggle-btn:hover { color: #8b90b0; background: rgba(255,255,255,0.06); }
+#rel-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+#rel-filters.hidden { display: none; }
+#rel-filters label.rel-cb {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  color: #555880;
+  font-size: 10.5px;
+  transition: color .15s;
+}
+#rel-filters label.rel-cb:hover { color: #8b90b0; }
+#rel-filters label.rel-cb input { accent-color: #7c6cf0; width: 12px; height: 12px; }
+
+/* --- Focus view --- */
+#focus-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0c0e1a;
+  z-index: 4;
+}
+#focus-view.view-hidden { display: none !important; }
+#focus-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: rgba(15, 18, 37, 0.92);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+  z-index: 5;
+}
+#focus-back-btn {
+  background: rgba(124,108,240,0.12);
+  border: 1px solid rgba(124,108,240,0.25);
+  border-radius: 6px;
+  color: #b4adff;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all .15s;
+}
+#focus-back-btn:hover {
+  background: rgba(124,108,240,0.2);
+  color: #d4d0ff;
+}
+#focus-label {
+  font-size: 12px;
+  color: #6b7094;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#focus-label strong { color: #b0b4cc; font-weight: 600; }
+#depth-control {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+#depth-control::before {
+  content: 'Depth';
+  font-size: 10.5px;
+  color: #4e5275;
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.depth-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  color: #6b7094;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all .15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.depth-btn:hover { background: rgba(255,255,255,0.06); color: #9498b8; }
+.depth-btn.active {
+  background: rgba(124,108,240,0.15);
+  border-color: rgba(124,108,240,0.3);
+  color: #b4adff;
+}
+#focus-graph-container {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+/* --- Relationship groups (side panel) --- */
+.rel-group {
+  margin-bottom: 2px;
+}
+.rel-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background .15s;
+  user-select: none;
+}
+.rel-group-header:hover { background: rgba(255,255,255,0.03); }
+.rel-group-chevron {
+  font-size: 10px;
+  color: #4e5275;
+  transition: transform .2s;
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.rel-group.expanded .rel-group-chevron { transform: rotate(90deg); }
+.rel-group-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.rel-group-count {
+  font-size: 10px;
+  color: #3e4260;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.rel-group-body {
+  display: none;
+  padding: 0 0 4px 18px;
+}
+.rel-group.expanded .rel-group-body { display: block; }
+.rel-group-desc {
+  font-size: 10.5px;
+  color: #3e4260;
+  padding: 2px 0 6px;
+  line-height: 1.4;
+  font-style: italic;
+}
+.rel-group-item {
+  padding: 4px 6px;
+  font-size: 11.5px;
+  color: #6b7094;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all .15s;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.rel-group-item:hover {
+  background: rgba(124,108,240,0.08);
+  color: #b4adff;
+}
+.rel-dir {
+  font-size: 11px;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+.rel-dir.outgoing { color: #47c9e5; }
+.rel-dir.incoming { color: #f0b95c; }
+.rel-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Explorer view (browse-first) --- */
+#explorer-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0c0e1a;
+}
+#explorer-kind-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  flex-shrink: 0;
+  align-items: center;
+}
+.kind-chip {
+  padding: 4px 12px;
+  border-radius: 14px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all .18s;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.kind-chip .kind-count {
+  font-size: 10px;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+.kind-chip.active {
+  border-color: currentColor;
+  opacity: 1;
+}
+.kind-chip:not(.active) {
+  opacity: 0.35;
+}
+.kind-chip:hover:not(.active) {
+  opacity: 0.6;
+}
+#explorer-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+#explorer-results {
+  flex: 1;
+  min-width: 300px;
+  overflow-y: auto;
+  border-right: 1px solid rgba(255,255,255,0.05);
+  display: flex;
+  flex-direction: column;
+}
+#explorer-results-header {
+  padding: 8px 14px;
+  font-size: 11px;
+  color: #4e5275;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+#explorer-results-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 10px;
+}
+#explorer-load-more {
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+#explorer-load-more.hidden { display: none; }
+#explorer-results-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3e4260;
+  font-size: 13px;
+  pointer-events: none;
+}
+#explorer-results-empty.hidden { display: none; }
+#explorer-detail-panel {
+  width: 380px;
+  min-width: 300px;
+  max-width: 440px;
+  overflow-y: auto;
+  background: #0f1225;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+#explorer-detail-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3e4260;
+  font-size: 13px;
+}
+#explorer-detail-empty.hidden { display: none; }
+#explorer-detail-header {
+  padding: 14px 16px 10px;
+}
+#explorer-detail-header.hidden { display: none; }
+.exp-detail-kind-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-right: 6px;
+}
+.exp-detail-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #d0d2dc;
+  margin-top: 6px;
+  word-break: break-word;
+  line-height: 1.35;
+}
+.exp-detail-ns {
+  font-size: 11.5px;
+  color: #47c9e5;
+  margin-top: 4px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.exp-detail-centrality {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 0;
+}
+.exp-centrality-bar {
+  flex: 1;
+  height: 5px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.exp-centrality-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #7c6cf0, #47c9e5);
+  transition: width .3s;
+}
+.exp-centrality-value {
+  font-size: 11.5px;
+  color: #8b90b0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+}
+.exp-centrality-label {
+  font-size: 10px;
+  color: #4e5275;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+#explorer-mini-graph {
+  height: 280px;
+  position: relative;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  flex-shrink: 0;
+}
+#explorer-connections {
+  padding: 10px 14px;
+  flex: 1;
+}
+.exp-card {
+  padding: 10px 12px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all .15s;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.exp-card:hover {
+  background: rgba(124,108,240,0.06);
+  border-color: rgba(124,108,240,0.12);
+}
+.exp-card.selected {
+  background: rgba(124,108,240,0.1);
+  border-color: rgba(124,108,240,0.3);
+}
+.exp-card-kind {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+  min-width: 52px;
+  text-align: center;
+}
+.exp-card-body {
+  flex: 1;
+  min-width: 0;
+}
+.exp-card-label {
+  font-size: 12.5px;
+  color: #c8cad0;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.exp-card-ns {
+  font-size: 10.5px;
+  color: #4e5275;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.exp-card-degree {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: #555880;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.exp-card-degree-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(124,108,240,0.4);
+}
+.exp-card-centrality {
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.05);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.exp-card-centrality-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #7c6cf0, #47c9e5);
+}
+.exp-conn-group {
+  margin-bottom: 8px;
+}
+.exp-conn-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 0;
+  font-size: 11px;
+  color: #4e5275;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  margin-bottom: 4px;
+}
+.exp-conn-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.exp-conn-count {
+  font-size: 10px;
+  color: #3e4260;
+  margin-left: auto;
+}
+.exp-conn-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  color: #6b7094;
+  cursor: pointer;
+  transition: all .15s;
+}
+.exp-conn-item:hover {
+  background: rgba(124,108,240,0.08);
+  color: #b4adff;
+}
+.exp-conn-item.cross-ns {
+  background: rgba(71,201,229,0.04);
+  border-left: 2px solid rgba(71,201,229,0.3);
+}
+.exp-conn-item.cross-ns:hover {
+  background: rgba(71,201,229,0.1);
+}
+.exp-conn-dir {
+  font-size: 11px;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+.exp-conn-dir.outgoing { color: #47c9e5; }
+.exp-conn-dir.incoming { color: #f0b95c; }
+.exp-conn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.exp-conn-ns {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 9px;
+  flex-shrink: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.exp-conn-ns.same-ns {
+  background: rgba(255,255,255,0.04);
+  color: #4e5275;
+}
+.exp-conn-ns.diff-ns {
+  background: rgba(71,201,229,0.1);
+  color: #47c9e5;
+  border: 1px solid rgba(71,201,229,0.15);
+}
+.exp-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #4e5275;
+  padding: 8px 0 6px;
+  font-weight: 600;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.1); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <div id="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="url(#bg)" stroke-width="2" stroke-linecap="round">
+      <defs><linearGradient id="bg" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#7c6cf0"/><stop offset="100%" stop-color="#47c9e5"/></linearGradient></defs>
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+    </svg>
+    <span>CODEMEM</span>
+  </div>
+  <div class="tab-group">
+    <button class="tab-btn active" data-tab="explorer">Explorer</button>
+    <button class="tab-btn" data-tab="graph">Knowledge Graph</button>
+    <button class="tab-btn" data-tab="vector">Vector Space</button>
+  </div>
+  <div class="stats-pills">
+    <div class="stat-pill"><span class="num" id="stat-nodes">--</span> nodes</div>
+    <div class="stat-pill"><span class="num" id="stat-edges">--</span> edges</div>
+  </div>
+  <div class="header-spacer"></div>
+  <div id="namespace-wrap">
+    <label>Namespace</label>
+    <select id="namespace-select"><option value="">All</option></select>
+  </div>
+  <div id="search-box">
+    <svg id="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="search-input" type="text" placeholder="Search memories..." />
+    <div id="search-dropdown"></div>
+  </div>
+</div>
+
+<!-- Main area -->
+<div id="main-area">
+  <!-- Views -->
+  <div id="view-container">
+    <div id="explorer-view">
+      <div id="explorer-kind-bar"></div>
+      <div id="explorer-body">
+        <div id="explorer-results">
+          <div id="explorer-results-header"></div>
+          <div id="explorer-results-list"></div>
+          <div id="explorer-load-more" class="hidden"><div class="spinner"></div></div>
+          <div id="explorer-results-empty" class="hidden">Loading...</div>
+        </div>
+        <div id="explorer-detail-panel">
+          <div id="explorer-detail-empty">Select a node to see details</div>
+          <div id="explorer-detail-header" class="hidden"></div>
+          <div id="explorer-mini-graph"></div>
+          <div id="explorer-connections"></div>
+        </div>
+      </div>
+    </div>
+    <div id="graph-view" class="view-hidden">
+      <div id="graph-loading" class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Building knowledge graph...</p>
+      </div>
+      <div id="graph-empty" class="empty-state hidden">
+        <div class="icon">&#9672;</div>
+        <p>No graph data</p>
+      </div>
+      <div id="focus-view" class="view-hidden">
+        <div id="focus-controls">
+          <button id="focus-back-btn">&larr; Full Graph</button>
+          <span id="focus-label">Focused on: ...</span>
+          <div id="depth-control">
+            <button class="depth-btn" data-depth="1">1</button>
+            <button class="depth-btn active" data-depth="2">2</button>
+            <button class="depth-btn" data-depth="3">3</button>
+          </div>
+        </div>
+        <div id="focus-graph-container"></div>
+      </div>
+    </div>
+    <div id="vector-view" class="view-hidden">
+      <div id="vector-loading" class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Projecting embeddings to 3D...</p>
+      </div>
+      <div id="vector-empty" class="empty-state hidden">
+        <div class="icon">&#9673;</div>
+        <p>No vector data</p>
+      </div>
+    </div>
+    <div id="legend"></div>
+  </div>
+
+  <!-- Right panel: Details -->
+  <div id="side-panel" class="empty">
+    <p>Select a memory to view details</p>
+  </div>
+</div>
+
+<!-- Tooltip -->
+<div id="tooltip"></div>
+
+<!-- Bottom bar -->
+<div id="bottom-bar">
+  <button id="filter-toggle-btn">Edge Filters</button>
+  <div id="rel-filters" class="hidden"></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ========== Color systems ==========
+// Memory types (top-level)
+const MEMORY_TYPE_COLORS = {
+  context:    '#7c6cf0',
+  pattern:    '#47c9e5',
+  insight:    '#6ce0a8',
+  decision:   '#f0776c',
+  preference: '#f0b95c',
+  style:      '#e07ce0',
+  habit:      '#e0a06c',
+};
+
+// Content prefix categories (sub-level, used when one type is selected)
+const CATEGORY_COLORS = {
+  FUNCTION:  '#7c6cf0',
+  FILE:      '#47c9e5',
+  CLASS:     '#f0776c',
+  MODULE:    '#f0b95c',
+  METHOD:    '#6ce0a8',
+  COMPONENT: '#e07ce0',
+  CONSTANT:  '#95a0c0',
+  DECORATOR: '#e0a06c',
+  SETTINGS:  '#6ca0e0',
+  IMPORTS:   '#a0e06c',
+  URL:       '#c0a0f0',
+  OTHER:     '#5a5e80',
+};
+
+const RELATIONSHIP_TYPES = [
+  'RELATES_TO', 'LEADS_TO', 'PART_OF', 'REINFORCES', 'CONTRADICTS',
+  'EVOLVED_INTO', 'DERIVED_FROM', 'INVALIDATED_BY', 'DEPENDS_ON',
+  'IMPORTS', 'EXTENDS', 'CALLS', 'CONTAINS', 'SUPERSEDES', 'BLOCKS',
+];
+
+const REL_COLORS = {};
+const relPalette = [
+  '#e74c6c','#47c9e5','#6ce0a8','#7c6cf0','#f0776c',
+  '#f0b95c','#e07ce0','#4a9ef0','#5ce0b9','#a070d0',
+  '#d08050','#50b098','#c04060','#506080','#e0c050',
+];
+RELATIONSHIP_TYPES.forEach((r, i) => { REL_COLORS[r] = relPalette[i % relPalette.length]; });
+
+// ========== State ==========
+let activeTab = 'explorer';
+let currentNamespace = '';
+let vectorData = [];
+let graphNodes = [];
+let graphEdges = [];
+let relFilters = {};
+RELATIONSHIP_TYPES.forEach(r => { relFilters[r] = true; });
+
+// Focus mode state
+let focusMode = false;
+let focusNodeId = null;
+let focusDepth = 2;
+let focusGraphInstance = null;
+
+const REL_DESCRIPTIONS = {
+  RELATES_TO: 'General relationship between these memories',
+  LEADS_TO: 'This memory leads to or causes the target',
+  PART_OF: 'This memory is a component or subset of the target',
+  REINFORCES: 'This memory strengthens or supports the target',
+  CONTRADICTS: 'This memory conflicts with or opposes the target',
+  EVOLVED_INTO: 'This memory evolved or transformed into the target',
+  DERIVED_FROM: 'This memory was derived or created from the target',
+  INVALIDATED_BY: 'This memory is invalidated or superseded by the target',
+  DEPENDS_ON: 'This memory depends on or requires the target',
+  IMPORTS: 'This memory imports or uses the target',
+  EXTENDS: 'This memory extends or builds upon the target',
+  CALLS: 'This memory calls or invokes the target',
+  CONTAINS: 'This memory contains or encompasses the target',
+  SUPERSEDES: 'This memory replaces or supersedes the target',
+  BLOCKS: 'This memory blocks or prevents the target',
+};
+
+let allMemories = [];
+let memoryLookup = {};
+let typeFilters = {};
+let categoryFilters = {};
+let selectedMemoryId = null;
+
+// Browse state
+let browseOffset = 0, browseTotal = 0, browseLoading = false;
+let browseKindFilter = null, browseNodes = [], kindCounts = {};
+let browseSearchQuery = '';
+
+// DOM references
+const topBarTabs = document.querySelectorAll('.tab-btn');
+const searchInput = document.getElementById('search-input');
+const searchDropdown = document.getElementById('search-dropdown');
+const namespaceSelect = document.getElementById('namespace-select');
+const sidePanel = document.getElementById('side-panel');
+const tooltip = document.getElementById('tooltip');
+const vectorView = document.getElementById('vector-view');
+const graphView = document.getElementById('graph-view');
+const vectorLoading = document.getElementById('vector-loading');
+const graphLoading = document.getElementById('graph-loading');
+const vectorEmpty = document.getElementById('vector-empty');
+const graphEmpty = document.getElementById('graph-empty');
+const relFiltersContainer = document.getElementById('rel-filters');
+const legendEl = document.getElementById('legend');
+const focusViewEl = document.getElementById('focus-view');
+const focusGraphContainerEl = document.getElementById('focus-graph-container');
+const focusLabelEl = document.getElementById('focus-label');
+const focusBackBtn = document.getElementById('focus-back-btn');
+const depthBtns = document.querySelectorAll('.depth-btn');
+
+// ========== Mouse tracking (for tooltip positioning) ==========
+let mouseX = 0, mouseY = 0;
+document.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  if (tooltip.style.display === 'block') {
+    tooltip.style.left = (mouseX + 16) + 'px';
+    tooltip.style.top = Math.min(mouseY - 10, window.innerHeight - tooltip.offsetHeight - 10) + 'px';
+  }
+});
+
+// ========== Utility ==========
+async function apiFetch(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = String(str);
+  return d.innerHTML;
+}
+
+function extractCategory(content) {
+  if (!content) return 'OTHER';
+  const prefix = content.split(':')[0].trim().toUpperCase();
+  if (prefix === 'FUNCTION' || prefix === 'FUNCTIONS') return 'FUNCTION';
+  if (prefix === 'FILE') return 'FILE';
+  if (prefix === 'CLASS' || prefix.startsWith('CLASSES')) return 'CLASS';
+  if (prefix === 'MODULE') return 'MODULE';
+  if (prefix === 'METHOD') return 'METHOD';
+  if (prefix === 'COMPONENT') return 'COMPONENT';
+  if (prefix === 'CONSTANT') return 'CONSTANT';
+  if (prefix === 'DECORATOR') return 'DECORATOR';
+  if (prefix === 'SETTINGS') return 'SETTINGS';
+  if (prefix === 'IMPORTS' || prefix === 'IMPORT') return 'IMPORTS';
+  if (prefix.includes('URL')) return 'URL';
+  // Check content start for common patterns
+  const lower = content.toLowerCase();
+  if (lower.startsWith('function')) return 'FUNCTION';
+  if (lower.startsWith('file')) return 'FILE';
+  if (lower.startsWith('class')) return 'CLASS';
+  return 'OTHER';
+}
+
+function getCategoryColor(cat) {
+  return CATEGORY_COLORS[cat] || CATEGORY_COLORS.OTHER;
+}
+
+function getMemTypeColor(memType) {
+  return MEMORY_TYPE_COLORS[memType] || MEMORY_TYPE_COLORS.context;
+}
+
+// Smart color: if all memory types are active, color by memory_type.
+// If only one (or a subset) is selected, color by prefix category.
+function isAllTypesSelected() {
+  const keys = Object.keys(typeFilters);
+  return keys.length === 0 || keys.every(k => typeFilters[k]);
+}
+
+function getNodeColor(mem) {
+  if (!mem) return CATEGORY_COLORS.OTHER;
+  if (isAllTypesSelected()) {
+    // Color by memory_type
+    return getMemTypeColor(mem.memory_type);
+  } else {
+    // Color by prefix category
+    return getCategoryColor(mem._cat);
+  }
+}
+
+// ========== Rich Tooltip (Neo4j Bloom-style) ==========
+function showRichTooltip(nodeOrPoint) {
+  const id = nodeOrPoint.memory_id || nodeOrPoint.id;
+  const mem = memoryLookup[id];
+  const memType = nodeOrPoint._memType || (mem ? mem.memory_type : 'context');
+  const color = nodeOrPoint.color || getMemTypeColor(memType);
+  const content = mem ? mem.content : (nodeOrPoint.label || id || '');
+  const degree = nodeOrPoint._degree || 0;
+  const cat = nodeOrPoint._cat || extractCategory(content);
+  const importance = mem ? mem.importance : (nodeOrPoint._importance || 0.5);
+
+  tooltip.innerHTML =
+    '<div class="tt-header">' +
+    '<span class="tt-badge" style="background:' + color + '20;color:' + color + ';border:2px solid ' + color + ';">' + esc(memType[0].toUpperCase()) + '</span>' +
+    '<span class="tt-title">' + esc(cat) + '</span>' +
+    '</div>' +
+    '<div class="tt-body">' +
+    '<div class="tt-content">' + esc(content) + '</div>' +
+    '</div>' +
+    '<div class="tt-footer">' +
+    (degree > 0 ? '<span class="tt-stat"><span class="num">' + degree + '</span> connections</span>' : '') +
+    '<span class="tt-stat">' + esc(memType) + '</span>' +
+    '<span class="tt-stat">' + Math.round((importance || 0) * 100) + '%</span>' +
+    '</div>';
+
+  tooltip.style.display = 'block';
+  tooltip.style.left = (mouseX + 16) + 'px';
+  tooltip.style.top = Math.min(mouseY - 10, window.innerHeight - 120) + 'px';
+}
+
+function hideTooltip() {
+  tooltip.style.display = 'none';
+  tooltip.innerHTML = '';
+}
+
+// ========== Stats ==========
+async function loadStats() {
+  try {
+    const s = await apiFetch('/api/stats');
+    document.getElementById('stat-nodes').textContent = (s.node_count ?? s.memory_count ?? 0);
+    document.getElementById('stat-edges').textContent = s.edge_count ?? 0;
+  } catch {}
+}
+
+// ========== Namespaces ==========
+async function loadNamespaces() {
+  try {
+    const ns = await apiFetch('/api/namespaces');
+    ns.forEach(n => {
+      const opt = document.createElement('option');
+      opt.value = n;
+      opt.textContent = n;
+      namespaceSelect.appendChild(opt);
+    });
+  } catch {}
+}
+
+// ========== Memory list (for lookup only — no left panel) ==========
+async function loadMemories() {
+  try {
+    allMemories = await apiFetch('/api/memories');
+    memoryLookup = {};
+    allMemories.forEach(m => {
+      m._cat = extractCategory(m.content);
+      memoryLookup[m.id] = m;
+    });
+  } catch {}
+}
+
+function onFiltersChanged() {
+  buildLegend();
+  if (pointsData.length > 0) buildPointCloud();
+  if (forceGraph) buildForceGraph();
+}
+
+function renderMemoryList() {
+  // No-op: left panel removed. Kept for compatibility with graph click handlers.
+}
+
+function highlightInView(id) {
+  if (activeTab === 'vector') {
+    const idx = pointsData.findIndex(p => p.id === id);
+    if (idx >= 0) {
+      const p = pointsData[idx];
+      const SCALE = 40;
+      const target = new THREE.Vector3((p.x||0)*SCALE, (p.y||0)*SCALE, (p.z||0)*SCALE);
+      threeCamera.position.set(target.x + 6, target.y + 3, target.z + 6);
+      threeControls.target.copy(target);
+      threeControls.update();
+    }
+  } else if (activeTab === 'graph') {
+    enterFocusMode(id, focusDepth);
+  }
+}
+
+// ========== Side Panel ==========
+function clearSidePanel() {
+  sidePanel.innerHTML = '<p>Select a memory to view details</p>';
+  sidePanel.classList.add('empty');
+}
+
+function showSidePanel(data) {
+  sidePanel.classList.remove('empty');
+  let html = '';
+  const mem = memoryLookup[data.id];
+  const cat = mem ? mem._cat : extractCategory(data.content || data.label || '');
+  const memType = data.memory_type || (mem && mem.memory_type) || 'context';
+  const catColor = getNodeColor(mem || { memory_type: memType, _cat: cat });
+
+  // Type + Category
+  html += '<div class="detail-card">'
+    + '<div class="label">Type / Category</div>'
+    + '<div class="value">'
+    + '<span style="color:' + getMemTypeColor(memType) + '; font-weight:600;">' + esc(memType) + '</span>'
+    + ' <span style="color:#3e4260;">/</span> '
+    + '<span style="color:' + getCategoryColor(cat) + '; font-weight:600;">' + esc(cat) + '</span>'
+    + '</div>'
+    + '</div>';
+
+  // ID
+  html += '<div class="detail-card">'
+    + '<div class="label">ID</div>'
+    + '<div class="value id">' + esc(data.id || '') + '</div>'
+    + '</div>';
+
+  // Content or Label
+  const text = data.content || data.label || '';
+  if (text) {
+    html += '<div class="detail-card">'
+      + '<div class="label">Content</div>'
+      + '<div class="value">' + esc(text) + '</div>'
+      + '</div>';
+  }
+
+  // Namespace
+  const ns = data.namespace || (mem && mem.namespace);
+  if (ns) {
+    html += '<div class="detail-card">'
+      + '<div class="label">Namespace</div>'
+      + '<div class="value">' + esc(ns) + '</div>'
+      + '</div>';
+  }
+
+  // Tags
+  const tags = data.tags || (mem && mem.tags);
+  if (tags && tags.length) {
+    html += '<div class="detail-card">'
+      + '<div class="label">Tags</div>'
+      + '<div class="tags-container">'
+      + tags.map(t => '<span class="tag-chip">' + esc(t) + '</span>').join('')
+      + '</div></div>';
+  }
+
+  // Importance
+  const importance = data.importance != null ? data.importance : (mem ? mem.importance : null);
+  if (importance != null) {
+    const pct = Math.round(importance * 100);
+    html += '<div class="detail-card">'
+      + '<div class="label">Importance</div>'
+      + '<div class="progress-row">'
+      + '<div class="progress-bar"><div class="fill" style="width:' + pct + '%;background:' + catColor + ';"></div></div>'
+      + '<div class="progress-value">' + pct + '%</div>'
+      + '</div></div>';
+  }
+
+  // Confidence
+  if (data.confidence != null) {
+    const pct = Math.round(data.confidence * 100);
+    html += '<div class="detail-card">'
+      + '<div class="label">Confidence</div>'
+      + '<div class="progress-row">'
+      + '<div class="progress-bar"><div class="fill" style="width:' + pct + '%;background:#47c9e5;"></div></div>'
+      + '<div class="progress-value">' + pct + '%</div>'
+      + '</div></div>';
+  }
+
+  // Created
+  if (data.created_at) {
+    html += '<div class="detail-card">'
+      + '<div class="label">Created</div>'
+      + '<div class="value">' + esc(data.created_at) + '</div>'
+      + '</div>';
+  }
+
+  // Connected edges — grouped by relationship type
+  if (data.edges && data.edges.length) {
+    // Group edges by relationship type
+    const groups = {};
+    data.edges.forEach(e => {
+      const rel = e.relationship || 'RELATES_TO';
+      if (!groups[rel]) groups[rel] = [];
+      const isOutgoing = e.src === data.id;
+      const targetId = isOutgoing ? e.dst : e.src;
+      const targetLabel = isOutgoing ? (e.dst_label || targetId) : (e.src_label || targetId);
+      groups[rel].push({ targetId, targetLabel, isOutgoing });
+    });
+
+    // Sort by count descending
+    const sortedGroups = Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
+    const totalGroups = sortedGroups.length;
+
+    html += '<div class="detail-card"><div class="label">Connections (' + data.edges.length + ')</div>';
+
+    sortedGroups.forEach(([rel, items]) => {
+      const rc = REL_COLORS[rel] || '#5a5e80';
+      const desc = REL_DESCRIPTIONS[rel] || '';
+      // Auto-expand if ≤3 items in group or ≤3 total groups
+      const autoExpand = items.length <= 3 || totalGroups <= 3;
+
+      html += '<div class="rel-group' + (autoExpand ? ' expanded' : '') + '">'
+        + '<div class="rel-group-header">'
+        + '<span class="rel-group-chevron">&#9656;</span>'
+        + '<span class="rel-group-badge" style="background:' + rc + '20;color:' + rc + ';">' + esc(rel) + '</span>'
+        + '<span class="rel-group-count">' + items.length + '</span>'
+        + '</div>'
+        + '<div class="rel-group-body">';
+
+      if (desc) {
+        html += '<div class="rel-group-desc">' + esc(desc) + '</div>';
+      }
+
+      items.forEach(item => {
+        const dirClass = item.isOutgoing ? 'outgoing' : 'incoming';
+        const dirArrow = item.isOutgoing ? '&rarr;' : '&larr;';
+        html += '<div class="rel-group-item" data-id="' + esc(item.targetId) + '">'
+          + '<span class="rel-dir ' + dirClass + '">' + dirArrow + '</span>'
+          + '<span class="rel-item-label">' + esc(item.targetLabel) + '</span>'
+          + '</div>';
+      });
+
+      html += '</div></div>';
+    });
+
+    html += '</div>';
+  }
+
+  sidePanel.innerHTML = html;
+
+  // Click handlers on relationship group headers (toggle expand/collapse)
+  sidePanel.querySelectorAll('.rel-group-header').forEach(header => {
+    header.addEventListener('click', () => {
+      header.parentElement.classList.toggle('expanded');
+    });
+  });
+
+  // Click handlers on relationship items
+  sidePanel.querySelectorAll('.rel-group-item[data-id]').forEach(item => {
+    item.addEventListener('click', () => {
+      const targetId = item.dataset.id;
+      selectedMemoryId = targetId;
+      if (activeTab === 'graph') {
+        enterFocusMode(targetId, focusDepth);
+      } else {
+        fetchAndShowMemory(targetId);
+      }
+    });
+  });
+}
+
+async function fetchAndShowMemory(id) {
+  try {
+    const mem = await apiFetch('/api/memories/' + encodeURIComponent(id));
+    showSidePanel(mem);
+  } catch {}
+}
+
+// ========== Legend (Interactive — Bloom-style) ==========
+let legendDisabled = {};  // Track which legend items are hidden
+
+function buildLegend() {
+  legendEl.innerHTML = '';
+  const container = document.createDocumentFragment();
+
+  if (isAllTypesSelected()) {
+    const h4 = document.createElement('h4');
+    h4.textContent = 'Memory Types';
+    container.appendChild(h4);
+
+    // Count per type
+    const typeCounts = {};
+    allMemories.forEach(m => { typeCounts[m.memory_type] = (typeCounts[m.memory_type] || 0) + 1; });
+
+    Object.keys(typeCounts).sort().forEach(type => {
+      const c = getMemTypeColor(type);
+      const disabled = legendDisabled[type];
+      const item = document.createElement('div');
+      item.className = 'legend-item' + (disabled ? ' disabled' : '');
+      item.innerHTML =
+        '<div class="legend-dot" style="background:' + c + ';box-shadow:0 0 8px ' + c + '60;"></div>'
+        + '<span>' + esc(type) + '</span>'
+        + '<span class="legend-count">' + typeCounts[type] + '</span>';
+      item.addEventListener('click', () => {
+        legendDisabled[type] = !legendDisabled[type];
+        typeFilters[type] = !legendDisabled[type];
+        item.classList.toggle('disabled', legendDisabled[type]);
+        onFiltersChanged();
+      });
+      container.appendChild(item);
+    });
+  } else {
+    const h4 = document.createElement('h4');
+    h4.textContent = 'Categories';
+    container.appendChild(h4);
+
+    const catCounts = {};
+    allMemories.forEach(m => {
+      if (typeFilters[m.memory_type] !== false) catCounts[m._cat] = (catCounts[m._cat] || 0) + 1;
+    });
+
+    Object.keys(catCounts).sort().forEach(cat => {
+      const c = getCategoryColor(cat);
+      const disabled = legendDisabled[cat];
+      const item = document.createElement('div');
+      item.className = 'legend-item' + (disabled ? ' disabled' : '');
+      item.innerHTML =
+        '<div class="legend-dot" style="background:' + c + ';box-shadow:0 0 8px ' + c + '60;"></div>'
+        + '<span>' + esc(cat) + '</span>'
+        + '<span class="legend-count">' + catCounts[cat] + '</span>';
+      item.addEventListener('click', () => {
+        legendDisabled[cat] = !legendDisabled[cat];
+        categoryFilters[cat] = !legendDisabled[cat];
+        item.classList.toggle('disabled', legendDisabled[cat]);
+        onFiltersChanged();
+      });
+      container.appendChild(item);
+    });
+  }
+
+  legendEl.appendChild(container);
+}
+
+// ====================================================================
+// Vector Space (Three.js)
+// ====================================================================
+let threeScene, threeCamera, threeRenderer, threeControls;
+let pointsMesh, pointsData = [];
+let raycaster, mouse;
+let hoveredIndex = -1;
+
+function createDiscTexture() {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const center = size / 2;
+
+  // Soft disc: solid center with smooth alpha falloff at edge
+  const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.5, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.75, 'rgba(255,255,255,0.6)');
+  gradient.addColorStop(0.9, 'rgba(255,255,255,0.15)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function initVectorView() {
+  threeScene = new THREE.Scene();
+  threeScene.background = new THREE.Color(0x0c0e1a);
+  // Subtle fog for depth (tuned for ~40x scaled coordinates)
+  threeScene.fog = new THREE.FogExp2(0x0c0e1a, 0.008);
+
+  threeCamera = new THREE.PerspectiveCamera(55, 1, 0.1, 1000);
+  threeCamera.position.set(0, 0, 30);
+
+  threeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  vectorView.appendChild(threeRenderer.domElement);
+
+  threeControls = new OrbitControls(threeCamera, threeRenderer.domElement);
+  threeControls.enableDamping = true;
+  threeControls.dampingFactor = 0.06;
+  threeControls.rotateSpeed = 0.5;
+
+  raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.8;
+  mouse = new THREE.Vector2();
+
+  vectorView.addEventListener('mousemove', onVectorMouseMove);
+  vectorView.addEventListener('click', onVectorClick);
+
+  resizeVectorView();
+  animateVector();
+}
+
+function resizeVectorView() {
+  if (!threeRenderer) return;
+  const w = vectorView.clientWidth;
+  const h = vectorView.clientHeight;
+  if (w === 0 || h === 0) return;
+  threeCamera.aspect = w / h;
+  threeCamera.updateProjectionMatrix();
+  threeRenderer.setSize(w, h);
+}
+
+function animateVector() {
+  requestAnimationFrame(animateVector);
+  if (activeTab !== 'vector') return;
+  threeControls.update();
+  threeRenderer.render(threeScene, threeCamera);
+}
+
+async function loadVectorData() {
+  vectorLoading.classList.remove('hidden');
+  vectorEmpty.classList.add('hidden');
+  try {
+    const nsParam = currentNamespace ? '?namespace=' + encodeURIComponent(currentNamespace) : '';
+    vectorData = await apiFetch('/api/vectors' + nsParam);
+    buildPointCloud();
+    vectorLoading.classList.add('hidden');
+    if (vectorData.length === 0) vectorEmpty.classList.remove('hidden');
+  } catch {
+    vectorLoading.classList.add('hidden');
+    vectorEmpty.classList.remove('hidden');
+  }
+}
+
+function buildPointCloud() {
+  if (pointsMesh) {
+    threeScene.remove(pointsMesh);
+    pointsMesh.geometry.dispose();
+    pointsMesh.material.dispose();
+    pointsMesh = null;
+  }
+  pointsData = vectorData;
+  if (pointsData.length === 0) return;
+
+  const count = pointsData.length;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
+  const tmpColor = new THREE.Color();
+
+  // Scale factor: raw PCA coords are in ~[-0.6, 0.6], spread them out
+  const SCALE = 40;
+
+  pointsData.forEach((p, i) => {
+    positions[i * 3]     = (p.x || 0) * SCALE;
+    positions[i * 3 + 1] = (p.y || 0) * SCALE;
+    positions[i * 3 + 2] = (p.z || 0) * SCALE;
+
+    // Color by smart mode: memory_type when all types shown, category when filtered
+    const mem = memoryLookup[p.id];
+    const hex = getNodeColor(mem || { memory_type: 'context', _cat: extractCategory(p.label || '') });
+    tmpColor.set(hex);
+    colors[i * 3]     = tmpColor.r;
+    colors[i * 3 + 1] = tmpColor.g;
+    colors[i * 3 + 2] = tmpColor.b;
+
+    const importance = p.importance != null ? p.importance : 0.5;
+    sizes[i] = 0.15 + importance * 0.35;
+  });
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geom.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+  const discTex = createDiscTexture();
+  const mat = new THREE.PointsMaterial({
+    vertexColors: true,
+    size: 1.2,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.92,
+    alphaMap: discTex,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
+  });
+
+  pointsMesh = new THREE.Points(geom, mat);
+  threeScene.add(pointsMesh);
+
+  // Auto-fit camera
+  const box = new THREE.Box3().setFromBufferAttribute(geom.getAttribute('position'));
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  const extent = box.getSize(new THREE.Vector3()).length();
+  threeCamera.position.set(center.x, center.y + extent * 0.3, center.z + extent * 1.1);
+  threeControls.target.copy(center);
+  threeControls.update();
+}
+
+function onVectorMouseMove(event) {
+  if (!pointsMesh || activeTab !== 'vector') return;
+  const rect = vectorView.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, threeCamera);
+  const intersects = raycaster.intersectObject(pointsMesh);
+
+  if (intersects.length > 0) {
+    const idx = intersects[0].index;
+    if (idx !== hoveredIndex) {
+      hoveredIndex = idx;
+      const p = pointsData[idx];
+      const mem = memoryLookup[p.id];
+      // Use rich tooltip for vector view too
+      showRichTooltip({
+        id: p.id,
+        label: p.label || p.id,
+        _memType: mem ? mem.memory_type : 'context',
+        _cat: mem ? mem._cat : extractCategory(p.label || ''),
+        _importance: mem ? mem.importance : (p.importance || 0.5),
+        _degree: 0,
+        color: getNodeColor(mem || { memory_type: 'context', _cat: extractCategory(p.label || '') }),
+      });
+    }
+  } else {
+    hoveredIndex = -1;
+    hideTooltip();
+  }
+}
+
+function onVectorClick() {
+  if (hoveredIndex >= 0 && hoveredIndex < pointsData.length) {
+    const p = pointsData[hoveredIndex];
+    selectedMemoryId = p.id;
+    fetchAndShowMemory(p.id);
+    renderMemoryList(); // update selection
+  }
+}
+
+// ====================================================================
+// Knowledge Graph (force-graph 2D)
+// ====================================================================
+let forceGraph = null;
+let graphContainer = null;
+let highlightNodes = new Set();
+let highlightLinks = new Set();
+
+function initGraphView() {
+  graphContainer = document.createElement('div');
+  graphContainer.style.cssText = 'position:absolute;inset:0;';
+  graphView.appendChild(graphContainer);
+}
+
+async function loadGraphData() {
+  graphLoading.classList.remove('hidden');
+  graphEmpty.classList.add('hidden');
+  try {
+    const [nodes, edges] = await Promise.all([
+      apiFetch('/api/graph/nodes'),
+      apiFetch('/api/graph/edges'),
+    ]);
+
+    // Filter by namespace via memoryLookup (graph nodes have namespace:null)
+    if (currentNamespace) {
+      graphNodes = nodes.filter(n => {
+        const mem = memoryLookup[n.memory_id || n.id];
+        return mem && mem.namespace === currentNamespace;
+      });
+    } else {
+      graphNodes = nodes;
+    }
+    graphEdges = edges;
+
+    graphLoading.classList.add('hidden');
+    if (graphNodes.length === 0) {
+      graphEmpty.classList.remove('hidden');
+      if (forceGraph) forceGraph.graphData({ nodes: [], links: [] });
+      return;
+    }
+
+    // Delay graph build to ensure container has dimensions after tab switch
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        buildForceGraph();
+      });
+    });
+  } catch (err) {
+    console.error('Graph load error:', err);
+    graphLoading.classList.add('hidden');
+    graphEmpty.classList.remove('hidden');
+  }
+}
+
+function getFilteredGraphData() {
+  const nodeSet = new Set(graphNodes.map(n => n.id));
+  const filteredEdges = graphEdges.filter(e =>
+    relFilters[e.relationship] !== false && nodeSet.has(e.src) && nodeSet.has(e.dst)
+  );
+
+  // Only include nodes that have at least one visible edge (removes orphans for cleaner view)
+  // Also compute degree (connection count) per node — Bloom sizes nodes by degree
+  const connectedIds = new Set();
+  const degreeMap = {};
+  filteredEdges.forEach(e => {
+    connectedIds.add(e.src);
+    connectedIds.add(e.dst);
+    degreeMap[e.src] = (degreeMap[e.src] || 0) + 1;
+    degreeMap[e.dst] = (degreeMap[e.dst] || 0) + 1;
+  });
+
+  return {
+    nodes: graphNodes
+      .filter(n => connectedIds.has(n.id))
+      .map(n => {
+        const mem = memoryLookup[n.memory_id || n.id];
+        const cat = mem ? mem._cat : extractCategory(n.label || '');
+        const importance = mem ? (mem.importance || 0.5) : 0.5;
+        const degree = degreeMap[n.id] || 0;
+        return {
+          ...n,
+          _cat: cat,
+          _importance: importance,
+          _degree: degree,
+          _memType: mem ? mem.memory_type : 'context',
+          label: n.label || n.id,
+          val: Math.max(2, 3 + Math.sqrt(degree) * 2),
+          color: getNodeColor(mem || { memory_type: 'context', _cat: cat }),
+        };
+      }),
+    links: filteredEdges.map(e => ({
+      ...e,
+      source: e.src,
+      target: e.dst,
+      color: (REL_COLORS[e.relationship] || '#5a5e80') + '66',
+    })),
+  };
+}
+
+function buildForceGraph() {
+  const data = getFilteredGraphData();
+
+  if (forceGraph) {
+    forceGraph.graphData(data);
+    return;
+  }
+
+  const rect = graphContainer.getBoundingClientRect();
+  const w = Math.max(rect.width, 400);
+  const h = Math.max(rect.height, 300);
+
+  const ForceGraph2D = window.ForceGraph;
+  if (!ForceGraph2D) {
+    console.error('ForceGraph 2D library not loaded');
+    graphEmpty.classList.remove('hidden');
+    return;
+  }
+
+  forceGraph = ForceGraph2D()(graphContainer)
+    .width(w)
+    .height(h)
+    .backgroundColor('#0c0e1a')
+    .graphData(data)
+    .nodeLabel('')
+    .nodeVal(n => n.val)
+    .nodeColor(() => 'rgba(0,0,0,0)')
+    .nodeCanvasObjectMode(() => 'after')
+    .nodeCanvasObject((node, ctx, globalScale) => {
+      if (!isFinite(node.x) || !isFinite(node.y)) return;
+      const isHL = highlightNodes.has(node.id);
+      const color = isHL ? '#ffffff' : node.color;
+      const baseR = 3 + Math.sqrt(node._degree || 0) * 1.2;
+      const r = isHL ? baseR * 1.3 : baseR;
+
+      // Outer glow
+      const glow = ctx.createRadialGradient(node.x, node.y, r * 0.8, node.x, node.y, r * 2);
+      glow.addColorStop(0, color + '25');
+      glow.addColorStop(1, 'transparent');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r * 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Dark fill
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = isHL ? 'rgba(255,255,255,0.12)' : 'rgba(14, 17, 38, 0.92)';
+      ctx.fill();
+
+      // Colored ring
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isHL ? 2 : 1.2;
+      ctx.stroke();
+    })
+    .linkColor(l => highlightLinks.has(l) ? '#ffffff' : l.color)
+    .linkWidth(l => highlightLinks.has(l) ? 2.5 : 0.5)
+    .linkCurvature(0.15)
+    .linkDirectionalArrowLength(4)
+    .linkDirectionalArrowRelPos(1)
+    .linkDirectionalParticles(l => highlightLinks.has(l) ? 3 : 1)
+    .linkDirectionalParticleWidth(1.2)
+    .linkDirectionalParticleSpeed(0.005)
+    .linkLabel(l => l.relationship)
+    .onNodeClick(onGraphNodeClick)
+    .onNodeHover(onGraphNodeHover)
+    .warmupTicks(0)
+    .cooldownTicks(200)
+    .d3AlphaDecay(0.025)
+    .d3VelocityDecay(0.3);
+
+  // Increase node spacing to reduce overlap
+  forceGraph.d3Force('charge').strength(-120);
+  forceGraph.d3Force('link').distance(60);
+}
+
+async function onGraphNodeClick(node) {
+  if (!node) {
+    clearSidePanel();
+    return;
+  }
+
+  selectedMemoryId = node.id;
+  highlightNodes.clear();
+  highlightLinks.clear();
+  highlightNodes.add(node.id);
+
+  try {
+    const neighbors = await apiFetch('/api/graph/neighbors/' + encodeURIComponent(node.id) + '?depth=1');
+
+    if (neighbors.nodes) {
+      neighbors.nodes.forEach(n => highlightNodes.add(n.id));
+    }
+    if (neighbors.edges) {
+      neighbors.edges.forEach(e => {
+        const link = forceGraph.graphData().links.find(l =>
+          (l.source.id || l.source) === e.src && (l.target.id || l.target) === e.dst
+        );
+        if (link) highlightLinks.add(link);
+      });
+    }
+
+    const nodeMap = {};
+    (neighbors.nodes || []).forEach(n => { nodeMap[n.id] = n.label || n.id; });
+    nodeMap[node.id] = node.label;
+
+    const detail = {
+      ...node,
+      edges: (neighbors.edges || []).map(e => ({
+        ...e,
+        src_label: nodeMap[e.src] || e.src,
+        dst_label: nodeMap[e.dst] || e.dst,
+      })),
+    };
+
+    // Enrich with memory data
+    const mem = memoryLookup[node.memory_id || node.id];
+    if (mem) {
+      detail.content = mem.content;
+      detail.tags = mem.tags;
+      detail.importance = mem.importance;
+      detail.namespace = mem.namespace;
+    }
+
+    showSidePanel(detail);
+  } catch {
+    showSidePanel(node);
+  }
+
+  // Refresh rendering — trigger re-render to update ring highlights
+  if (forceGraph) {
+    forceGraph
+      .linkColor(forceGraph.linkColor())
+      .linkWidth(forceGraph.linkWidth())
+      .linkDirectionalParticles(forceGraph.linkDirectionalParticles());
+  }
+
+  renderMemoryList();
+
+  // Enter focus mode
+  enterFocusMode(node.id, focusDepth);
+}
+
+function onGraphNodeHover(node) {
+  if (graphContainer) {
+    graphContainer.style.cursor = node ? 'pointer' : 'default';
+  }
+  if (node) {
+    showRichTooltip(node);
+  } else {
+    hideTooltip();
+  }
+}
+
+function navigateToGraphNode(id) {
+  enterFocusMode(id, focusDepth);
+}
+
+function resizeGraphView() {
+  if (!forceGraph) return;
+  const w = graphContainer.clientWidth || graphView.clientWidth;
+  const h = graphContainer.clientHeight || graphView.clientHeight;
+  if (w > 0 && h > 0) forceGraph.width(w).height(h);
+}
+
+// ====================================================================
+// Focus Mode (Ego Graph)
+// ====================================================================
+async function enterFocusMode(nodeId, depth) {
+  if (!nodeId) return;
+  focusMode = true;
+  focusNodeId = nodeId;
+  focusDepth = depth || focusDepth;
+
+  // Update depth button UI
+  depthBtns.forEach(b => b.classList.toggle('active', parseInt(b.dataset.depth) === focusDepth));
+
+  // Update label
+  const mem = memoryLookup[nodeId];
+  const label = mem ? (mem.content || '').substring(0, 60) : nodeId;
+  focusLabelEl.innerHTML = 'Focused on: <strong>' + esc(label) + '</strong>';
+
+  // Show focus view, hide main graph container
+  focusViewEl.classList.remove('view-hidden');
+  if (graphContainer) graphContainer.style.display = 'none';
+
+  // Fetch neighbors and build both the graph and the detail panel
+  try {
+    const neighbors = await apiFetch('/api/graph/neighbors/' + encodeURIComponent(nodeId) + '?depth=' + focusDepth);
+    buildFocusGraph(nodeId, neighbors);
+
+    // Build detail panel with edges included
+    const nodeMap = {};
+    (neighbors.nodes || []).forEach(n => { nodeMap[n.id] = n.label || n.id; });
+    nodeMap[nodeId] = mem ? (mem.content || '').substring(0, 60) : nodeId;
+
+    // Only include depth-1 edges (directly connected to center) for the side panel
+    const directEdges = (neighbors.edges || []).filter(e =>
+      (e.src === nodeId || e.dst === nodeId) && relFilters[e.relationship] !== false
+    );
+
+    const detail = {
+      id: nodeId,
+      memory_type: mem ? mem.memory_type : 'context',
+      content: mem ? mem.content : nodeId,
+      namespace: mem ? mem.namespace : null,
+      tags: mem ? mem.tags : null,
+      importance: mem ? mem.importance : null,
+      confidence: mem ? mem.confidence : null,
+      created_at: mem ? mem.created_at : null,
+      edges: directEdges.map(e => ({
+        ...e,
+        src_label: nodeMap[e.src] || e.src,
+        dst_label: nodeMap[e.dst] || e.dst,
+      })),
+    };
+    showSidePanel(detail);
+  } catch (err) {
+    console.error('Focus mode fetch error:', err);
+    // Fallback: show memory without edges
+    fetchAndShowMemory(nodeId);
+  }
+
+  selectedMemoryId = nodeId;
+  renderMemoryList();
+}
+
+function buildFocusGraph(centerId, neighborData) {
+  // Destroy previous focus graph
+  if (focusGraphInstance) {
+    focusGraphInstance._destructor && focusGraphInstance._destructor();
+    focusGraphInstance = null;
+  }
+  focusGraphContainerEl.innerHTML = '';
+
+  const neighborNodes = neighborData.nodes || [];
+  const neighborEdges = neighborData.edges || [];
+
+  // Build node set: center + neighbors
+  const nodeMap = {};
+  nodeMap[centerId] = true;
+  neighborNodes.forEach(n => { nodeMap[n.id] = true; });
+
+  // Compute degree for focus nodes
+  const focusDegreeMap = {};
+  neighborEdges.forEach(e => {
+    focusDegreeMap[e.src] = (focusDegreeMap[e.src] || 0) + 1;
+    focusDegreeMap[e.dst] = (focusDegreeMap[e.dst] || 0) + 1;
+  });
+
+  // Build display nodes
+  const nodes = [];
+  const centerMem = memoryLookup[centerId];
+  const centerLabel = centerMem ? (centerMem.content || '').substring(0, 40) : centerId.substring(0, 12);
+  nodes.push({
+    id: centerId,
+    label: centerLabel,
+    _isCenter: true,
+    _memType: centerMem ? centerMem.memory_type : 'context',
+    _cat: centerMem ? centerMem._cat : 'OTHER',
+    _degree: focusDegreeMap[centerId] || 0,
+    color: '#ffffff',
+    val: 25,
+  });
+
+  neighborNodes.forEach(n => {
+    if (n.id === centerId) return;
+    const mem = memoryLookup[n.memory_id || n.id];
+    const cat = mem ? mem._cat : extractCategory(n.label || '');
+    const nodeColor = getNodeColor(mem || { memory_type: 'context', _cat: cat });
+    nodes.push({
+      id: n.id,
+      label: (n.label || '').substring(0, 30),
+      _isCenter: false,
+      _memType: mem ? mem.memory_type : 'context',
+      _cat: cat,
+      _degree: focusDegreeMap[n.id] || 0,
+      color: nodeColor,
+      val: 10,
+    });
+  });
+
+  // Build links (only those connecting nodes in our set)
+  const nodeIds = new Set(nodes.map(n => n.id));
+  const links = neighborEdges
+    .filter(e => nodeIds.has(e.src) && nodeIds.has(e.dst) && relFilters[e.relationship] !== false)
+    .map(e => ({
+      source: e.src,
+      target: e.dst,
+      relationship: e.relationship,
+      color: (REL_COLORS[e.relationship] || '#5a5e80') + 'bb',
+    }));
+
+  const rect = focusGraphContainerEl.getBoundingClientRect();
+  const w = Math.max(rect.width, 400);
+  const h = Math.max(rect.height, 300);
+
+  const ForceGraph2D = window.ForceGraph;
+  focusGraphInstance = ForceGraph2D()(focusGraphContainerEl)
+    .width(w)
+    .height(h)
+    .backgroundColor('#0c0e1a')
+    .graphData({ nodes, links })
+    .nodeLabel('')
+    .nodeVal(n => n.val)
+    .nodeColor(() => 'rgba(0,0,0,0)')
+    .nodeCanvasObjectMode(() => 'after')
+    .nodeCanvasObject((node, ctx, globalScale) => {
+      if (!isFinite(node.x) || !isFinite(node.y)) return;
+      const isCenter = node._isCenter;
+      const color = node.color;
+      const r = isCenter ? 14 : 8;
+
+      // Outer glow
+      if (isCenter) {
+        const glow = ctx.createRadialGradient(node.x, node.y, r, node.x, node.y, r * 2.2);
+        glow.addColorStop(0, 'rgba(255,255,255,0.18)');
+        glow.addColorStop(1, 'transparent');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r * 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        const glow = ctx.createRadialGradient(node.x, node.y, r * 0.8, node.x, node.y, r * 1.8);
+        glow.addColorStop(0, color + '20');
+        glow.addColorStop(1, 'transparent');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r * 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Dark fill
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = isCenter ? 'rgba(25, 30, 60, 0.92)' : 'rgba(14, 17, 38, 0.92)';
+      ctx.fill();
+
+      // Colored ring
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isCenter ? 3 : 2;
+      ctx.stroke();
+
+      // Type initial
+      const initial = (node._memType || 'C')[0].toUpperCase();
+      ctx.font = 'bold ' + (isCenter ? 10 : 7) + 'px Inter, sans-serif';
+      ctx.fillStyle = isCenter ? '#ffffff' : color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(initial, node.x, node.y);
+
+      // Text label below
+      const label = node.label || '';
+      if (label) {
+        const fontSize = isCenter ? 5 : 3.5;
+        ctx.font = (isCenter ? 'bold ' : '') + fontSize + 'px Inter, sans-serif';
+        ctx.fillStyle = isCenter ? '#ffffff' : '#8b90b0';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(label, node.x, node.y + r + 3);
+      }
+    })
+    .linkColor(l => l.color)
+    .linkWidth(1.5)
+    .linkCurvature(0.12)
+    .linkDirectionalArrowLength(5)
+    .linkDirectionalArrowRelPos(1)
+    .linkDirectionalParticles(2)
+    .linkDirectionalParticleWidth(1.2)
+    .linkDirectionalParticleSpeed(0.006)
+    .linkCanvasObjectMode(() => 'after')
+    .linkCanvasObject((link, ctx, globalScale) => {
+      const rel = link.relationship || '';
+      if (!rel) return;
+      const src = link.source;
+      const tgt = link.target;
+      if (typeof src !== 'object' || typeof tgt !== 'object') return;
+      if (!isFinite(src.x) || !isFinite(src.y) || !isFinite(tgt.x) || !isFinite(tgt.y)) return;
+
+      const midX = (src.x + tgt.x) / 2;
+      const midY = (src.y + tgt.y) / 2;
+      const rc = REL_COLORS[rel] || '#5a5e80';
+      const fontSize = 3;
+      ctx.font = fontSize + 'px Inter, sans-serif';
+      const tw = ctx.measureText(rel).width;
+      const pad = 2;
+
+      // Background pill
+      ctx.fillStyle = rc + '30';
+      ctx.beginPath();
+      ctx.roundRect(midX - tw / 2 - pad, midY - fontSize / 2 - pad, tw + pad * 2, fontSize + pad * 2, 2);
+      ctx.fill();
+
+      // Text
+      ctx.fillStyle = rc + 'cc';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(rel, midX, midY);
+    })
+    .onNodeClick(onFocusNodeClick)
+    .onNodeHover(node => {
+      focusGraphContainerEl.style.cursor = node ? 'pointer' : 'default';
+      if (node) {
+        showRichTooltip(node);
+      } else {
+        hideTooltip();
+      }
+    })
+    .warmupTicks(0)
+    .cooldownTicks(150)
+    .d3AlphaDecay(0.03)
+    .d3VelocityDecay(0.25);
+
+  // Stronger repulsion in focus mode to prevent node overlap
+  focusGraphInstance.d3Force('charge').strength(-250);
+  focusGraphInstance.d3Force('link').distance(100);
+}
+
+function exitFocusMode() {
+  focusMode = false;
+  focusNodeId = null;
+
+  // Destroy focus graph
+  if (focusGraphInstance) {
+    focusGraphInstance._destructor && focusGraphInstance._destructor();
+    focusGraphInstance = null;
+  }
+  focusGraphContainerEl.innerHTML = '';
+
+  // Hide focus view, show main graph
+  focusViewEl.classList.add('view-hidden');
+  if (graphContainer) graphContainer.style.display = '';
+
+  // Resize main graph
+  requestAnimationFrame(() => resizeGraphView());
+}
+
+function onFocusNodeClick(node) {
+  if (!node) return;
+  // Re-center focus on the clicked neighbor
+  enterFocusMode(node.id, focusDepth);
+}
+
+// ====================================================================
+// Search (merged: drives explorer when explorer tab is active, dropdown otherwise)
+// ====================================================================
+let searchTimeout = null;
+
+function updateSearchPlaceholder() {
+  searchInput.placeholder = activeTab === 'explorer'
+    ? 'Search functions, files, classes...'
+    : 'Search memories...';
+}
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  const q = searchInput.value.trim();
+
+  if (activeTab === 'explorer') {
+    // Drive explorer browse
+    searchDropdown.classList.remove('visible');
+    browseSearchQuery = q;
+    searchTimeout = setTimeout(() => loadBrowseData(true), 250);
+    return;
+  }
+
+  // Other tabs: dropdown mode
+  if (!q) {
+    searchDropdown.classList.remove('visible');
+    return;
+  }
+  searchTimeout = setTimeout(doSearch, 250);
+});
+
+searchInput.addEventListener('blur', () => {
+  if (activeTab !== 'explorer') {
+    setTimeout(() => searchDropdown.classList.remove('visible'), 200);
+  }
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    searchDropdown.classList.remove('visible');
+    searchInput.blur();
+  }
+});
+
+async function doSearch() {
+  const q = searchInput.value.trim();
+  if (!q) return;
+
+  try {
+    const results = await apiFetch('/api/search?q=' + encodeURIComponent(q));
+    if (!results || results.length === 0) {
+      searchDropdown.innerHTML = '<div class="search-result" style="color:#3e4260;cursor:default;">No results</div>';
+      searchDropdown.classList.add('visible');
+      return;
+    }
+
+    searchDropdown.innerHTML = '';
+    results.slice(0, 8).forEach(r => {
+      const cat = extractCategory(r.content);
+      const catColor = getCategoryColor(cat);
+      const item = document.createElement('div');
+      item.className = 'search-result';
+      item.innerHTML =
+        '<div><span class="sr-type" style="background:' + catColor + '20;color:' + catColor + ';">' + esc(cat) + '</span></div>'
+        + '<div class="sr-content">' + esc(r.content) + '</div>';
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        searchDropdown.classList.remove('visible');
+        searchInput.value = '';
+        selectedMemoryId = r.id;
+        fetchAndShowMemory(r.id);
+        highlightInView(r.id);
+      });
+      searchDropdown.appendChild(item);
+    });
+    searchDropdown.classList.add('visible');
+  } catch {}
+}
+
+// ====================================================================
+// Tab switching
+// ====================================================================
+topBarTabs.forEach(btn => {
+  btn.addEventListener('click', () => {
+    topBarTabs.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeTab = btn.dataset.tab;
+
+    hideTooltip();
+    updateSearchPlaceholder();
+    searchDropdown.classList.remove('visible');
+    const explorerView = document.getElementById('explorer-view');
+
+    if (activeTab === 'vector') {
+      if (focusMode) exitFocusMode();
+      vectorView.classList.remove('view-hidden');
+      graphView.classList.add('view-hidden');
+      explorerView.classList.add('view-hidden');
+      sidePanel.style.display = '';
+      relFiltersContainer.classList.add('hidden');
+      if (vectorData.length === 0) {
+        loadVectorData();
+      } else {
+        resizeVectorView();
+      }
+    } else if (activeTab === 'graph') {
+      if (focusMode) exitFocusMode();
+      graphView.classList.remove('view-hidden');
+      vectorView.classList.add('view-hidden');
+      explorerView.classList.add('view-hidden');
+      sidePanel.style.display = '';
+      relFiltersContainer.classList.remove('hidden');
+      if (!forceGraph) {
+        loadGraphData();
+      } else {
+        requestAnimationFrame(() => resizeGraphView());
+      }
+    } else if (activeTab === 'explorer') {
+      if (focusMode) exitFocusMode();
+      explorerView.classList.remove('view-hidden');
+      vectorView.classList.add('view-hidden');
+      graphView.classList.add('view-hidden');
+      sidePanel.style.display = 'none';
+      relFiltersContainer.classList.add('hidden');
+      initExplorerView();
+    }
+  });
+});
+
+// ====================================================================
+// Namespace change
+// ====================================================================
+namespaceSelect.addEventListener('change', () => {
+  currentNamespace = namespaceSelect.value;
+  clearSidePanel();
+  loadStats();
+  if (activeTab === 'vector') {
+    loadVectorData();
+  } else if (activeTab === 'graph') {
+    loadGraphData();
+  } else if (activeTab === 'explorer') {
+    loadBrowseData(true);
+  }
+});
+
+// ====================================================================
+// Relationship filters
+// ====================================================================
+function buildRelFilters() {
+  RELATIONSHIP_TYPES.forEach(r => {
+    const label = document.createElement('label');
+    label.className = 'rel-cb';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.addEventListener('change', () => {
+      relFilters[r] = cb.checked;
+      if (focusMode && focusNodeId) {
+        enterFocusMode(focusNodeId, focusDepth);
+      } else if (forceGraph) {
+        buildForceGraph();
+      }
+    });
+    const span = document.createElement('span');
+    span.textContent = r;
+    span.style.color = REL_COLORS[r] || '#5a5e80';
+    label.appendChild(cb);
+    label.appendChild(span);
+    relFiltersContainer.appendChild(label);
+  });
+}
+
+// ====================================================================
+// Bottom bar toggles
+// ====================================================================
+document.getElementById('filter-toggle-btn').addEventListener('click', () => {
+  relFiltersContainer.classList.toggle('hidden');
+});
+
+// ====================================================================
+// Focus mode controls
+// ====================================================================
+focusBackBtn.addEventListener('click', () => {
+  exitFocusMode();
+});
+
+depthBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const depth = parseInt(btn.dataset.depth);
+    if (depth && focusNodeId) {
+      focusDepth = depth;
+      depthBtns.forEach(b => b.classList.toggle('active', parseInt(b.dataset.depth) === depth));
+      enterFocusMode(focusNodeId, depth);
+    }
+  });
+});
+
+// ====================================================================
+// Resize
+// ====================================================================
+window.addEventListener('resize', () => {
+  resizeVectorView();
+  resizeGraphView();
+  if (focusGraphInstance) {
+    const w = focusGraphContainerEl.clientWidth;
+    const h = focusGraphContainerEl.clientHeight;
+    if (w > 0 && h > 0) focusGraphInstance.width(w).height(h);
+  }
+  if (explorerMiniGraphInstance) {
+    const el = document.getElementById('explorer-mini-graph');
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    if (w > 0 && h > 0) explorerMiniGraphInstance.width(w).height(h);
+  }
+});
+
+// ====================================================================
+// Explorer View (browse-first)
+// ====================================================================
+let explorerInited = false;
+let explorerSelectedId = null;
+let explorerMiniGraphInstance = null;
+
+// Kind color palette for graph node kinds
+const KIND_COLORS = {
+  file: '#47c9e5',
+  function: '#7c6cf0',
+  class: '#f0776c',
+  method: '#6ce0a8',
+  module: '#f0b95c',
+  struct: '#e07ce0',
+  enum: '#e0a06c',
+  trait: '#4a9ef0',
+  interface: '#5ce0b9',
+  constant: '#95a0c0',
+  type: '#a070d0',
+  macro: '#d08050',
+  import: '#50b098',
+  variable: '#506080',
+  field: '#e0c050',
+};
+
+function getKindColor(kind) {
+  return KIND_COLORS[kind?.toLowerCase()] || '#6b7094';
+}
+
+function initExplorerView() {
+  if (explorerInited) {
+    return;
+  }
+  explorerInited = true;
+
+  // Infinite scroll on results list
+  const listEl = document.getElementById('explorer-results-list');
+  listEl.addEventListener('scroll', () => {
+    if (browseLoading) return;
+    if (browseNodes.length >= browseTotal) return;
+    const { scrollTop, scrollHeight, clientHeight } = listEl;
+    if (scrollTop + clientHeight >= scrollHeight - 100) {
+      loadBrowseData(false);
+    }
+  });
+
+  // Load initial data
+  loadBrowseData(true);
+}
+
+async function loadBrowseData(reset = true) {
+  if (browseLoading) return;
+  browseLoading = true;
+
+  if (reset) {
+    browseOffset = 0;
+    browseNodes = [];
+    explorerSelectedId = null;
+    // Clear detail panel
+    const detailEmpty = document.getElementById('explorer-detail-empty');
+    const detailHeader = document.getElementById('explorer-detail-header');
+    const miniGraphEl = document.getElementById('explorer-mini-graph');
+    const connectionsEl = document.getElementById('explorer-connections');
+    detailEmpty.classList.remove('hidden');
+    detailHeader.classList.add('hidden');
+    miniGraphEl.innerHTML = '';
+    connectionsEl.innerHTML = '';
+  }
+
+  const loadMoreEl = document.getElementById('explorer-load-more');
+  const emptyEl = document.getElementById('explorer-results-empty');
+  loadMoreEl.classList.remove('hidden');
+  emptyEl.classList.add('hidden');
+
+  try {
+    let url = '/api/graph/browse?offset=' + browseOffset + '&limit=50';
+    if (currentNamespace) url += '&namespace=' + encodeURIComponent(currentNamespace);
+    if (browseKindFilter) url += '&kind=' + encodeURIComponent(browseKindFilter);
+    if (browseSearchQuery) url += '&q=' + encodeURIComponent(browseSearchQuery);
+
+    const data = await apiFetch(url);
+    browseTotal = data.total;
+    kindCounts = data.kinds || {};
+
+    if (reset) {
+      browseNodes = data.nodes;
+      renderKindChips();
+      renderBrowseResults(true);
+      // Update header stat pills to reflect filtered totals
+      const totalNodes = Object.values(kindCounts).reduce((s, c) => s + c, 0);
+      document.getElementById('stat-nodes').textContent = totalNodes.toLocaleString();
+      if (data.edge_count != null) {
+        document.getElementById('stat-edges').textContent = data.edge_count.toLocaleString();
+      }
+    } else {
+      browseNodes = browseNodes.concat(data.nodes);
+      renderBrowseResults(false);
+    }
+
+    browseOffset = browseNodes.length;
+
+    if (browseNodes.length === 0) {
+      emptyEl.textContent = browseSearchQuery ? 'No results match your search' : 'No graph nodes found';
+      emptyEl.classList.remove('hidden');
+    }
+  } catch (err) {
+    console.error('Browse load error:', err);
+    if (browseNodes.length === 0) {
+      emptyEl.textContent = 'Failed to load data';
+      emptyEl.classList.remove('hidden');
+    }
+  }
+
+  loadMoreEl.classList.add('hidden');
+  browseLoading = false;
+}
+
+function renderKindChips() {
+  const bar = document.getElementById('explorer-kind-bar');
+  bar.innerHTML = '';
+
+  // Sort by count descending
+  const sorted = Object.entries(kindCounts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length === 0) return;
+
+  // "All" chip
+  const allChip = document.createElement('span');
+  allChip.className = 'kind-chip' + (!browseKindFilter ? ' active' : '');
+  allChip.style.color = '#b4adff';
+  allChip.style.background = !browseKindFilter ? 'rgba(124,108,240,0.12)' : 'rgba(124,108,240,0.06)';
+  const allTotal = Object.values(kindCounts).reduce((s, c) => s + c, 0);
+  allChip.innerHTML = 'All <span class="kind-count">' + allTotal + '</span>';
+  allChip.addEventListener('click', () => {
+    browseKindFilter = null;
+    loadBrowseData(true);
+  });
+  bar.appendChild(allChip);
+
+  sorted.forEach(([kind, count]) => {
+    const color = getKindColor(kind);
+    const chip = document.createElement('span');
+    chip.className = 'kind-chip' + (browseKindFilter === kind ? ' active' : '');
+    chip.style.color = color;
+    chip.style.background = (browseKindFilter === kind ? color + '18' : color + '08');
+    chip.innerHTML = esc(kind) + ' <span class="kind-count">' + count + '</span>';
+    chip.addEventListener('click', () => {
+      browseKindFilter = browseKindFilter === kind ? null : kind;
+      loadBrowseData(true);
+    });
+    bar.appendChild(chip);
+  });
+}
+
+function renderBrowseResults(fullReset) {
+  const listEl = document.getElementById('explorer-results-list');
+  const headerEl = document.getElementById('explorer-results-header');
+
+  headerEl.textContent = browseTotal.toLocaleString() + ' nodes' + (browseKindFilter ? ' (' + browseKindFilter + ')' : '') + (browseSearchQuery ? ' matching "' + browseSearchQuery + '"' : '');
+
+  if (fullReset) {
+    listEl.innerHTML = '';
+  }
+
+  const startIdx = fullReset ? 0 : (browseNodes.length - 50);
+  const nodes = browseNodes.slice(Math.max(0, startIdx));
+
+  nodes.forEach(node => {
+    const color = getKindColor(node.kind);
+    const card = document.createElement('div');
+    card.className = 'exp-card' + (node.id === explorerSelectedId ? ' selected' : '');
+    card.dataset.id = node.id;
+
+    const centralityPct = Math.round((node.centrality || 0) * 100);
+    const nsPath = node.namespace ? node.namespace.replace(/\//g, ' / ') : '';
+
+    card.innerHTML =
+      '<span class="exp-card-kind" style="background:' + color + '15;color:' + color + ';">' + esc(node.kind) + '</span>'
+      + '<div class="exp-card-body">'
+      + '<div class="exp-card-label">' + esc(node.label) + '</div>'
+      + (nsPath ? '<div class="exp-card-ns">' + esc(nsPath) + '</div>' : '')
+      + '</div>'
+      + '<div class="exp-card-degree"><span class="exp-card-degree-dot"></span>' + node.degree + '</div>'
+      + '<div class="exp-card-centrality"><div class="exp-card-centrality-fill" style="width:' + centralityPct + '%;"></div></div>';
+
+    card.addEventListener('click', () => {
+      explorerSelectedId = node.id;
+      listEl.querySelectorAll('.exp-card.selected').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+      selectExplorerNode(node);
+    });
+    listEl.appendChild(card);
+  });
+}
+
+async function selectExplorerNode(node) {
+  const detailEmpty = document.getElementById('explorer-detail-empty');
+  const detailHeader = document.getElementById('explorer-detail-header');
+  const miniGraphEl = document.getElementById('explorer-mini-graph');
+  const connectionsEl = document.getElementById('explorer-connections');
+
+  detailEmpty.classList.add('hidden');
+  detailHeader.classList.remove('hidden');
+
+  // Render detail header
+  const color = getKindColor(node.kind);
+  const centralityPct = Math.round((node.centrality || 0) * 100);
+  detailHeader.innerHTML =
+    '<span class="exp-detail-kind-badge" style="background:' + color + '18;color:' + color + ';">' + esc(node.kind) + '</span>'
+    + '<div class="exp-detail-label">' + esc(node.label) + '</div>'
+    + (node.namespace ? '<div class="exp-detail-ns">' + esc(node.namespace) + '</div>' : '')
+    + '<div class="exp-detail-centrality">'
+    + '<span class="exp-centrality-label">Centrality</span>'
+    + '<div class="exp-centrality-bar"><div class="exp-centrality-fill" style="width:' + centralityPct + '%;"></div></div>'
+    + '<span class="exp-centrality-value">' + (node.centrality || 0).toFixed(2) + '</span>'
+    + '</div>';
+
+  // Load neighbors for mini-graph and connections
+  try {
+    const neighbors = await apiFetch('/api/graph/neighbors/' + encodeURIComponent(node.id) + '?depth=1');
+    buildExplorerMiniGraph(node.id, neighbors, miniGraphEl);
+    buildExplorerConnections(node.id, neighbors, connectionsEl);
+  } catch {
+    miniGraphEl.innerHTML = '';
+    connectionsEl.innerHTML = '<div style="color:#3e4260;text-align:center;padding:20px;">No graph data</div>';
+  }
+}
+
+function buildExplorerMiniGraph(centerId, neighborData, container) {
+  if (explorerMiniGraphInstance) {
+    explorerMiniGraphInstance._destructor && explorerMiniGraphInstance._destructor();
+    explorerMiniGraphInstance = null;
+  }
+  container.innerHTML = '';
+
+  const neighborNodes = neighborData.nodes || [];
+  const neighborEdges = neighborData.edges || [];
+
+  if (neighborNodes.length === 0 && neighborEdges.length === 0) {
+    container.innerHTML = '<div style="color:#3e4260;display:flex;align-items:center;justify-content:center;height:100%;">No connections found</div>';
+    return;
+  }
+
+  const nodes = [];
+  const nodeIdSet = new Set();
+  nodeIdSet.add(centerId);
+
+  // Find center node data
+  const centerNode = neighborNodes.find(n => n.id === centerId) || { id: centerId, label: centerId, kind: 'unknown' };
+  nodes.push({
+    id: centerId,
+    label: (centerNode.label || '').substring(0, 30),
+    _isCenter: true,
+    _kind: centerNode.kind || 'unknown',
+    color: '#ffffff',
+    val: 20,
+  });
+
+  neighborNodes.forEach(n => {
+    if (n.id === centerId) return;
+    nodeIdSet.add(n.id);
+    const color = getKindColor(n.kind);
+    nodes.push({
+      id: n.id,
+      label: (n.label || '').substring(0, 25),
+      _isCenter: false,
+      _kind: n.kind || 'unknown',
+      color: color,
+      val: 8,
+    });
+  });
+
+  const links = neighborEdges
+    .filter(e => nodeIdSet.has(e.src) && nodeIdSet.has(e.dst))
+    .map(e => ({
+      source: e.src,
+      target: e.dst,
+      relationship: e.relationship,
+      color: (REL_COLORS[e.relationship] || '#5a5e80') + 'aa',
+    }));
+
+  const rect = container.getBoundingClientRect();
+  const w = Math.max(rect.width, 300);
+  const h = Math.max(rect.height, 250);
+
+  const ForceGraph2D = window.ForceGraph;
+  if (!ForceGraph2D) return;
+
+  explorerMiniGraphInstance = ForceGraph2D()(container)
+    .width(w)
+    .height(h)
+    .backgroundColor('#0f1225')
+    .graphData({ nodes, links })
+    .nodeLabel('')
+    .nodeVal(n => n.val)
+    .nodeColor(() => 'rgba(0,0,0,0)')
+    .nodeCanvasObjectMode(() => 'after')
+    .nodeCanvasObject((node, ctx) => {
+      if (!isFinite(node.x) || !isFinite(node.y)) return;
+      const isCenter = node._isCenter;
+      const color = node.color;
+      const r = isCenter ? 12 : 7;
+
+      const glow = ctx.createRadialGradient(node.x, node.y, r * 0.6, node.x, node.y, r * 1.8);
+      glow.addColorStop(0, (isCenter ? 'rgba(255,255,255,0.15)' : color + '18'));
+      glow.addColorStop(1, 'transparent');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r * 1.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = isCenter ? 'rgba(25,30,60,0.92)' : 'rgba(14,17,38,0.92)';
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = isCenter ? 2.5 : 1.5;
+      ctx.stroke();
+
+      const initial = (node._kind || '?')[0].toUpperCase();
+      ctx.font = 'bold ' + (isCenter ? 9 : 6) + 'px Inter, sans-serif';
+      ctx.fillStyle = isCenter ? '#ffffff' : color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(initial, node.x, node.y);
+
+      if (!isCenter && node.label) {
+        ctx.font = '3px Inter, sans-serif';
+        ctx.fillStyle = '#4e5275';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(node.label.substring(0, 20), node.x, node.y + r + 2);
+      }
+    })
+    .linkColor(l => l.color)
+    .linkWidth(1)
+    .linkCurvature(0.1)
+    .linkDirectionalArrowLength(4)
+    .linkDirectionalArrowRelPos(1)
+    .linkDirectionalParticles(1)
+    .linkDirectionalParticleWidth(1)
+    .linkDirectionalParticleSpeed(0.005)
+    .onNodeClick(node => {
+      if (!node) return;
+      // Find browse node data for clicked node
+      const browseNode = browseNodes.find(n => n.id === node.id);
+      if (browseNode) {
+        explorerSelectedId = node.id;
+        selectExplorerNode(browseNode);
+        // Update selection in list
+        const listEl = document.getElementById('explorer-results-list');
+        listEl.querySelectorAll('.exp-card.selected').forEach(c => c.classList.remove('selected'));
+        const card = listEl.querySelector('[data-id="' + CSS.escape(node.id) + '"]');
+        if (card) card.classList.add('selected');
+      } else {
+        // Node not in current browse results — fetch its info from neighbors response
+        explorerSelectedId = node.id;
+        selectExplorerNode({ id: node.id, kind: node._kind || 'unknown', label: node.label || node.id, centrality: 0, namespace: null, degree: 0 });
+      }
+    })
+    .onNodeHover(node => {
+      container.style.cursor = node ? 'pointer' : 'default';
+      if (node) showRichTooltip(node);
+      else hideTooltip();
+    })
+    .warmupTicks(0)
+    .cooldownTicks(120)
+    .d3AlphaDecay(0.035)
+    .d3VelocityDecay(0.3);
+}
+
+function buildExplorerConnections(centerId, neighborData, container) {
+  container.innerHTML = '';
+  const neighborEdges = neighborData.edges || [];
+
+  const directEdges = neighborEdges.filter(e => e.src === centerId || e.dst === centerId);
+  if (directEdges.length === 0) {
+    container.innerHTML = '<div style="color:#3e4260;padding:10px;font-size:12px;">No direct connections</div>';
+    return;
+  }
+
+  const nodeMap = {};
+  (neighborData.nodes || []).forEach(n => { nodeMap[n.id] = { label: n.label || n.id, kind: n.kind }; });
+
+  const groups = {};
+  directEdges.forEach(e => {
+    const rel = e.relationship || 'RELATES_TO';
+    if (!groups[rel]) groups[rel] = [];
+    const isOutgoing = e.src === centerId;
+    const targetId = isOutgoing ? e.dst : e.src;
+    const target = nodeMap[targetId] || { label: targetId, kind: 'unknown' };
+    groups[rel].push({
+      targetId,
+      targetLabel: target.label,
+      targetKind: target.kind,
+      isOutgoing,
+    });
+  });
+
+  let html = '<div class="exp-section-title">Connections (' + directEdges.length + ')</div>';
+
+  const sortedGroups = Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
+  sortedGroups.forEach(([rel, items]) => {
+    const rc = REL_COLORS[rel] || '#5a5e80';
+    html += '<div class="exp-conn-group">'
+      + '<div class="exp-conn-group-header">'
+      + '<span class="exp-conn-badge" style="background:' + rc + '20;color:' + rc + ';">' + esc(rel) + '</span>'
+      + '<span class="exp-conn-count">' + items.length + '</span>'
+      + '</div>';
+
+    items.forEach(item => {
+      const dirClass = item.isOutgoing ? 'outgoing' : 'incoming';
+      const dirArrow = item.isOutgoing ? '&rarr;' : '&larr;';
+      const kindColor = getKindColor(item.targetKind);
+      html += '<div class="exp-conn-item" data-id="' + esc(item.targetId) + '">'
+        + '<span class="exp-conn-dir ' + dirClass + '">' + dirArrow + '</span>'
+        + '<span class="exp-card-kind" style="background:' + kindColor + '12;color:' + kindColor + ';font-size:8px;padding:1px 5px;min-width:auto;">' + esc(item.targetKind || '') + '</span>'
+        + '<span class="exp-conn-label">' + esc(item.targetLabel) + '</span>'
+        + '</div>';
+    });
+
+    html += '</div>';
+  });
+
+  container.innerHTML = html;
+
+  container.querySelectorAll('.exp-conn-item[data-id]').forEach(item => {
+    item.addEventListener('click', () => {
+      const targetId = item.dataset.id;
+      explorerSelectedId = targetId;
+      // Find in browse nodes or create minimal node info
+      const browseNode = browseNodes.find(n => n.id === targetId);
+      const nd = nodeMap[targetId] || {};
+      selectExplorerNode(browseNode || { id: targetId, kind: nd.kind || 'unknown', label: nd.label || targetId, centrality: 0, namespace: null, degree: 0 });
+      // Update selection in list
+      const listEl = document.getElementById('explorer-results-list');
+      listEl.querySelectorAll('.exp-card.selected').forEach(c => c.classList.remove('selected'));
+      const card = listEl.querySelector('[data-id="' + CSS.escape(targetId) + '"]');
+      if (card) card.classList.add('selected');
+    });
+  });
+}
+
+// ====================================================================
+// Init
+// ====================================================================
+async function init() {
+  buildRelFilters();
+  initVectorView();
+  initGraphView();
+  updateSearchPlaceholder();
+  sidePanel.style.display = 'none'; // hide side panel on explorer tab initially
+  await Promise.all([loadStats(), loadNamespaces(), loadMemories()]);
+  buildLegend();
+  initExplorerView();
+}
+
+init();
+</script>
+</body>
+</html>

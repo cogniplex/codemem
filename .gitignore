@@ -1,0 +1,8 @@
+/target
+.codemem/
+.claude/
+.swarm/
+.mcp.json
+*.swp
+*.swo
+.DS_Store

@@ -1,0 +1,33 @@
+[package]
+name = "codemem-bench"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Criterion benchmarks for Codemem"
+publish = false
+
+[dependencies]
+codemem-core = { workspace = true }
+codemem-storage = { workspace = true }
+codemem-vector = { workspace = true }
+codemem-graph = { workspace = true }
+codemem-embeddings = { workspace = true }
+criterion = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[[bench]]
+name = "vector"
+harness = false
+
+[[bench]]
+name = "storage"
+harness = false
+
+[[bench]]
+name = "graph"
+harness = false

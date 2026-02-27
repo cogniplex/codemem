@@ -1,0 +1,35 @@
+[package]
+name = "codemem-mcp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "MCP server for Codemem (JSON-RPC 2.0 over stdio)"
+
+[features]
+default = []
+metal = ["codemem-embeddings/metal"]
+cuda = ["codemem-embeddings/cuda"]
+accelerate = ["codemem-embeddings/accelerate"]
+
+[dependencies]
+codemem-core = { workspace = true }
+codemem-storage = { workspace = true }
+codemem-vector = { workspace = true }
+codemem-graph = { workspace = true }
+codemem-embeddings = { workspace = true }
+codemem-index = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+rusqlite = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,16 @@
+[package]
+name = "codemem-watch"
+version.workspace = true
+edition.workspace = true
+description = "Real-time file watcher for Codemem with debouncing and .gitignore support"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+codemem-core = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+ignore = { workspace = true }
+tracing = { workspace = true }
+crossbeam-channel = { workspace = true }

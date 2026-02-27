@@ -1,0 +1,34 @@
+[package]
+name = "codemem-index"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Tree-sitter code indexing for Codemem memory engine"
+
+[dependencies]
+codemem-core = { workspace = true }
+codemem-storage = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+rusqlite = { workspace = true }
+
+tree-sitter = { workspace = true }
+walkdir = { workspace = true }
+ignore = { workspace = true }
+
+# Manifest parsing
+toml = "0.8"
+
+# Language grammars (per-crate, not workspace)
+tree-sitter-rust = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-java = "0.23"
