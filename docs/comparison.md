@@ -27,7 +27,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 
 | Aspect | Codemem | Mem0 |
 |--------|--------|------|
-| **Install** | `cargo install codemem` | `pip install mem0ai` + vector DB + graph DB |
+| **Install** | `curl -fsSL .../install.sh \| sh` or `brew install cogniplex/tap/codemem` | `pip install mem0ai` + vector DB + graph DB |
 | **Storage** | Single SQLite file + HNSW index | Triple-store: vector DB (24+ providers) + graph DB (Neo4j/Memgraph) + relational DB |
 | **Auto-capture** | PostToolUse hooks capture Read/Grep/Edit/Write automatically | Manual `add()` calls only |
 | **Code awareness** | 6 language extractors, structural indexing, code-aware memory types | General-purpose fact extraction from conversations |
@@ -152,7 +152,6 @@ Codemem was directly inspired by AutoMem's research. The key difference is packa
 
 | Aspect | Codemem | AgentDB |
 |--------|--------|---------|
-| **LOC** | ~23,500 (Rust) | ~74,600 (TypeScript) |
 | **RL algorithms** | None | 9 (DQN, PPO, A3C, REINFORCE, etc.) |
 | **GNN reasoning** | No | CausalMemoryGraph (proprietary @ruvector/gnn) |
 | **Skill library** | No | Trajectory segmentation, typed I/O |
@@ -192,3 +191,13 @@ Codemem was directly inspired by AutoMem's research. The key difference is packa
 The AI memory landscape has matured significantly. Most tools are Python-based, require external services (vector DBs, graph DBs, embedding APIs), and target general-purpose conversation memory.
 
 Codemem occupies a unique position: a **single Rust binary** purpose-built for **AI coding assistants**, combining the best research ideas (graph-vector hybrid from AutoMem/HippoRAG, contextual embeddings from Anthropic, neuroscience-inspired consolidation) into a **zero-dependency, offline-first** package. The tradeoff is intentional: Codemem drops cloud-scale multi-tenancy, RL/GNN research features, and pluggable backend architecture in favor of simplicity, speed, and local-first operation.
+
+Install in one line:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cogniplex/codemem/main/install.sh | sh
+# or: brew install cogniplex/tap/codemem
+# or: cargo install codemem-cli
+```
+
+Then use the [code-mapper agent](../examples/agents/code-mapper.md) to index your codebase, run PageRank, detect clusters, and store architectural insights as persistent memories.

@@ -92,3 +92,79 @@ jobs:
             codemem-*.tar.gz
             codemem-*.tar.gz.sha256
           generate_release_notes: true
+
+  homebrew:
+    name: Update Homebrew Tap
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+          path: artifacts
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v6
+        with:
+          repository: cogniplex/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA_MACOS_ARM64=$(awk '{print $1}' artifacts/codemem-macos-arm64.tar.gz.sha256)
+          SHA_LINUX_ARM64=$(awk '{print $1}' artifacts/codemem-linux-arm64.tar.gz.sha256)
+          SHA_LINUX_AMD64=$(awk '{print $1}' artifacts/codemem-linux-amd64.tar.gz.sha256)
+
+          mkdir -p homebrew-tap/Formula
+
+          cat > homebrew-tap/Formula/codemem.rb << 'FORMULA'
+          class Codemem < Formula
+            desc "Standalone Rust memory engine for AI coding assistants"
+            homepage "https://github.com/cogniplex/codemem"
+            version "VERSION_PLACEHOLDER"
+            license "Apache-2.0"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/cogniplex/codemem/releases/download/vVERSION_PLACEHOLDER/codemem-macos-arm64.tar.gz"
+                sha256 "SHA_MACOS_ARM64_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/cogniplex/codemem/releases/download/vVERSION_PLACEHOLDER/codemem-linux-arm64.tar.gz"
+                sha256 "SHA_LINUX_ARM64_PLACEHOLDER"
+              end
+              on_intel do
+                url "https://github.com/cogniplex/codemem/releases/download/vVERSION_PLACEHOLDER/codemem-linux-amd64.tar.gz"
+                sha256 "SHA_LINUX_AMD64_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install "codemem"
+            end
+
+            test do
+              assert_match "codemem", shell_output("#{bin}/codemem --version")
+            end
+          end
+          FORMULA
+
+          # Replace placeholders with actual values
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" homebrew-tap/Formula/codemem.rb
+          sed -i "s/SHA_MACOS_ARM64_PLACEHOLDER/$SHA_MACOS_ARM64/" homebrew-tap/Formula/codemem.rb
+          sed -i "s/SHA_LINUX_ARM64_PLACEHOLDER/$SHA_LINUX_ARM64/" homebrew-tap/Formula/codemem.rb
+          sed -i "s/SHA_LINUX_AMD64_PLACEHOLDER/$SHA_LINUX_AMD64/" homebrew-tap/Formula/codemem.rb
+
+      - name: Push to tap
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/codemem.rb
+          git diff --cached --quiet || git commit -m "codemem ${{ github.ref_name }}"
+          git push

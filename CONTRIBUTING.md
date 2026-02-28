@@ -16,7 +16,7 @@ cargo build
 ## Test
 
 ```bash
-cargo test --workspace       # All 346 tests
+cargo test --workspace       # All 415 tests
 cargo bench                  # Criterion benchmarks
 ```
 

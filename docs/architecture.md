@@ -38,6 +38,7 @@ graph TB
         DB[(codemem.db<br/>SQLite WAL)]
         HNSW[(codemem.idx<br/>HNSW index)]
         MODEL[models/<br/>bge-base-en-v1.5]
+        CONF[config.toml<br/>Persistent config]
     end
 
     H -->|stdin JSON| HOOKS
@@ -113,21 +114,20 @@ graph BT
 
 ## 3. Crate Reference Table
 
-| Crate | LOC | Description |
-|-------|-----|-------------|
-| codemem-core | 1,111 | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`). 7 `MemoryType`s, 5 `PatternType`s, 23 `RelationshipType`s, 12 `NodeKind`s, `ScoringWeights` |
-| codemem-storage | 2,252 | rusqlite (bundled), WAL mode, embedded schema. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl) |
-| codemem-vector | 269 | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200, efSearch=100, persistent ID mapping |
-| codemem-graph | 1,771 | petgraph + SQLite persistence. Split into `traversal.rs` (GraphBackend trait impl: BFS/DFS/shortest path), `algorithms.rs` (PageRank, personalized PageRank, Louvain, betweenness, SCC, topological layers). Cached centrality scores (`recompute_centrality()`) |
-| codemem-embeddings | 846 | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization |
-| codemem-index | 7,813 | tree-sitter code indexing, 6 language extractors (Rust, TypeScript, Python, Go, C/C++, Java), manifest parsing (Cargo.toml), reference resolution, incremental indexing |
-| codemem-mcp | 6,553 | JSON-RPC stdio server, 33 MCP tools. Split into `tools_memory.rs` (CRUD), `tools_graph.rs` (analysis), `tools_recall.rs` (advanced recall/namespaces), `tools_consolidation.rs` (lifecycle), `scoring.rs` (hybrid scorer), `types.rs` (protocol types). BM25 scoring, contextual enrichment, pattern detection |
-| codemem-hooks | 979 | PostToolUse JSON parser, extractors per tool type (Read, Glob, Grep, Edit, Write), diff-aware memory via `similar` crate (semantic summaries), edge materialization, content hashing |
-| codemem-cli | 2,803 | clap derive, 15 commands. Split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`. Includes `compress` module for LLM-powered observation compression |
-| codemem-watch | 188 | Real-time file watcher via `notify` + `notify-debouncer-mini` (50ms debounce), .gitignore-aware, 17 file extensions, crossbeam channels |
-| codemem-viz | 696 | Axum REST API + embedded HTML frontend, PCA projection of embeddings to 3D, interactive dashboard |
-| codemem-bench | 7 | Criterion benchmarks (vector, storage, graph), 20% CI regression threshold |
-| **Total** | **~26,500** | **358 tests, 12 crates** |
+| Crate | Description |
+|-------|-------------|
+| codemem-core | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`), config (`config.rs`: `CodememConfig` TOML persistence). 7 `MemoryType`s, 5 `PatternType`s, 23 `RelationshipType`s, 12 `NodeKind`s, `ScoringWeights` |
+| codemem-storage | rusqlite (bundled), WAL mode, versioned schema migrations. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning with `schema_version` table) |
+| codemem-vector | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200, efSearch=100, persistent ID mapping |
+| codemem-graph | petgraph + SQLite persistence. Split into `traversal.rs` (GraphBackend trait impl: BFS/DFS/shortest path), `algorithms.rs` (PageRank, personalized PageRank, Louvain, betweenness, SCC, topological layers). Cached centrality scores (`recompute_centrality()`) |
+| codemem-embeddings | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization. Safe concurrency via `LockPoisoned` error handling |
+| codemem-index | tree-sitter code indexing, 6 language extractors (Rust, TypeScript, Python, Go, C/C++, Java), manifest parsing (Cargo.toml), reference resolution, incremental indexing |
+| codemem-mcp | JSON-RPC stdio server, 33 MCP tools. Split into `tools_memory.rs` (CRUD), `tools_graph.rs` (analysis), `tools_recall.rs` (advanced recall/namespaces), `tools_consolidation.rs` (lifecycle), `scoring.rs` (hybrid scorer), `types.rs` (protocol types). BM25 scoring, contextual enrichment, pattern detection. RwLock-based scoring weights, typed lock helpers |
+| codemem-hooks | PostToolUse JSON parser, extractors per tool type (Read, Glob, Grep, Edit, Write), diff-aware memory via `similar` crate (semantic summaries), edge materialization, content hashing |
+| codemem-cli | clap derive, 15 commands. Split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`. Includes `compress` module for LLM-powered observation compression |
+| codemem-watch | Real-time file watcher via `notify` + `notify-debouncer-mini` (50ms debounce), proper `.gitignore` parsing via `ignore` crate, 17 file extensions, crossbeam channels |
+| codemem-viz | Axum REST API + embedded HTML frontend, PCA projection of embeddings to 3D, interactive dashboard |
+| codemem-bench | Criterion benchmarks (vector, storage, graph), 20% CI regression threshold |
 
 ---
 
@@ -353,7 +353,9 @@ Each consolidation run is logged in the `consolidation_log` table with cycle typ
 
 ## 8. Storage Schema
 
-All persistent state lives in a single SQLite database at `~/.codemem/codemem.db`, configured with WAL mode, 64MB cache, 256MB memory-mapped I/O, and foreign key enforcement.
+All persistent state lives in a single SQLite database at `~/.codemem/codemem.db`, configured with WAL mode, 64MB cache, 256MB memory-mapped I/O, and foreign key enforcement. Configuration is stored in `~/.codemem/config.toml` (TOML format, loaded at startup, partial configs merge with defaults).
+
+The schema is managed by versioned, idempotent migrations tracked in a `schema_version` table. Migrations are applied automatically on startup.
 
 ### `memories` table
 
@@ -434,6 +436,24 @@ Index: `(cycle_type, run_at)`.
 | `summary` | TEXT | Optional session summary |
 
 Indexes: `namespace`, `started_at`.
+
+### `schema_version` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `version` | INTEGER PK | Migration version number |
+| `description` | TEXT NOT NULL | Human-readable migration description |
+| `applied_at` | INTEGER NOT NULL | Unix timestamp when migration was applied |
+
+### `file_hashes` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `file_path` | TEXT PK | Absolute file path |
+| `content_hash` | TEXT NOT NULL | SHA-256 hash of file contents |
+| `indexed_at` | INTEGER NOT NULL | Unix timestamp of last indexing |
+
+Used by incremental indexing to skip unchanged files on re-index.
 
 ---
 
@@ -573,7 +593,8 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 | `tracing` / `tracing-subscriber` | Structured logging |
 | `thiserror` / `anyhow` | Error handling |
 | `walkdir` / `ignore` | Filesystem traversal for code indexing (respects `.gitignore`) |
-| `toml` | Cargo.toml manifest parsing for dependency extraction |
+| `toml` | Cargo.toml manifest parsing and persistent configuration |
+| `ignore` | Gitignore-aware file filtering for watcher |
 | `similar` | Line-level text diffing for semantic diff summaries |
 | `notify` / `notify-debouncer-mini` | Filesystem event watcher with 50ms debouncing |
 | `crossbeam-channel` | Multi-producer, multi-consumer channels for file watch events |
