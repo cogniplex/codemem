@@ -24,66 +24,24 @@ impl ChangeDetector {
     ///
     /// This reads from the `file_hashes` table if it exists. If the table
     /// doesn't exist or the query fails, starts fresh with no known hashes.
-    pub fn load_from_storage(&mut self, storage: &codemem_storage::Storage) {
-        // Try to read from a file_hashes table. If it doesn't exist, that's fine.
-        let conn = storage.connection();
-        let result = conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS file_hashes (
-                file_path TEXT PRIMARY KEY,
-                content_hash TEXT NOT NULL,
-                indexed_at INTEGER NOT NULL
-            )",
-        );
-        if result.is_err() {
-            tracing::warn!("Failed to create file_hashes table, starting fresh");
-            return;
+    pub fn load_from_storage(&mut self, storage: &dyn codemem_core::StorageBackend) {
+        match storage.load_file_hashes() {
+            Ok(hashes) => {
+                tracing::debug!("Loaded {} known file hashes", hashes.len());
+                self.known_hashes = hashes;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load file hashes, starting fresh: {e}");
+            }
         }
-
-        let mut stmt = match conn.prepare("SELECT file_path, content_hash FROM file_hashes") {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-
-        let rows = match stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }) {
-            Ok(r) => r,
-            Err(_) => return,
-        };
-
-        for row in rows.flatten() {
-            self.known_hashes.insert(row.0, row.1);
-        }
-
-        tracing::debug!("Loaded {} known file hashes", self.known_hashes.len());
     }
 
     /// Save current hashes to storage.
     pub fn save_to_storage(
         &self,
-        storage: &codemem_storage::Storage,
+        storage: &dyn codemem_core::StorageBackend,
     ) -> Result<(), codemem_core::CodememError> {
-        let conn = storage.connection();
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS file_hashes (
-                file_path TEXT PRIMARY KEY,
-                content_hash TEXT NOT NULL,
-                indexed_at INTEGER NOT NULL
-            )",
-        )
-        .map_err(|e| codemem_core::CodememError::Storage(e.to_string()))?;
-
-        let now = chrono::Utc::now().timestamp();
-        let mut stmt = conn
-            .prepare("INSERT OR REPLACE INTO file_hashes (file_path, content_hash, indexed_at) VALUES (?1, ?2, ?3)")
-            .map_err(|e| codemem_core::CodememError::Storage(e.to_string()))?;
-
-        for (path, hash) in &self.known_hashes {
-            stmt.execute(rusqlite::params![path, hash, now])
-                .map_err(|e| codemem_core::CodememError::Storage(e.to_string()))?;
-        }
-
-        Ok(())
+        storage.save_file_hashes(&self.known_hashes)
     }
 
     /// Check if a file has changed since the last index.

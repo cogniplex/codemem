@@ -115,19 +115,19 @@ graph BT
 
 | Crate | LOC | Description |
 |-------|-----|-------------|
-| codemem-core | 833 | Shared types (`MemoryNode`, `Edge`, `Session`, `DetectedPattern`), 7 `MemoryType`s, 5 `PatternType`s, 23 `RelationshipType`s, 12 `NodeKind`s, `VectorBackend`/`GraphBackend` traits, `ScoringWeights` |
-| codemem-storage | 1,435 | rusqlite (bundled), WAL mode, embedded schema via `include_str!`, memory/graph/session CRUD, embeddings blob storage, consolidation log, pattern queries (repeated searches, file hotspots, decision chains, tool usage stats) |
-| codemem-vector | 267 | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200, efSearch=100, persistent ID mapping |
-| codemem-graph | 1,633 | petgraph + SQLite persistence, 25 algorithms (PageRank, personalized PageRank, Louvain community detection, betweenness centrality, BFS/DFS, SCC, topological layers, degree centrality, connected components, multi-hop expansion), cached centrality scores (`recompute_centrality()`) |
-| codemem-embeddings | ~700 | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization |
-| codemem-index | 7,850 | tree-sitter code indexing, 6 language extractors (Rust, TypeScript, Python, Go, C/C++, Java), manifest parsing (Cargo.toml), reference resolution, incremental indexing |
-| codemem-mcp | 6,220 | JSON-RPC stdio server, 33 MCP tools, BM25 scoring (Okapi, code-aware tokenizer), contextual embedding enrichment, 9-component hybrid scoring, pattern detection, impact-aware recall |
-| codemem-hooks | 920 | PostToolUse JSON parser, extractors per tool type (Read, Glob, Grep, Edit, Write), diff-aware memory via `similar` crate (semantic summaries), edge materialization, content hashing |
-| codemem-cli | ~2,100 | clap derive, 15 commands: `init`, `search`, `stats`, `serve`, `ingest`, `consolidate`, `viz`, `index`, `export`, `import`, `watch`, `sessions`, `context`, `prompt`, `summarize`. Includes `compress` module for LLM-powered observation compression |
-| codemem-watch | 175 | Real-time file watcher via `notify` + `notify-debouncer-mini` (50ms debounce), .gitignore-aware, 17 file extensions, crossbeam channels |
-| codemem-viz | 661 | Axum REST API + embedded HTML frontend, PCA projection of embeddings to 3D, interactive dashboard |
+| codemem-core | 1,111 | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`). 7 `MemoryType`s, 5 `PatternType`s, 23 `RelationshipType`s, 12 `NodeKind`s, `ScoringWeights` |
+| codemem-storage | 2,252 | rusqlite (bundled), WAL mode, embedded schema. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl) |
+| codemem-vector | 269 | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200, efSearch=100, persistent ID mapping |
+| codemem-graph | 1,771 | petgraph + SQLite persistence. Split into `traversal.rs` (GraphBackend trait impl: BFS/DFS/shortest path), `algorithms.rs` (PageRank, personalized PageRank, Louvain, betweenness, SCC, topological layers). Cached centrality scores (`recompute_centrality()`) |
+| codemem-embeddings | 846 | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization |
+| codemem-index | 7,813 | tree-sitter code indexing, 6 language extractors (Rust, TypeScript, Python, Go, C/C++, Java), manifest parsing (Cargo.toml), reference resolution, incremental indexing |
+| codemem-mcp | 6,553 | JSON-RPC stdio server, 33 MCP tools. Split into `tools_memory.rs` (CRUD), `tools_graph.rs` (analysis), `tools_recall.rs` (advanced recall/namespaces), `tools_consolidation.rs` (lifecycle), `scoring.rs` (hybrid scorer), `types.rs` (protocol types). BM25 scoring, contextual enrichment, pattern detection |
+| codemem-hooks | 979 | PostToolUse JSON parser, extractors per tool type (Read, Glob, Grep, Edit, Write), diff-aware memory via `similar` crate (semantic summaries), edge materialization, content hashing |
+| codemem-cli | 2,803 | clap derive, 15 commands. Split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`. Includes `compress` module for LLM-powered observation compression |
+| codemem-watch | 188 | Real-time file watcher via `notify` + `notify-debouncer-mini` (50ms debounce), .gitignore-aware, 17 file extensions, crossbeam channels |
+| codemem-viz | 696 | Axum REST API + embedded HTML frontend, PCA projection of embeddings to 3D, interactive dashboard |
 | codemem-bench | 7 | Criterion benchmarks (vector, storage, graph), 20% CI regression threshold |
-| **Total** | **~23,500** | **352 tests, 12 crates** |
+| **Total** | **~26,500** | **358 tests, 12 crates** |
 
 ---
 

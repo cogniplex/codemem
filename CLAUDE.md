@@ -6,22 +6,22 @@ This file provides guidance to Claude Code when working with this repository.
 
 Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 33 MCP tools, 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), optional LLM observation compression, real-time file watching, and cross-session pattern detection.
 
-## Workspace Structure (12 crates, ~23,500 LOC Rust)
+## Workspace Structure (12 crates, ~26,500 LOC Rust)
 
 | Crate | LOC | Purpose |
 |-------|-----|---------|
-| codemem-core | 833 | Shared types: MemoryNode, Edge, Session, DetectedPattern, 7 MemoryTypes, 23 RelationshipTypes, 12 NodeKinds, ScoringWeights, VectorBackend/GraphBackend traits |
-| codemem-storage | 1,435 | rusqlite (bundled), WAL mode, memory/graph/embedding/session CRUD, pattern queries |
-| codemem-vector | 267 | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200 |
-| codemem-graph | 1,633 | petgraph + SQLite, 25 algorithms (PageRank, Louvain, BFS/DFS, SCC, betweenness), cached centrality |
-| codemem-embeddings | ~700 | Pluggable via `from_env()`: Candle (local BERT, default), Ollama, OpenAI-compatible. `CachedProvider` wrapper, BAAI/bge-base-en-v1.5 (768-dim), LRU cache 10K |
-| codemem-index | 7,850 | tree-sitter code indexing, 6 languages (Rust, TS, Python, Go, C/C++, Java) |
-| codemem-mcp | 6,220 | JSON-RPC stdio server, 33 MCP tools, BM25 scoring, contextual enrichment, hybrid scoring, pattern detection |
-| codemem-hooks | 920 | PostToolUse JSON parser, per-tool extractors, diff-aware memory (semantic summaries) |
-| codemem-cli | ~2,100 | clap derive, 15 commands, compress module for LLM-powered observation compression |
-| codemem-viz | 661 | PCA visualization dashboard |
+| codemem-core | 1,111 | Shared types (`types.rs`), traits (`traits.rs`), errors (`error.rs`): MemoryNode, Edge, Session, DetectedPattern, 7 MemoryTypes, 23 RelationshipTypes, 12 NodeKinds, ScoringWeights, VectorBackend/GraphBackend/StorageBackend traits |
+| codemem-storage | 2,252 | rusqlite (bundled), WAL mode; split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl) |
+| codemem-vector | 269 | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200 |
+| codemem-graph | 1,771 | petgraph + SQLite; split into `traversal.rs` (GraphBackend impl), `algorithms.rs` (PageRank, Louvain, SCC, betweenness, topological), cached centrality |
+| codemem-embeddings | 846 | Pluggable via `from_env()`: Candle (local BERT, default), Ollama, OpenAI-compatible. `CachedProvider` wrapper, BAAI/bge-base-en-v1.5 (768-dim), LRU cache 10K |
+| codemem-index | 7,813 | tree-sitter code indexing, 6 languages (Rust, TS, Python, Go, C/C++, Java) |
+| codemem-mcp | 6,553 | JSON-RPC stdio server, 33 MCP tools; split into `tools_memory.rs`, `tools_graph.rs`, `tools_recall.rs`, `tools_consolidation.rs`, `scoring.rs`, `types.rs` |
+| codemem-hooks | 979 | PostToolUse JSON parser, per-tool extractors, diff-aware memory (semantic summaries) |
+| codemem-cli | 2,803 | clap derive, 15 commands; split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs` |
+| codemem-viz | 696 | PCA visualization dashboard |
 | codemem-bench | 7 | Criterion benchmarks, 20% regression threshold |
-| codemem-watch | 175 | Real-time file watcher via notify (<50ms debounce), .gitignore support |
+| codemem-watch | 188 | Real-time file watcher via notify (<50ms debounce), .gitignore support |
 
 ## Key Design Decisions
 
@@ -49,7 +49,7 @@ candle-core/nn/transformers (ML inference), usearch (HNSW), rusqlite (bundled SQ
 
 ```bash
 cargo build                    # Build all crates
-cargo test --workspace         # Run all 352 tests
+cargo test --workspace         # Run all 358 tests
 cargo bench                    # Run benchmarks
 cargo build --release          # Optimized release binary
 ```

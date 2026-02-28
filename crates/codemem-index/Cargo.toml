@@ -9,14 +9,12 @@ description = "Tree-sitter code indexing for Codemem memory engine"
 
 [dependencies]
 codemem-core = { workspace = true }
-codemem-storage = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-rusqlite = { workspace = true }
 
 tree-sitter = { workspace = true }
 walkdir = { workspace = true }

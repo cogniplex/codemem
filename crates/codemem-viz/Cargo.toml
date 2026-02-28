@@ -12,7 +12,6 @@ description = "Interactive visualization dashboard for Codemem"
 [dependencies]
 codemem-core = { workspace = true }
 codemem-storage = { workspace = true }
-rusqlite = { workspace = true }
 axum = "0.8"
 tokio = { workspace = true }
 serde = { workspace = true }

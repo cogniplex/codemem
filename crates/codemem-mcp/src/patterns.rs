@@ -3,8 +3,7 @@
 //! Analyzes stored memories to detect recurring patterns like repeated searches,
 //! file hotspots, decision chains, and tool preferences across sessions.
 
-use codemem_core::{CodememError, DetectedPattern, PatternType};
-use codemem_storage::Storage;
+use codemem_core::{CodememError, DetectedPattern, PatternType, StorageBackend};
 
 /// Detect all patterns in the memory store.
 ///
@@ -12,7 +11,7 @@ use codemem_storage::Storage;
 /// descending. The `min_frequency` parameter controls the threshold for how many
 /// times a pattern must appear before it is flagged.
 pub fn detect_patterns(
-    storage: &Storage,
+    storage: &dyn StorageBackend,
     namespace: Option<&str>,
     min_frequency: usize,
 ) -> Result<Vec<DetectedPattern>, CodememError> {
@@ -35,7 +34,7 @@ pub fn detect_patterns(
 
 /// Detect repeated search patterns (Grep/Glob queries used multiple times).
 fn detect_repeated_searches(
-    storage: &Storage,
+    storage: &dyn StorageBackend,
     namespace: Option<&str>,
     min_frequency: usize,
 ) -> Result<Vec<DetectedPattern>, CodememError> {
@@ -58,7 +57,7 @@ fn detect_repeated_searches(
 
 /// Detect file hotspots (files accessed frequently via Read/Edit/Write).
 fn detect_file_hotspots(
-    storage: &Storage,
+    storage: &dyn StorageBackend,
     namespace: Option<&str>,
     min_frequency: usize,
 ) -> Result<Vec<DetectedPattern>, CodememError> {
@@ -81,7 +80,7 @@ fn detect_file_hotspots(
 
 /// Detect decision chains: files modified multiple times via Edit/Write over time.
 fn detect_decision_chains(
-    storage: &Storage,
+    storage: &dyn StorageBackend,
     namespace: Option<&str>,
     min_frequency: usize,
 ) -> Result<Vec<DetectedPattern>, CodememError> {
@@ -104,22 +103,19 @@ fn detect_decision_chains(
 
 /// Detect tool usage preferences by analyzing the distribution of tool usage.
 fn detect_tool_preferences(
-    storage: &Storage,
+    storage: &dyn StorageBackend,
     namespace: Option<&str>,
 ) -> Result<Vec<DetectedPattern>, CodememError> {
-    let stats = storage.get_tool_usage_stats(namespace)?;
+    let tool_entries = storage.get_tool_usage_stats(namespace)?;
 
-    if stats.len() < 2 {
+    if tool_entries.len() < 2 {
         return Ok(vec![]);
     }
 
-    let total: usize = stats.values().sum();
+    let total: usize = tool_entries.iter().map(|(_, c)| c).sum();
     if total == 0 {
         return Ok(vec![]);
     }
-
-    let mut tool_entries: Vec<(String, usize)> = stats.into_iter().collect();
-    tool_entries.sort_by(|a, b| b.1.cmp(&a.1));
 
     Ok(tool_entries
         .into_iter()
@@ -231,6 +227,7 @@ mod tests {
     use super::*;
     use codemem_core::MemoryNode;
     use codemem_core::MemoryType;
+    use codemem_storage::Storage;
     use std::collections::HashMap;
 
     fn make_memory(content: &str, tool: &str, extra_metadata: Vec<(&str, &str)>) -> MemoryNode {

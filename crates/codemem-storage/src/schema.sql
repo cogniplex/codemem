@@ -87,6 +87,17 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_namespace ON sessions(namespace);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
 
+-- Compound indexes for common query patterns
+CREATE INDEX IF NOT EXISTS idx_memories_ns_type ON memories(namespace, memory_type);
+CREATE INDEX IF NOT EXISTS idx_memories_imp_accessed ON memories(importance, last_accessed_at);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_src_rel ON graph_edges(src, relationship);
+
+-- File hash tracking for incremental indexing
+CREATE TABLE IF NOT EXISTS file_hashes (
+    file_path TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL
+);
+
 -- Note: session_id column on memories is added dynamically via
 -- Storage::ensure_session_column() since SQLite lacks
 -- ALTER TABLE ADD COLUMN IF NOT EXISTS.

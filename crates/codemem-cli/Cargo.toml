@@ -30,7 +30,6 @@ codemem-mcp = { workspace = true }
 codemem-hooks = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
-rusqlite = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
