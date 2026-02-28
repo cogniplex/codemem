@@ -105,7 +105,7 @@ fn extract_symbols_recursive(
             // A template wraps another declaration. Recurse into the child
             // declaration so that the inner class/function is extracted.
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     extract_symbols_recursive(
                         child,
                         source,
@@ -134,7 +134,7 @@ fn extract_symbols_recursive(
 
     // Default recursion for children.
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_symbols_recursive(
                 child,
                 source,
@@ -245,7 +245,7 @@ fn extract_class_or_struct(
         };
 
         for i in 0..body.child_count() {
-            if let Some(child) = body.child(i) {
+            if let Some(child) = body.child(i as u32) {
                 if child.kind() == "access_specifier" {
                     vis = parse_access_specifier(child, source);
                 } else {
@@ -327,7 +327,7 @@ fn extract_namespace(
             new_scope.push(name);
         }
         for i in 0..body.child_count() {
-            if let Some(child) = body.child(i) {
+            if let Some(child) = body.child(i as u32) {
                 extract_symbols_recursive(
                     child,
                     source,
@@ -449,7 +449,7 @@ fn extract_references_recursive(
                 scope.to_vec()
             };
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     extract_references_recursive(child, source, file_path, &new_scope, references);
                 }
             }
@@ -466,7 +466,7 @@ fn extract_references_recursive(
                 scope.to_vec()
             };
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     extract_references_recursive(child, source, file_path, &new_scope, references);
                 }
             }
@@ -482,7 +482,7 @@ fn extract_references_recursive(
                 scope.to_vec()
             };
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     extract_references_recursive(child, source, file_path, &new_scope, references);
                 }
             }
@@ -493,7 +493,7 @@ fn extract_references_recursive(
 
     // Default recursion.
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_references_recursive(child, source, file_path, scope, references);
         }
     }
@@ -567,7 +567,7 @@ fn extract_inheritance_references(
 
     // base_class_clause children include type_identifier nodes for base classes.
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             match child.kind() {
                 "type_identifier" | "qualified_identifier" | "template_type" => {
                     let base_name = node_text(child, source);
@@ -582,7 +582,7 @@ fn extract_inheritance_references(
                 // Recurse into access-qualified base specifiers, e.g. `public Base`.
                 _ => {
                     for j in 0..child.child_count() {
-                        if let Some(gc) = child.child(j) {
+                        if let Some(gc) = child.child(j as u32) {
                             if gc.kind() == "type_identifier"
                                 || gc.kind() == "qualified_identifier"
                                 || gc.kind() == "template_type"
@@ -641,7 +641,7 @@ fn extract_declarator_name(node: Node, source: &[u8]) -> Option<String> {
         }
         "parenthesized_declarator" => {
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     if child.kind() != "(" && child.kind() != ")" {
                         return extract_declarator_name(child, source);
                     }
@@ -674,7 +674,7 @@ fn extract_declarator_name(node: Node, source: &[u8]) -> Option<String> {
 /// Check if a function definition has `static` storage class specifier.
 fn has_static_specifier(node: Node, source: &[u8]) -> bool {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "storage_class_specifier" {
                 let text = node_text(child, source);
                 if text == "static" {

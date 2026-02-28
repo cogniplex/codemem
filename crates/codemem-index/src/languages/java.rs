@@ -66,7 +66,7 @@ fn extract_symbols_recursive(
                     let mut new_scope = scope.to_vec();
                     new_scope.push(class_name);
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, symbols,
                             );
@@ -84,7 +84,7 @@ fn extract_symbols_recursive(
                     let mut new_scope = scope.to_vec();
                     new_scope.push(iface_name);
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, symbols,
                             );
@@ -102,7 +102,7 @@ fn extract_symbols_recursive(
                     let mut new_scope = scope.to_vec();
                     new_scope.push(enum_name);
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, symbols,
                             );
@@ -139,7 +139,7 @@ fn extract_symbols_recursive(
 
     // Default recursion for other node types
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_symbols_recursive(child, source, file_path, scope, symbols);
         }
     }
@@ -332,7 +332,7 @@ fn extract_field(
 
     // Find variable_declarator children to get the field name(s)
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "variable_declarator" {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = node_text(name_node, source);
@@ -390,7 +390,7 @@ fn extract_references_recursive(
                 let mut new_scope = scope.to_vec();
                 new_scope.push(name);
                 for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i) {
+                    if let Some(child) = node.child(i as u32) {
                         extract_references_recursive(
                             child, source, file_path, &new_scope, references,
                         );
@@ -405,7 +405,7 @@ fn extract_references_recursive(
                 let mut new_scope = scope.to_vec();
                 new_scope.push(name);
                 for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i) {
+                    if let Some(child) = node.child(i as u32) {
                         extract_references_recursive(
                             child, source, file_path, &new_scope, references,
                         );
@@ -419,7 +419,7 @@ fn extract_references_recursive(
 
     // Default recursion
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_references_recursive(child, source, file_path, scope, references);
         }
     }
@@ -540,7 +540,7 @@ fn extract_interface_list(
     references: &mut Vec<Reference>,
 ) {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             match child.kind() {
                 "type_identifier" | "generic_type" | "scoped_type_identifier" => {
                     let iface_name = node_text(child, source);
@@ -581,7 +581,7 @@ fn collect_modifiers(node: Node, source: &[u8]) -> Vec<String> {
     let mut modifiers = Vec::new();
     if let Some(mods) = node.child_by_field_name("modifiers") {
         for i in 0..mods.child_count() {
-            if let Some(child) = mods.child(i) {
+            if let Some(child) = mods.child(i as u32) {
                 let text = node_text(child, source);
                 modifiers.push(text);
             }
@@ -590,10 +590,10 @@ fn collect_modifiers(node: Node, source: &[u8]) -> Vec<String> {
     // Also check unnamed children that might be modifier keywords
     // (some grammar versions place modifiers as direct children)
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "modifiers" {
                 for j in 0..child.child_count() {
-                    if let Some(mod_child) = child.child(j) {
+                    if let Some(mod_child) = child.child(j as u32) {
                         let text = node_text(mod_child, source);
                         if !modifiers.contains(&text) {
                             modifiers.push(text);
@@ -694,7 +694,7 @@ fn clean_javadoc(raw: &str) -> String {
 fn has_test_annotation(node: Node, source: &[u8]) -> bool {
     if let Some(mods) = node.child_by_field_name("modifiers") {
         for i in 0..mods.child_count() {
-            if let Some(child) = mods.child(i) {
+            if let Some(child) = mods.child(i as u32) {
                 if child.kind() == "marker_annotation" || child.kind() == "annotation" {
                     let text = node_text(child, source);
                     if text == "@Test" || text.starts_with("@Test(") {

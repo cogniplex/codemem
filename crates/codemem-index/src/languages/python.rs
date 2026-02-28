@@ -67,7 +67,7 @@ fn extract_symbols_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, false, symbols,
                             );
@@ -86,7 +86,7 @@ fn extract_symbols_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, true, symbols,
                             );
@@ -99,7 +99,7 @@ fn extract_symbols_recursive(
         "decorated_definition" => {
             // Unwrap to inner definition
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     match child.kind() {
                         "function_definition" | "class_definition" => {
                             extract_symbols_recursive(
@@ -126,7 +126,7 @@ fn extract_symbols_recursive(
 
     // Default recursion
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_symbols_recursive(child, source, file_path, scope, in_class, symbols);
         }
     }
@@ -277,7 +277,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -294,7 +294,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -307,7 +307,7 @@ fn extract_references_recursive(
         "decorated_definition" => {
             // Recurse into inner definition
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     extract_references_recursive(child, source, file_path, scope, references);
                 }
             }
@@ -318,7 +318,7 @@ fn extract_references_recursive(
 
     // Default recursion
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_references_recursive(child, source, file_path, scope, references);
         }
     }
@@ -334,7 +334,7 @@ fn extract_import_reference(
     // import foo, bar, baz
     let source_qn = scope_qn(scope, file_path);
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "dotted_name" {
                 references.push(Reference {
                     source_qualified_name: source_qn.clone(),
@@ -407,7 +407,7 @@ fn extract_class_bases(
     // Look for superclasses in argument_list
     if let Some(superclasses) = node.child_by_field_name("superclasses") {
         for i in 0..superclasses.child_count() {
-            if let Some(child) = superclasses.child(i) {
+            if let Some(child) = superclasses.child(i as u32) {
                 match child.kind() {
                     "identifier" | "attribute" => {
                         let base_name = node_text(child, source);

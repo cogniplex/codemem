@@ -77,7 +77,7 @@ fn extract_symbols_recursive(
                 let mut new_scope = scope.to_vec();
                 new_scope.push(name);
                 for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i) {
+                    if let Some(child) = node.child(i as u32) {
                         extract_symbols_recursive(
                             child, source, file_path, &new_scope, false, symbols,
                         );
@@ -103,7 +103,7 @@ fn extract_symbols_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             // Trait methods are inside a trait, treat as impl-like scope
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, true, symbols,
@@ -123,7 +123,7 @@ fn extract_symbols_recursive(
                 // Recurse into impl body for methods — mark in_impl = true
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, true, symbols,
                             );
@@ -157,7 +157,7 @@ fn extract_symbols_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, false, symbols,
                             );
@@ -172,7 +172,7 @@ fn extract_symbols_recursive(
 
     // Default recursion for nodes we didn't handle specially
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_symbols_recursive(child, source, file_path, scope, in_impl, symbols);
         }
     }
@@ -295,7 +295,7 @@ fn extract_references_recursive(
                 new_scope.push(target.clone());
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -313,7 +313,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -330,7 +330,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -347,7 +347,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -362,7 +362,7 @@ fn extract_references_recursive(
 
     // Default recursion
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_references_recursive(child, source, file_path, scope, references);
         }
     }
@@ -496,7 +496,7 @@ fn build_qualified_name(scope: &[String], name: &str) -> String {
 /// Extract visibility from a node by checking for a `visibility_modifier` child.
 fn extract_visibility(node: Node, source: &[u8]) -> Visibility {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "visibility_modifier" {
                 let text = node_text(child, source);
                 if text.contains("pub(crate)") {
