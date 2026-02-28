@@ -5,7 +5,7 @@
 
 use crossbeam_channel::Receiver;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
-use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+use notify_debouncer_mini::new_debouncer;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -159,27 +159,24 @@ impl FileWatcher {
                         {
                             continue;
                         }
-                        let watch_event = match event.kind {
-                            DebouncedEventKind::Any => {
-                                if path.exists() {
-                                    if let Ok(mut known) = known_files.lock() {
-                                        if known.insert(path.clone()) {
-                                            WatchEvent::FileCreated(path)
-                                        } else {
-                                            WatchEvent::FileChanged(path)
-                                        }
-                                    } else {
-                                        WatchEvent::FileChanged(path)
-                                    }
+                        // Determine event type from filesystem state + known-files
+                        // set rather than the debouncer event kind, which varies
+                        // across platforms (FSEvents on macOS vs inotify on Linux).
+                        let watch_event = if path.exists() {
+                            if let Ok(mut known) = known_files.lock() {
+                                if known.insert(path.clone()) {
+                                    WatchEvent::FileCreated(path)
                                 } else {
-                                    if let Ok(mut known) = known_files.lock() {
-                                        known.remove(&path);
-                                    }
-                                    WatchEvent::FileDeleted(path)
+                                    WatchEvent::FileChanged(path)
                                 }
+                            } else {
+                                WatchEvent::FileChanged(path)
                             }
-                            DebouncedEventKind::AnyContinuous => WatchEvent::FileChanged(path),
-                            _ => WatchEvent::FileChanged(path),
+                        } else {
+                            if let Ok(mut known) = known_files.lock() {
+                                known.remove(&path);
+                            }
+                            WatchEvent::FileDeleted(path)
                         };
                         let _ = event_tx.send(watch_event);
                     }
