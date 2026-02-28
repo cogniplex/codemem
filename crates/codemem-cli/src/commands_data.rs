@@ -31,6 +31,20 @@ pub(crate) fn cmd_serve() -> anyhow::Result<()> {
     };
 
     let server = codemem_mcp::McpServer::new(Box::new(storage), vector, graph, embeddings);
+
+    // Auto-start background file watcher unless opted out
+    if std::env::var("CODEMEM_NO_WATCH").as_deref() != Ok("1") {
+        if let Ok(cwd) = std::env::current_dir() {
+            tracing::info!("Background file watcher started for {}", cwd.display());
+            let db_path_clone = db_path.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = run_watcher_loop(&db_path_clone, &cwd, true) {
+                    tracing::warn!("Background file watcher stopped: {e}");
+                }
+            });
+        }
+    }
+
     tracing::info!(
         "Codemem MCP server ready (stdio mode, db: {})",
         db_path.display()
@@ -190,8 +204,24 @@ pub(crate) fn cmd_watch(watch_dir: &std::path::Path) -> anyhow::Result<()> {
         anyhow::bail!("Not a directory: {}", watch_dir.display());
     }
 
-    let db_path = crate::codemem_db_path();
-    let storage = codemem_storage::Storage::open(&db_path)?;
+    println!(
+        "Watching {} for file changes (Ctrl+C to stop)",
+        watch_dir.display()
+    );
+    run_watcher_loop(&crate::codemem_db_path(), watch_dir, false)
+}
+
+/// Core watch loop used by both `cmd_watch` (foreground) and `cmd_serve` (background).
+///
+/// Opens its own `Storage`, `HnswIndex`, and embedding provider so it can run
+/// independently from the MCP server without lock contention.
+/// When `quiet` is true, uses `tracing::info!` instead of `println!`.
+pub(crate) fn run_watcher_loop(
+    db_path: &std::path::Path,
+    watch_dir: &std::path::Path,
+    quiet: bool,
+) -> anyhow::Result<()> {
+    let storage = codemem_storage::Storage::open(db_path)?;
 
     let emb_service = codemem_embeddings::from_env().ok();
 
@@ -202,10 +232,6 @@ pub(crate) fn cmd_watch(watch_dir: &std::path::Path) -> anyhow::Result<()> {
     }
 
     let watcher = codemem_watch::FileWatcher::new(watch_dir)?;
-    println!(
-        "Watching {} for file changes (Ctrl+C to stop)",
-        watch_dir.display()
-    );
 
     let receiver = watcher.receiver();
     let mut changes_since_save = 0usize;
@@ -226,7 +252,11 @@ pub(crate) fn cmd_watch(watch_dir: &std::path::Path) -> anyhow::Result<()> {
 
         match &event {
             codemem_watch::WatchEvent::FileDeleted(_) => {
-                println!("  [deleted] {relative}");
+                if quiet {
+                    tracing::info!("[deleted] {relative}");
+                } else {
+                    println!("  [deleted] {relative}");
+                }
             }
             _ => {
                 // Index the changed file
@@ -284,7 +314,11 @@ pub(crate) fn cmd_watch(watch_dir: &std::path::Path) -> anyhow::Result<()> {
                                     changes_since_save += 1;
                                 }
                             }
-                            println!("  [indexed] {relative} ({language})");
+                            if quiet {
+                                tracing::info!("[indexed] {relative} ({language})");
+                            } else {
+                                println!("  [indexed] {relative} ({language})");
+                            }
                         }
                         Err(codemem_core::CodememError::Duplicate(_)) => {
                             // Skip duplicate content
