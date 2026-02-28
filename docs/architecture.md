@@ -74,8 +74,8 @@ graph BT
     core[codemem-core]
     storage[codemem-storage] --> core
     vector[codemem-vector] --> core
-    graph[codemem-graph] --> core
-    graph --> storage
+    graphCrate[codemem-graph] --> core
+    graphCrate --> storage
     embeddings[codemem-embeddings] --> core
     index[codemem-index] --> core
     index --> storage
@@ -87,13 +87,13 @@ graph BT
     mcp[codemem-mcp] --> core
     mcp --> storage
     mcp --> vector
-    mcp --> graph
+    mcp --> graphCrate
     mcp --> embeddings
     mcp --> index
     cli[codemem-cli] --> core
     cli --> storage
     cli --> vector
-    cli --> graph
+    cli --> graphCrate
     cli --> embeddings
     cli --> mcp
     cli --> hooks
@@ -105,7 +105,7 @@ graph BT
     bench[codemem-bench] --> core
     bench --> storage
     bench --> vector
-    bench --> graph
+    bench --> graphCrate
     bench --> embeddings
 ```
 

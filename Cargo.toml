@@ -29,17 +29,17 @@ rust-version = "1.75"
 
 [workspace.dependencies]
 # Internal crates
-codemem-core = { path = "crates/codemem-core" }
-codemem-storage = { path = "crates/codemem-storage" }
-codemem-vector = { path = "crates/codemem-vector" }
-codemem-graph = { path = "crates/codemem-graph" }
-codemem-embeddings = { path = "crates/codemem-embeddings" }
-codemem-mcp = { path = "crates/codemem-mcp" }
-codemem-hooks = { path = "crates/codemem-hooks" }
-codemem-cli = { path = "crates/codemem-cli" }
-codemem-viz = { path = "crates/codemem-viz" }
-codemem-index = { path = "crates/codemem-index" }
-codemem-watch = { path = "crates/codemem-watch" }
+codemem-core = { path = "crates/codemem-core", version = "0.1.0" }
+codemem-storage = { path = "crates/codemem-storage", version = "0.1.0" }
+codemem-vector = { path = "crates/codemem-vector", version = "0.1.0" }
+codemem-graph = { path = "crates/codemem-graph", version = "0.1.0" }
+codemem-embeddings = { path = "crates/codemem-embeddings", version = "0.1.0" }
+codemem-mcp = { path = "crates/codemem-mcp", version = "0.1.0" }
+codemem-hooks = { path = "crates/codemem-hooks", version = "0.1.0" }
+codemem-cli = { path = "crates/codemem-cli", version = "0.1.0" }
+codemem-viz = { path = "crates/codemem-viz", version = "0.1.0" }
+codemem-index = { path = "crates/codemem-index", version = "0.1.0" }
+codemem-watch = { path = "crates/codemem-watch", version = "0.1.0" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
