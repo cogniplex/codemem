@@ -152,7 +152,10 @@ mod tests {
 
     #[test]
     fn load_or_default_returns_default_when_no_file() {
-        let config = CodememConfig::load_or_default();
+        // Use a path that doesn't exist to test the default fallback
+        let nonexistent = std::path::PathBuf::from("/tmp/codemem_test_no_exist/config.toml");
+        let _ = std::fs::remove_file(&nonexistent); // ensure it doesn't exist
+        let config = CodememConfig::load(&nonexistent).unwrap_or_default();
         assert!((config.scoring.vector_similarity - 0.25).abs() < f64::EPSILON);
     }
 

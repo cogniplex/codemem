@@ -140,6 +140,8 @@ fn consolidate_creative(storage: &codemem_storage::Storage) -> anyhow::Result<us
                 weight: 1.0,
                 properties: std::collections::HashMap::new(),
                 created_at: now,
+                valid_from: None,
+                valid_to: None,
             });
 
             new_connections += 1;

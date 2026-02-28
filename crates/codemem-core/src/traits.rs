@@ -319,6 +319,26 @@ pub trait StorageBackend: Send + Sync {
     /// Get edges filtered by namespace (edges where both src and dst nodes have the given namespace).
     fn graph_edges_for_namespace(&self, namespace: &str) -> Result<Vec<Edge>, CodememError>;
 
+    // ── Temporal Edge Queries ───────────────────────────────────────
+
+    /// Get edges active at a specific timestamp. Default: no temporal filtering.
+    fn get_edges_at_time(&self, node_id: &str, _timestamp: i64) -> Result<Vec<Edge>, CodememError> {
+        self.get_edges_for_node(node_id)
+    }
+
+    /// Fetch stale memories with access metadata for power-law decay.
+    /// Returns (id, importance, access_count, last_accessed_at).
+    fn get_stale_memories_for_decay(
+        &self,
+        threshold_ts: i64,
+    ) -> Result<Vec<(String, f64, u32, i64)>, CodememError>;
+
+    /// Batch-update importance values. Returns count of updated rows.
+    fn batch_update_importance(&self, updates: &[(String, f64)]) -> Result<usize, CodememError>;
+
+    /// Total session count, optionally filtered by namespace.
+    fn session_count(&self, namespace: Option<&str>) -> Result<usize, CodememError>;
+
     // ── File Hash Tracking ──────────────────────────────────────────
 
     /// Load all file hashes for incremental indexing. Returns path -> hash map.

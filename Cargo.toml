@@ -16,7 +16,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["Codemem Contributors"]
 license = "Apache-2.0"
@@ -29,17 +29,17 @@ rust-version = "1.75"
 
 [workspace.dependencies]
 # Internal crates
-codemem-core = { path = "crates/codemem-core", version = "0.4.0" }
-codemem-storage = { path = "crates/codemem-storage", version = "0.4.0" }
-codemem-vector = { path = "crates/codemem-vector", version = "0.4.0" }
-codemem-graph = { path = "crates/codemem-graph", version = "0.4.0" }
-codemem-embeddings = { path = "crates/codemem-embeddings", version = "0.4.0" }
-codemem-mcp = { path = "crates/codemem-mcp", version = "0.4.0" }
-codemem-hooks = { path = "crates/codemem-hooks", version = "0.4.0" }
-codemem-cli = { path = "crates/codemem-cli", version = "0.4.0" }
-codemem-viz = { path = "crates/codemem-viz", version = "0.4.0" }
-codemem-index = { path = "crates/codemem-index", version = "0.4.0" }
-codemem-watch = { path = "crates/codemem-watch", version = "0.4.0" }
+codemem-core = { path = "crates/codemem-core", version = "0.5.0" }
+codemem-storage = { path = "crates/codemem-storage", version = "0.5.0" }
+codemem-vector = { path = "crates/codemem-vector", version = "0.5.0" }
+codemem-graph = { path = "crates/codemem-graph", version = "0.5.0" }
+codemem-embeddings = { path = "crates/codemem-embeddings", version = "0.5.0" }
+codemem-mcp = { path = "crates/codemem-mcp", version = "0.5.0" }
+codemem-hooks = { path = "crates/codemem-hooks", version = "0.5.0" }
+codemem-cli = { path = "crates/codemem-cli", version = "0.5.0" }
+codemem-viz = { path = "crates/codemem-viz", version = "0.5.0" }
+codemem-index = { path = "crates/codemem-index", version = "0.5.0" }
+codemem-watch = { path = "crates/codemem-watch", version = "0.5.0" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

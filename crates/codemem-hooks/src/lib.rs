@@ -153,6 +153,8 @@ pub fn materialize_edges(pending: &[PendingEdge], memory_id: &str) -> Vec<codeme
                     weight: 1.0,
                     properties: props,
                     created_at: now,
+                    valid_from: None,
+                    valid_to: None,
                 }
             } else {
                 let edge_id = format!("{}-{}-{}", pe.src_id, pe.relationship, pe.dst_id);
@@ -164,6 +166,8 @@ pub fn materialize_edges(pending: &[PendingEdge], memory_id: &str) -> Vec<codeme
                     weight: 1.0,
                     properties: HashMap::new(),
                     created_at: now,
+                    valid_from: None,
+                    valid_to: None,
                 }
             }
         })

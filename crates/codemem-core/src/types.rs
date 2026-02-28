@@ -261,6 +261,10 @@ pub struct Edge {
     pub weight: f64,
     pub properties: HashMap<String, serde_json::Value>,
     pub created_at: DateTime<Utc>,
+    /// When this edge becomes valid (None = always valid).
+    pub valid_from: Option<DateTime<Utc>>,
+    /// When this edge expires (None = never expires).
+    pub valid_to: Option<DateTime<Utc>>,
 }
 
 /// A graph node in the knowledge graph.

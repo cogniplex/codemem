@@ -26,6 +26,8 @@ fn make_edge(src: usize, dst: usize, edge_id: usize) -> Edge {
         weight: 1.0,
         properties: HashMap::new(),
         created_at: chrono::Utc::now(),
+        valid_from: None,
+        valid_to: None,
     }
 }
 

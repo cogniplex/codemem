@@ -316,6 +316,8 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
             weight: 1.0,
             properties: std::collections::HashMap::new(),
             created_at: now,
+            valid_from: None,
+            valid_to: None,
         })
         .collect();
 

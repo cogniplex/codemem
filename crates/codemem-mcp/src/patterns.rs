@@ -5,21 +5,50 @@
 
 use codemem_core::{CodememError, DetectedPattern, PatternType, StorageBackend};
 
+/// Compute log-scaled confidence from frequency, total sessions, and a recency factor.
+///
+/// Uses `ln(frequency) / ln(total_sessions)` as a base, scaled by `recency_factor`.
+/// Returns 0.0 for zero inputs, clamped to [0.0, 1.0].
+fn compute_confidence(frequency: usize, total_sessions: usize, recency_factor: f64) -> f64 {
+    if frequency == 0 || total_sessions == 0 {
+        return 0.0;
+    }
+    let base = (frequency as f64).ln() / (total_sessions as f64).ln().max(1.0);
+    (base * recency_factor).min(1.0)
+}
+
 /// Detect all patterns in the memory store.
 ///
 /// Runs multiple detectors and returns all patterns found, sorted by confidence
 /// descending. The `min_frequency` parameter controls the threshold for how many
-/// times a pattern must appear before it is flagged.
+/// times a pattern must appear before it is flagged. `total_sessions` is used for
+/// log-scaled confidence computation.
 pub fn detect_patterns(
     storage: &dyn StorageBackend,
     namespace: Option<&str>,
     min_frequency: usize,
+    total_sessions: usize,
 ) -> Result<Vec<DetectedPattern>, CodememError> {
     let mut patterns = Vec::new();
 
-    patterns.extend(detect_repeated_searches(storage, namespace, min_frequency)?);
-    patterns.extend(detect_file_hotspots(storage, namespace, min_frequency)?);
-    patterns.extend(detect_decision_chains(storage, namespace, min_frequency)?);
+    patterns.extend(detect_repeated_searches(
+        storage,
+        namespace,
+        min_frequency,
+        total_sessions,
+    )?);
+    patterns.extend(detect_file_hotspots(
+        storage,
+        namespace,
+        min_frequency,
+        total_sessions,
+    )?);
+    patterns.extend(detect_decision_chains(
+        storage,
+        namespace,
+        min_frequency,
+        total_sessions,
+    )?);
     patterns.extend(detect_tool_preferences(storage, namespace)?);
 
     // Sort by confidence descending
@@ -37,6 +66,7 @@ fn detect_repeated_searches(
     storage: &dyn StorageBackend,
     namespace: Option<&str>,
     min_frequency: usize,
+    total_sessions: usize,
 ) -> Result<Vec<DetectedPattern>, CodememError> {
     let results = storage.get_repeated_searches(min_frequency, namespace)?;
 
@@ -50,7 +80,7 @@ fn detect_repeated_searches(
             ),
             frequency: count,
             related_memories: memory_ids,
-            confidence: (count as f64 / 10.0).min(1.0),
+            confidence: compute_confidence(count, total_sessions, 1.0),
         })
         .collect())
 }
@@ -60,6 +90,7 @@ fn detect_file_hotspots(
     storage: &dyn StorageBackend,
     namespace: Option<&str>,
     min_frequency: usize,
+    total_sessions: usize,
 ) -> Result<Vec<DetectedPattern>, CodememError> {
     let results = storage.get_file_hotspots(min_frequency, namespace)?;
 
@@ -73,7 +104,7 @@ fn detect_file_hotspots(
             ),
             frequency: count,
             related_memories: memory_ids,
-            confidence: (count as f64 / 10.0).min(1.0),
+            confidence: compute_confidence(count, total_sessions, 1.0),
         })
         .collect())
 }
@@ -83,6 +114,7 @@ fn detect_decision_chains(
     storage: &dyn StorageBackend,
     namespace: Option<&str>,
     min_frequency: usize,
+    total_sessions: usize,
 ) -> Result<Vec<DetectedPattern>, CodememError> {
     let results = storage.get_decision_chains(min_frequency, namespace)?;
 
@@ -96,7 +128,7 @@ fn detect_decision_chains(
             ),
             frequency: count,
             related_memories: memory_ids,
-            confidence: (count as f64 / 8.0).min(1.0),
+            confidence: compute_confidence(count, total_sessions, 1.0),
         })
         .collect())
 }
@@ -260,7 +292,7 @@ mod tests {
     #[test]
     fn detect_patterns_empty_db() {
         let storage = Storage::open_in_memory().unwrap();
-        let patterns = detect_patterns(&storage, None, 2).unwrap();
+        let patterns = detect_patterns(&storage, None, 2, 10).unwrap();
         assert!(patterns.is_empty());
     }
 
@@ -282,7 +314,7 @@ mod tests {
         let mem = make_memory("glob for rs files", "Glob", vec![("pattern", "*.rs")]);
         storage.insert_memory(&mem).unwrap();
 
-        let patterns = detect_patterns(&storage, None, 2).unwrap();
+        let patterns = detect_patterns(&storage, None, 2, 10).unwrap();
         let searches: Vec<_> = patterns
             .iter()
             .filter(|p| p.pattern_type == PatternType::RepeatedSearch)
@@ -311,7 +343,7 @@ mod tests {
         let mem = make_memory("read lib.rs", "Read", vec![("file_path", "src/lib.rs")]);
         storage.insert_memory(&mem).unwrap();
 
-        let patterns = detect_patterns(&storage, None, 3).unwrap();
+        let patterns = detect_patterns(&storage, None, 3, 10).unwrap();
         let hotspots: Vec<_> = patterns
             .iter()
             .filter(|p| p.pattern_type == PatternType::FileHotspot)
@@ -336,7 +368,7 @@ mod tests {
             storage.insert_memory(&mem).unwrap();
         }
 
-        let patterns = detect_patterns(&storage, None, 2).unwrap();
+        let patterns = detect_patterns(&storage, None, 2, 10).unwrap();
         let chains: Vec<_> = patterns
             .iter()
             .filter(|p| p.pattern_type == PatternType::DecisionChain)
@@ -360,7 +392,7 @@ mod tests {
             storage.insert_memory(&mem).unwrap();
         }
 
-        let patterns = detect_patterns(&storage, None, 1).unwrap();
+        let patterns = detect_patterns(&storage, None, 1, 10).unwrap();
         let prefs: Vec<_> = patterns
             .iter()
             .filter(|p| p.pattern_type == PatternType::ToolPreference)
@@ -415,12 +447,34 @@ mod tests {
         let mem = make_memory("read file", "Read", vec![]);
         storage.insert_memory(&mem).unwrap();
 
-        let patterns = detect_patterns(&storage, None, 1).unwrap();
+        let patterns = detect_patterns(&storage, None, 1, 10).unwrap();
         let prefs: Vec<_> = patterns
             .iter()
             .filter(|p| p.pattern_type == PatternType::ToolPreference)
             .collect();
 
         assert!(prefs.is_empty());
+    }
+
+    #[test]
+    fn compute_confidence_log_scaled() {
+        // With frequency=10, total_sessions=100: ln(10)/ln(100) ≈ 0.5
+        let c = compute_confidence(10, 100, 1.0);
+        assert!((c - 0.5).abs() < 0.01, "expected ~0.5, got {c}");
+
+        // Recency factor scales the result
+        let c2 = compute_confidence(10, 100, 0.5);
+        assert!((c2 - 0.25).abs() < 0.01, "expected ~0.25, got {c2}");
+
+        // Clamped to 1.0
+        let c3 = compute_confidence(100, 10, 1.0);
+        assert_eq!(c3, 1.0);
+    }
+
+    #[test]
+    fn compute_confidence_zero_inputs() {
+        assert_eq!(compute_confidence(0, 10, 1.0), 0.0);
+        assert_eq!(compute_confidence(5, 0, 1.0), 0.0);
+        assert_eq!(compute_confidence(0, 0, 1.0), 0.0);
     }
 }

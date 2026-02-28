@@ -171,8 +171,8 @@ impl Storage {
         let props_json = serde_json::to_string(&edge.properties)?;
 
         conn.execute(
-            "INSERT OR REPLACE INTO graph_edges (id, src, dst, relationship, weight, properties, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT OR REPLACE INTO graph_edges (id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 edge.id,
                 edge.src,
@@ -181,6 +181,8 @@ impl Storage {
                 edge.weight,
                 props_json,
                 edge.created_at.timestamp(),
+                edge.valid_from.map(|dt| dt.timestamp()),
+                edge.valid_to.map(|dt| dt.timestamp()),
             ],
         )
         .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -193,7 +195,7 @@ impl Storage {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                "SELECT id, src, dst, relationship, weight, properties, created_at FROM graph_edges WHERE src = ?1 OR dst = ?1",
+                "SELECT id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to FROM graph_edges WHERE src = ?1 OR dst = ?1",
             )
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
@@ -202,6 +204,8 @@ impl Storage {
                 let rel_str: String = row.get(3)?;
                 let props_str: String = row.get(5)?;
                 let created_ts: i64 = row.get(6)?;
+                let valid_from_ts: Option<i64> = row.get(7)?;
+                let valid_to_ts: Option<i64> = row.get(8)?;
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -210,26 +214,48 @@ impl Storage {
                     row.get::<_, f64>(4)?,
                     props_str,
                     created_ts,
+                    valid_from_ts,
+                    valid_to_ts,
                 ))
             })
             .map_err(|e| CodememError::Storage(e.to_string()))?
             .filter_map(|r| r.ok())
-            .filter_map(|(id, src, dst, rel_str, weight, props_str, created_ts)| {
-                let relationship: RelationshipType = rel_str.parse().ok()?;
-                let properties: HashMap<String, serde_json::Value> =
-                    serde_json::from_str(&props_str).unwrap_or_default();
-                let created_at =
-                    chrono::DateTime::from_timestamp(created_ts, 0)?.with_timezone(&chrono::Utc);
-                Some(Edge {
+            .filter_map(
+                |(
                     id,
                     src,
                     dst,
-                    relationship,
+                    rel_str,
                     weight,
-                    properties,
-                    created_at,
-                })
-            })
+                    props_str,
+                    created_ts,
+                    valid_from_ts,
+                    valid_to_ts,
+                )| {
+                    let relationship: RelationshipType = rel_str.parse().ok()?;
+                    let properties: HashMap<String, serde_json::Value> =
+                        serde_json::from_str(&props_str).unwrap_or_default();
+                    let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?
+                        .with_timezone(&chrono::Utc);
+                    let valid_from = valid_from_ts
+                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                        .map(|dt| dt.with_timezone(&chrono::Utc));
+                    let valid_to = valid_to_ts
+                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                        .map(|dt| dt.with_timezone(&chrono::Utc));
+                    Some(Edge {
+                        id,
+                        src,
+                        dst,
+                        relationship,
+                        weight,
+                        properties,
+                        created_at,
+                        valid_from,
+                        valid_to,
+                    })
+                },
+            )
             .collect();
 
         Ok(edges)
@@ -239,7 +265,7 @@ impl Storage {
     pub fn all_graph_edges(&self) -> Result<Vec<Edge>, CodememError> {
         let conn = self.conn();
         let mut stmt = conn
-            .prepare("SELECT id, src, dst, relationship, weight, properties, created_at FROM graph_edges")
+            .prepare("SELECT id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to FROM graph_edges")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         let edges = stmt
@@ -247,6 +273,8 @@ impl Storage {
                 let rel_str: String = row.get(3)?;
                 let props_str: String = row.get(5)?;
                 let created_ts: i64 = row.get(6)?;
+                let valid_from_ts: Option<i64> = row.get(7)?;
+                let valid_to_ts: Option<i64> = row.get(8)?;
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -255,26 +283,48 @@ impl Storage {
                     row.get::<_, f64>(4)?,
                     props_str,
                     created_ts,
+                    valid_from_ts,
+                    valid_to_ts,
                 ))
             })
             .map_err(|e| CodememError::Storage(e.to_string()))?
             .filter_map(|r| r.ok())
-            .filter_map(|(id, src, dst, rel_str, weight, props_str, created_ts)| {
-                let relationship: RelationshipType = rel_str.parse().ok()?;
-                let properties: HashMap<String, serde_json::Value> =
-                    serde_json::from_str(&props_str).unwrap_or_default();
-                let created_at =
-                    chrono::DateTime::from_timestamp(created_ts, 0)?.with_timezone(&chrono::Utc);
-                Some(Edge {
+            .filter_map(
+                |(
                     id,
                     src,
                     dst,
-                    relationship,
+                    rel_str,
                     weight,
-                    properties,
-                    created_at,
-                })
-            })
+                    props_str,
+                    created_ts,
+                    valid_from_ts,
+                    valid_to_ts,
+                )| {
+                    let relationship: RelationshipType = rel_str.parse().ok()?;
+                    let properties: HashMap<String, serde_json::Value> =
+                        serde_json::from_str(&props_str).unwrap_or_default();
+                    let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?
+                        .with_timezone(&chrono::Utc);
+                    let valid_from = valid_from_ts
+                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                        .map(|dt| dt.with_timezone(&chrono::Utc));
+                    let valid_to = valid_to_ts
+                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                        .map(|dt| dt.with_timezone(&chrono::Utc));
+                    Some(Edge {
+                        id,
+                        src,
+                        dst,
+                        relationship,
+                        weight,
+                        properties,
+                        created_at,
+                        valid_from,
+                        valid_to,
+                    })
+                },
+            )
             .collect();
 
         Ok(edges)
@@ -297,7 +347,7 @@ impl Storage {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                "SELECT e.id, e.src, e.dst, e.relationship, e.weight, e.properties, e.created_at
+                "SELECT e.id, e.src, e.dst, e.relationship, e.weight, e.properties, e.created_at, e.valid_from, e.valid_to
                  FROM graph_edges e
                  INNER JOIN graph_nodes gs ON e.src = gs.id
                  INNER JOIN graph_nodes gd ON e.dst = gd.id
@@ -310,6 +360,8 @@ impl Storage {
                 let rel_str: String = row.get(3)?;
                 let props_str: String = row.get(5)?;
                 let created_ts: i64 = row.get(6)?;
+                let valid_from_ts: Option<i64> = row.get(7)?;
+                let valid_to_ts: Option<i64> = row.get(8)?;
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -318,26 +370,48 @@ impl Storage {
                     row.get::<_, f64>(4)?,
                     props_str,
                     created_ts,
+                    valid_from_ts,
+                    valid_to_ts,
                 ))
             })
             .map_err(|e| CodememError::Storage(e.to_string()))?
             .filter_map(|r| r.ok())
-            .filter_map(|(id, src, dst, rel_str, weight, props_str, created_ts)| {
-                let relationship: RelationshipType = rel_str.parse().ok()?;
-                let properties: HashMap<String, serde_json::Value> =
-                    serde_json::from_str(&props_str).unwrap_or_default();
-                let created_at =
-                    chrono::DateTime::from_timestamp(created_ts, 0)?.with_timezone(&chrono::Utc);
-                Some(Edge {
+            .filter_map(
+                |(
                     id,
                     src,
                     dst,
-                    relationship,
+                    rel_str,
                     weight,
-                    properties,
-                    created_at,
-                })
-            })
+                    props_str,
+                    created_ts,
+                    valid_from_ts,
+                    valid_to_ts,
+                )| {
+                    let relationship: RelationshipType = rel_str.parse().ok()?;
+                    let properties: HashMap<String, serde_json::Value> =
+                        serde_json::from_str(&props_str).unwrap_or_default();
+                    let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?
+                        .with_timezone(&chrono::Utc);
+                    let valid_from = valid_from_ts
+                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                        .map(|dt| dt.with_timezone(&chrono::Utc));
+                    let valid_to = valid_to_ts
+                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                        .map(|dt| dt.with_timezone(&chrono::Utc));
+                    Some(Edge {
+                        id,
+                        src,
+                        dst,
+                        relationship,
+                        weight,
+                        properties,
+                        created_at,
+                        valid_from,
+                        valid_to,
+                    })
+                },
+            )
             .collect();
 
         Ok(edges)

@@ -222,6 +222,8 @@ impl McpServer {
                 dst: format!("sym:{}", edge.target_qualified_name),
                 relationship: edge.relationship,
                 weight: 1.0,
+                valid_from: None,
+                valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
             };
@@ -747,6 +749,13 @@ impl McpServer {
             Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
         }
 
+        // Persist scoring weights to config file
+        let mut config = codemem_core::CodememConfig::load_or_default();
+        config.scoring = normalized.clone();
+        if let Err(e) = config.save(&codemem_core::CodememConfig::default_path()) {
+            tracing::warn!("Failed to persist scoring weights: {e}");
+        }
+
         let response = json!({
             "updated": true,
             "weights": {
@@ -1063,6 +1072,8 @@ mod tests {
                 weight: 1.0,
                 properties: HashMap::new(),
                 created_at: chrono::Utc::now(),
+                valid_from: None,
+                valid_to: None,
             };
             graph.add_edge(edge).unwrap();
         }
@@ -1107,6 +1118,8 @@ mod tests {
             weight: 1.0,
             properties: HashMap::new(),
             created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
         };
         let edge2 = Edge {
             id: "e2".to_string(),
@@ -1116,6 +1129,8 @@ mod tests {
             weight: 1.0,
             properties: HashMap::new(),
             created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
         };
         {
             let mut graph = server.graph.lock().unwrap();

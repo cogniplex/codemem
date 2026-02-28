@@ -1,13 +1,14 @@
 //! codemem-mcp: MCP server for Codemem (JSON-RPC 2.0 over stdio).
 //!
-//! Implements 33 tools: store_memory, recall_memory, update_memory,
+//! Implements 37 tools: store_memory, recall_memory, update_memory,
 //! delete_memory, associate_memories, graph_traverse, codemem_stats, codemem_health,
 //! index_codebase, search_symbols, get_symbol_info, get_dependencies, get_impact,
 //! get_clusters, get_cross_repo, get_pagerank, search_code, set_scoring_weights,
 //! export_memories, import_memories, recall_with_expansion, list_namespaces,
 //! namespace_stats, delete_namespace, consolidate_decay, consolidate_creative,
 //! consolidate_cluster, consolidate_forget, consolidation_status,
-//! recall_with_impact, get_decision_chain, detect_patterns, pattern_insights.
+//! recall_with_impact, get_decision_chain, detect_patterns, pattern_insights,
+//! refine_memory, split_memory, merge_memories, consolidate_summarize.
 //!
 //! Transport: Newline-delimited JSON-RPC messages over stdio.
 //! All logging goes to stderr; stdout is reserved for JSON-RPC only.
@@ -24,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 
 pub mod bm25;
+pub(crate) mod compress;
 pub mod patterns;
 pub mod scoring;
 pub mod tools_consolidation;
@@ -62,7 +64,7 @@ pub struct McpServer {
     /// BM25 index for code-aware token overlap scoring.
     /// Updated incrementally on store/update/delete operations.
     pub(crate) bm25_index: Mutex<bm25::Bm25Index>,
-    /// Loaded configuration (used by scoring_weights initialization and future features).
+    /// Loaded configuration (used by scoring_weights initialization and persistence).
     #[allow(dead_code)]
     pub(crate) config: codemem_core::CodememConfig,
 }
@@ -476,6 +478,10 @@ impl McpServer {
             "import_memories" => self.tool_import_memories(args),
             "detect_patterns" => self.tool_detect_patterns(args),
             "pattern_insights" => self.tool_pattern_insights(args),
+            "refine_memory" => self.tool_refine_memory(args),
+            "split_memory" => self.tool_split_memory(args),
+            "merge_memories" => self.tool_merge_memories(args),
+            "consolidate_summarize" => self.tool_consolidate_summarize(args),
             _ => ToolResult::tool_error(format!("Unknown tool: {name}")),
         }
     }
@@ -860,7 +866,9 @@ fn tool_definitions() -> Vec<Value> {
             "description": "Run cluster consolidation: group memories by content_hash prefix, keep highest-importance per group, delete duplicates",
             "inputSchema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "similarity_threshold": { "type": "number", "minimum": 0.5, "maximum": 1.0, "default": 0.92, "description": "Cosine similarity threshold for semantic deduplication (default: 0.92)" }
+                }
             }
         }),
         json!({
@@ -919,6 +927,79 @@ fn tool_definitions() -> Vec<Value> {
                 }
             }
         }),
+        // ── Memory Refinement & Merge Tools ──────────────────────────────────
+        json!({
+            "name": "refine_memory",
+            "description": "Refine an existing memory: creates a new version linked via EVOLVED_INTO edge, preserving the original for provenance tracking",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "ID of the memory to refine" },
+                    "content": { "type": "string", "description": "Updated content (optional, inherits from original)" },
+                    "importance": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                    "tags": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["id"]
+            }
+        }),
+        json!({
+            "name": "split_memory",
+            "description": "Split a memory into multiple parts, each linked to the original via PART_OF edges for provenance tracking",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "ID of the memory to split" },
+                    "parts": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": { "type": "string" },
+                                "tags": { "type": "array", "items": { "type": "string" } },
+                                "importance": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+                            },
+                            "required": ["content"]
+                        },
+                        "description": "Array of parts to create from the source memory"
+                    }
+                },
+                "required": ["id", "parts"]
+            }
+        }),
+        json!({
+            "name": "merge_memories",
+            "description": "Merge multiple memories into a single summary memory linked via SUMMARIZES edges for provenance tracking",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_ids": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 2,
+                        "description": "IDs of memories to merge (minimum 2)"
+                    },
+                    "content": { "type": "string", "description": "Content for the merged summary memory" },
+                    "memory_type": {
+                        "type": "string",
+                        "enum": ["decision", "pattern", "preference", "style", "habit", "insight", "context"],
+                        "description": "Type for the merged memory (default: insight)"
+                    },
+                    "importance": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.7 },
+                    "tags": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["source_ids", "content"]
+            }
+        }),
+        json!({
+            "name": "consolidate_summarize",
+            "description": "LLM-powered consolidation: find connected components, summarize large clusters into Insight memories linked via SUMMARIZES edges. Requires CODEMEM_COMPRESS_PROVIDER env var.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cluster_size": { "type": "integer", "minimum": 2, "default": 5, "description": "Minimum cluster size to summarize (default: 5)" }
+                }
+            }
+        }),
     ]
 }
 
@@ -942,12 +1023,12 @@ mod tests {
     }
 
     #[test]
-    fn handle_tools_list_returns_33_tools() {
+    fn handle_tools_list_returns_37_tools() {
         let server = test_server();
         let resp = server.handle_request("tools/list", None, json!(2));
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 33);
+        assert_eq!(tools.len(), 37);
 
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"store_memory"));
@@ -979,6 +1060,10 @@ mod tests {
         assert!(names.contains(&"get_decision_chain"));
         assert!(names.contains(&"detect_patterns"));
         assert!(names.contains(&"pattern_insights"));
+        assert!(names.contains(&"refine_memory"));
+        assert!(names.contains(&"split_memory"));
+        assert!(names.contains(&"merge_memories"));
+        assert!(names.contains(&"consolidate_summarize"));
     }
 
     #[test]

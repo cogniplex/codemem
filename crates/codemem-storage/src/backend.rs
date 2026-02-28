@@ -455,8 +455,8 @@ impl StorageBackend for Storage {
             let props_json =
                 serde_json::to_string(&edge.properties).unwrap_or_else(|_| "{}".to_string());
             tx.execute(
-                "INSERT OR REPLACE INTO graph_edges (id, src, dst, relationship, weight, properties, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT OR REPLACE INTO graph_edges (id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     edge.id,
                     edge.src,
@@ -465,6 +465,8 @@ impl StorageBackend for Storage {
                     edge.weight,
                     props_json,
                     edge.created_at.timestamp(),
+                    edge.valid_from.map(|dt| dt.timestamp()),
+                    edge.valid_to.map(|dt| dt.timestamp()),
                 ],
             )
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -473,6 +475,148 @@ impl StorageBackend for Storage {
         tx.commit()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
         Ok(())
+    }
+
+    fn get_edges_at_time(&self, node_id: &str, timestamp: i64) -> Result<Vec<Edge>, CodememError> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to
+                 FROM graph_edges
+                 WHERE (src = ?1 OR dst = ?1)
+                   AND (valid_from IS NULL OR valid_from <= ?2)
+                   AND (valid_to IS NULL OR valid_to > ?2)",
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let edges = stmt
+            .query_map(params![node_id, timestamp], |row| {
+                let rel_str: String = row.get(3)?;
+                let props_str: String = row.get(5)?;
+                let created_ts: i64 = row.get(6)?;
+                let valid_from_ts: Option<i64> = row.get(7)?;
+                let valid_to_ts: Option<i64> = row.get(8)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    rel_str,
+                    row.get::<_, f64>(4)?,
+                    props_str,
+                    created_ts,
+                    valid_from_ts,
+                    valid_to_ts,
+                ))
+            })
+            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .filter_map(
+                |(
+                    id,
+                    src,
+                    dst,
+                    rel_str,
+                    weight,
+                    props_str,
+                    created_ts,
+                    valid_from_ts,
+                    valid_to_ts,
+                )| {
+                    let relationship: codemem_core::RelationshipType = rel_str.parse().ok()?;
+                    let properties: std::collections::HashMap<String, serde_json::Value> =
+                        serde_json::from_str(&props_str).unwrap_or_default();
+                    let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?
+                        .with_timezone(&chrono::Utc);
+                    let valid_from = valid_from_ts
+                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                        .map(|dt| dt.with_timezone(&chrono::Utc));
+                    let valid_to = valid_to_ts
+                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                        .map(|dt| dt.with_timezone(&chrono::Utc));
+                    Some(Edge {
+                        id,
+                        src,
+                        dst,
+                        relationship,
+                        weight,
+                        properties,
+                        created_at,
+                        valid_from,
+                        valid_to,
+                    })
+                },
+            )
+            .collect();
+
+        Ok(edges)
+    }
+
+    fn get_stale_memories_for_decay(
+        &self,
+        threshold_ts: i64,
+    ) -> Result<Vec<(String, f64, u32, i64)>, CodememError> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, importance, access_count, last_accessed_at FROM memories WHERE last_accessed_at < ?1",
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![threshold_ts], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })
+            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(rows)
+    }
+
+    fn batch_update_importance(&self, updates: &[(String, f64)]) -> Result<usize, CodememError> {
+        if updates.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn();
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let mut count = 0usize;
+        for (id, importance) in updates {
+            let rows = tx
+                .execute(
+                    "UPDATE memories SET importance = ?1 WHERE id = ?2",
+                    params![importance, id],
+                )
+                .map_err(|e| CodememError::Storage(e.to_string()))?;
+            count += rows;
+        }
+
+        tx.commit()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(count)
+    }
+
+    fn session_count(&self, namespace: Option<&str>) -> Result<usize, CodememError> {
+        let conn = self.conn();
+        let count: i64 = if let Some(ns) = namespace {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sessions WHERE namespace = ?1",
+                params![ns],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?
+        } else {
+            conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+                .map_err(|e| CodememError::Storage(e.to_string()))?
+        };
+        Ok(count as usize)
     }
 
     fn find_unembedded_memories(&self) -> Result<Vec<(String, String)>, CodememError> {

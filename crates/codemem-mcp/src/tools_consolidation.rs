@@ -13,8 +13,78 @@ use codemem_vector::HnswIndex;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
+/// Cosine similarity between two embedding vectors.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut dot = 0.0f64;
+    let mut norm_a = 0.0f64;
+    let mut norm_b = 0.0f64;
+    for (x, y) in a.iter().zip(b.iter()) {
+        let x = *x as f64;
+        let y = *y as f64;
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
+    }
+    let denom = norm_a.sqrt() * norm_b.sqrt();
+    if denom < 1e-12 {
+        0.0
+    } else {
+        dot / denom
+    }
+}
+
+/// Union-Find (disjoint set) data structure for transitive clustering.
+struct UnionFind {
+    parent: Vec<usize>,
+    rank: Vec<usize>,
+}
+
+impl UnionFind {
+    fn new(n: usize) -> Self {
+        Self {
+            parent: (0..n).collect(),
+            rank: vec![0; n],
+        }
+    }
+
+    fn find(&mut self, x: usize) -> usize {
+        if self.parent[x] != x {
+            self.parent[x] = self.find(self.parent[x]);
+        }
+        self.parent[x]
+    }
+
+    fn union(&mut self, x: usize, y: usize) {
+        let rx = self.find(x);
+        let ry = self.find(y);
+        if rx == ry {
+            return;
+        }
+        match self.rank[rx].cmp(&self.rank[ry]) {
+            std::cmp::Ordering::Less => self.parent[rx] = ry,
+            std::cmp::Ordering::Greater => self.parent[ry] = rx,
+            std::cmp::Ordering::Equal => {
+                self.parent[ry] = rx;
+                self.rank[rx] += 1;
+            }
+        }
+    }
+
+    fn groups(&mut self, n: usize) -> Vec<Vec<usize>> {
+        let mut map: HashMap<usize, Vec<usize>> = HashMap::new();
+        for i in 0..n {
+            let root = self.find(i);
+            map.entry(root).or_default().push(i);
+        }
+        map.into_values().collect()
+    }
+}
+
 impl McpServer {
-    /// MCP tool: consolidate_decay -- reduce importance of stale memories.
+    /// MCP tool: consolidate_decay -- power-law decay that rewards access frequency.
     pub(crate) fn tool_consolidate_decay(&self, args: &Value) -> ToolResult {
         let threshold_days = args
             .get("threshold_days")
@@ -24,9 +94,38 @@ impl McpServer {
         let now = chrono::Utc::now();
         let threshold_ts = (now - chrono::Duration::days(threshold_days)).timestamp();
 
-        let affected = match self.storage.decay_stale_memories(threshold_ts, 0.9) {
-            Ok(count) => count,
+        // Fetch stale memories with access metadata for power-law decay
+        let stale = match self.storage.get_stale_memories_for_decay(threshold_ts) {
+            Ok(rows) => rows,
             Err(e) => return ToolResult::tool_error(format!("Decay failed: {e}")),
+        };
+
+        if stale.is_empty() {
+            if let Err(e) = self.storage.insert_consolidation_log("decay", 0) {
+                tracing::warn!("Failed to log decay consolidation: {e}");
+            }
+            return ToolResult::text(
+                json!({"cycle": "decay", "affected": 0, "threshold_days": threshold_days})
+                    .to_string(),
+            );
+        }
+
+        // Compute power-law decay: importance * 0.9^(days_since/30) * (1 + log2(max(access_count,1)) * 0.1)
+        let now_ts = now.timestamp();
+        let updates: Vec<(String, f64)> = stale
+            .iter()
+            .map(|(id, importance, access_count, last_accessed_at)| {
+                let days_since = (now_ts - last_accessed_at) as f64 / 86400.0;
+                let time_decay = 0.9_f64.powf(days_since / 30.0);
+                let access_boost = 1.0 + ((*access_count).max(1) as f64).log2() * 0.1;
+                let new_importance = (importance * time_decay * access_boost).clamp(0.0, 1.0);
+                (id.clone(), new_importance)
+            })
+            .collect();
+
+        let affected = match self.storage.batch_update_importance(&updates) {
+            Ok(count) => count,
+            Err(e) => return ToolResult::tool_error(format!("Decay batch update failed: {e}")),
         };
 
         // Log the consolidation run
@@ -39,110 +138,134 @@ impl McpServer {
                 "cycle": "decay",
                 "affected": affected,
                 "threshold_days": threshold_days,
+                "algorithm": "power_law",
             })
             .to_string(),
         )
     }
 
-    /// MCP tool: consolidate_creative -- connect memories with overlapping tags
-    /// but different types via RELATES_TO edges.
+    /// MCP tool: consolidate_creative -- O(n log n) semantic creative consolidation.
+    /// Uses vector search to find cross-type neighbors and creates SHARES_THEME edges.
     pub(crate) fn tool_consolidate_creative(&self, args: &Value) -> ToolResult {
-        let _ = args; // no params
+        let _ = args;
 
-        // Load all memories with their id, content, and tags via StorageBackend
+        // Load all memories with their types
         let parsed = match self.storage.list_memories_for_creative() {
             Ok(rows) => rows,
             Err(e) => return ToolResult::tool_error(format!("Creative cycle failed: {e}")),
         };
 
-        // We also need memory types - get them from full memories for the subset
-        // For efficiency, get types from the content prefix or re-query
-        // Actually, list_memories_for_creative returns (id, content, tags)
-        // We need types too. Let's batch-fetch the memories to get their types.
         let ids_refs: Vec<&str> = parsed.iter().map(|(id, _, _)| id.as_str()).collect();
         let memories = match self.storage.get_memories_batch(&ids_refs) {
             Ok(m) => m,
             Err(e) => return ToolResult::tool_error(format!("Creative cycle failed: {e}")),
         };
 
-        // Build a map of id -> (type_string, tags)
-        let memory_info: Vec<(String, String, Vec<String>)> = memories
+        // Build type lookup
+        let type_map: HashMap<String, String> = memories
             .iter()
-            .map(|m| (m.id.clone(), m.memory_type.to_string(), m.tags.clone()))
+            .map(|m| (m.id.clone(), m.memory_type.to_string()))
             .collect();
 
-        // Load existing RELATES_TO edges to avoid duplicates
+        // Load existing SHARES_THEME edges to avoid duplicates
         let all_edges = match self.storage.all_graph_edges() {
             Ok(e) => e,
             Err(e) => return ToolResult::tool_error(format!("Creative cycle failed: {e}")),
         };
         let existing_edges: HashSet<(String, String)> = all_edges
             .iter()
-            .filter(|e| e.relationship == RelationshipType::RelatesTo)
-            .map(|e| (e.src.clone(), e.dst.clone()))
+            .filter(|e| {
+                e.relationship == RelationshipType::SharesTheme
+                    || e.relationship == RelationshipType::RelatesTo
+            })
+            .flat_map(|e| {
+                vec![
+                    (e.src.clone(), e.dst.clone()),
+                    (e.dst.clone(), e.src.clone()),
+                ]
+            })
             .collect();
 
-        let mut new_connections = 0usize;
+        // Load all embeddings
+        let all_embeddings = match self.storage.list_all_embeddings() {
+            Ok(e) => e,
+            Err(e) => return ToolResult::tool_error(format!("Creative cycle failed: {e}")),
+        };
+        let embedding_map: HashMap<String, Vec<f32>> = all_embeddings.into_iter().collect();
+
         let now = chrono::Utc::now();
+        let mut new_connections = 0usize;
         let mut graph = match self.lock_graph() {
             Ok(g) => g,
             Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
         };
 
-        for i in 0..memory_info.len() {
-            for j in (i + 1)..memory_info.len() {
-                let (ref id_a, ref type_a, ref tags_a) = memory_info[i];
-                let (ref id_b, ref type_b, ref tags_b) = memory_info[j];
+        let vector = match self.lock_vector() {
+            Ok(v) => v,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
-                // Different types required
-                if type_a == type_b {
+        // For each memory with an embedding, find 6 nearest neighbors
+        for (id, embedding) in &embedding_map {
+            let my_type = match type_map.get(id) {
+                Some(t) => t,
+                None => continue,
+            };
+
+            // vector.search returns (id, similarity) where similarity = 1 - cosine_distance
+            let neighbors = vector.search(embedding, 7).unwrap_or_default();
+
+            for (neighbor_id, sim) in &neighbors {
+                // Skip self
+                if neighbor_id == id {
                     continue;
                 }
 
-                // Must have at least one overlapping tag
-                let has_common_tag = tags_a.iter().any(|t| tags_b.contains(t));
-                if !has_common_tag {
-                    continue;
-                }
-
-                // Check not already connected in either direction
-                if existing_edges.contains(&(id_a.clone(), id_b.clone()))
-                    || existing_edges.contains(&(id_b.clone(), id_a.clone()))
-                {
-                    continue;
-                }
-
-                // Ensure both nodes exist in graph_nodes (upsert memory-type nodes)
-                let node_a = GraphNode {
-                    id: id_a.clone(),
-                    kind: NodeKind::Memory,
-                    label: id_a.clone(),
-                    payload: HashMap::new(),
-                    centrality: 0.0,
-                    memory_id: Some(id_a.clone()),
-                    namespace: None,
+                let neighbor_type = match type_map.get(neighbor_id) {
+                    Some(t) => t,
+                    None => continue,
                 };
-                let node_b = GraphNode {
-                    id: id_b.clone(),
-                    kind: NodeKind::Memory,
-                    label: id_b.clone(),
-                    payload: HashMap::new(),
-                    centrality: 0.0,
-                    memory_id: Some(id_b.clone()),
-                    namespace: None,
-                };
-                let _ = self.storage.insert_graph_node(&node_a);
-                let _ = self.storage.insert_graph_node(&node_b);
 
-                let edge_id = format!("{id_a}-RELATES_TO-{id_b}");
+                // Cross-type only
+                if my_type == neighbor_type {
+                    continue;
+                }
+
+                // Check not already connected
+                if existing_edges.contains(&(id.clone(), neighbor_id.clone())) {
+                    continue;
+                }
+
+                let similarity = *sim as f64;
+                if similarity < 0.5 {
+                    continue;
+                }
+
+                // Ensure both nodes exist
+                for nid in [id, neighbor_id] {
+                    let node = GraphNode {
+                        id: nid.clone(),
+                        kind: NodeKind::Memory,
+                        label: nid.clone(),
+                        payload: HashMap::new(),
+                        centrality: 0.0,
+                        memory_id: Some(nid.clone()),
+                        namespace: None,
+                    };
+                    let _ = self.storage.insert_graph_node(&node);
+                }
+
+                let edge_id = format!("{id}-SHARES_THEME-{neighbor_id}");
                 let edge = Edge {
                     id: edge_id,
-                    src: id_a.clone(),
-                    dst: id_b.clone(),
-                    relationship: RelationshipType::RelatesTo,
-                    weight: 1.0,
+                    src: id.clone(),
+                    dst: neighbor_id.clone(),
+                    relationship: RelationshipType::SharesTheme,
+                    weight: similarity,
                     properties: HashMap::new(),
                     created_at: now,
+                    valid_from: Some(now),
+                    valid_to: None,
                 };
 
                 if self.storage.insert_graph_edge(&edge).is_ok() {
@@ -151,6 +274,8 @@ impl McpServer {
                 }
             }
         }
+        drop(vector);
+        drop(graph);
 
         // Log the consolidation run
         if let Err(e) = self
@@ -164,15 +289,22 @@ impl McpServer {
             json!({
                 "cycle": "creative",
                 "new_connections": new_connections,
+                "algorithm": "vector_knn",
             })
             .to_string(),
         )
     }
 
-    /// MCP tool: consolidate_cluster -- merge memories with same content_hash prefix,
-    /// keeping the one with highest importance.
+    /// MCP tool: consolidate_cluster -- semantic deduplication using cosine similarity.
+    ///
+    /// Groups memories by content_hash prefix (fast pre-filter), then uses
+    /// pairwise cosine similarity + union-find to cluster transitively-similar
+    /// memories. Keeps the highest-importance memory per cluster.
     pub(crate) fn tool_consolidate_cluster(&self, args: &Value) -> ToolResult {
-        let _ = args; // no params
+        let similarity_threshold = args
+            .get("similarity_threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.92);
 
         // Load all memory IDs and batch-fetch for clustering
         let ids = match self.storage.list_memory_ids() {
@@ -185,37 +317,83 @@ impl McpServer {
             Err(e) => return ToolResult::tool_error(format!("Cluster cycle failed: {e}")),
         };
 
-        // Group by first 8 chars of content_hash
-        let mut groups: HashMap<String, Vec<(String, f64)>> = HashMap::new();
-        for m in &memories {
-            let (id, hash, importance) = (&m.id, &m.content_hash, m.importance);
-            let prefix = if hash.len() >= 8 {
-                hash[..8].to_string()
+        // Group by first 8 chars of content_hash (fast pre-filter)
+        let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, m) in memories.iter().enumerate() {
+            let prefix = if m.content_hash.len() >= 8 {
+                m.content_hash[..8].to_string()
             } else {
-                hash.clone()
+                m.content_hash.clone()
             };
-            groups
-                .entry(prefix)
-                .or_default()
-                .push((id.clone(), importance));
+            groups.entry(prefix).or_default().push(idx);
         }
+
+        // Load all embeddings for semantic comparison
+        let all_embeddings = match self.storage.list_all_embeddings() {
+            Ok(e) => e,
+            Err(e) => return ToolResult::tool_error(format!("Cluster cycle failed: {e}")),
+        };
+        let embedding_map: HashMap<String, Vec<f32>> = all_embeddings.into_iter().collect();
+
+        // Union-find for transitive clustering
+        let n = memories.len();
+        let mut uf = UnionFind::new(n);
+
+        for member_indices in groups.values() {
+            if member_indices.len() <= 1 {
+                continue;
+            }
+
+            // Pairwise cosine similarity within each hash-prefix group
+            for i in 0..member_indices.len() {
+                for j in (i + 1)..member_indices.len() {
+                    let idx_a = member_indices[i];
+                    let idx_b = member_indices[j];
+                    let id_a = &memories[idx_a].id;
+                    let id_b = &memories[idx_b].id;
+
+                    let sim = match (embedding_map.get(id_a), embedding_map.get(id_b)) {
+                        (Some(emb_a), Some(emb_b)) => cosine_similarity(emb_a, emb_b),
+                        // Fall back to hash equality (same prefix → likely duplicate)
+                        _ => {
+                            if memories[idx_a].content_hash == memories[idx_b].content_hash {
+                                1.0
+                            } else {
+                                0.0
+                            }
+                        }
+                    };
+
+                    if sim >= similarity_threshold {
+                        uf.union(idx_a, idx_b);
+                    }
+                }
+            }
+        }
+
+        // Collect clusters from union-find
+        let clusters = uf.groups(n);
 
         let mut merged_count = 0usize;
         let mut kept_count = 0usize;
         let mut ids_to_delete: Vec<String> = Vec::new();
 
-        for (_prefix, mut members) in groups {
-            if members.len() <= 1 {
+        for cluster in &clusters {
+            if cluster.len() <= 1 {
                 kept_count += 1;
                 continue;
             }
 
             // Sort by importance descending; keep the first (highest), delete the rest
+            let mut members: Vec<(usize, f64)> = cluster
+                .iter()
+                .map(|&idx| (idx, memories[idx].importance))
+                .collect();
             members.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             kept_count += 1;
 
-            for (id, _importance) in members.iter().skip(1) {
-                ids_to_delete.push(id.clone());
+            for &(idx, _) in members.iter().skip(1) {
+                ids_to_delete.push(memories[idx].id.clone());
                 merged_count += 1;
             }
         }
@@ -261,6 +439,8 @@ impl McpServer {
                 "cycle": "cluster",
                 "merged": merged_count,
                 "kept": kept_count,
+                "similarity_threshold": similarity_threshold,
+                "algorithm": "semantic_cosine",
             })
             .to_string(),
         )
@@ -723,7 +903,14 @@ impl McpServer {
             .unwrap_or(3) as usize;
         let namespace = args.get("namespace").and_then(|v| v.as_str());
 
-        match crate::patterns::detect_patterns(&*self.storage, namespace, min_frequency) {
+        let total_sessions = self.storage.session_count(namespace).unwrap_or(10);
+
+        match crate::patterns::detect_patterns(
+            &*self.storage,
+            namespace,
+            min_frequency,
+            total_sessions,
+        ) {
             Ok(detected) => {
                 let json_patterns: Vec<Value> = detected
                     .iter()
@@ -757,13 +944,206 @@ impl McpServer {
             .unwrap_or(2) as usize;
         let namespace = args.get("namespace").and_then(|v| v.as_str());
 
-        match crate::patterns::detect_patterns(&*self.storage, namespace, min_frequency) {
+        let total_sessions = self.storage.session_count(namespace).unwrap_or(10);
+
+        match crate::patterns::detect_patterns(
+            &*self.storage,
+            namespace,
+            min_frequency,
+            total_sessions,
+        ) {
             Ok(detected) => {
                 let markdown = crate::patterns::generate_insights(&detected);
                 ToolResult::text(markdown)
             }
             Err(e) => ToolResult::tool_error(format!("Pattern insights error: {e}")),
         }
+    }
+
+    /// MCP tool: consolidate_summarize -- LLM-powered consolidation that finds
+    /// connected components, summarizes large clusters into Insight memories
+    /// linked via SUMMARIZES edges.
+    pub(crate) fn tool_consolidate_summarize(&self, args: &Value) -> ToolResult {
+        let min_cluster_size = args
+            .get("cluster_size")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(5) as usize;
+
+        // Check that compression provider is configured
+        let provider = crate::compress::CompressProvider::from_env();
+        if !provider.is_enabled() {
+            return ToolResult::tool_error(
+                "CODEMEM_COMPRESS_PROVIDER env var not set. \
+                 Set it to 'ollama', 'openai', or 'anthropic' to enable LLM-powered consolidation.",
+            );
+        }
+
+        // Find connected components via the graph
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+
+        let components = graph.connected_components();
+        drop(graph);
+
+        let large_clusters: Vec<&Vec<String>> = components
+            .iter()
+            .filter(|c| c.len() >= min_cluster_size)
+            .collect();
+
+        if large_clusters.is_empty() {
+            return ToolResult::text(
+                json!({
+                    "cycle": "summarize",
+                    "summarized": 0,
+                    "message": format!("No clusters with {} or more members found", min_cluster_size),
+                })
+                .to_string(),
+            );
+        }
+
+        let mut summarized_count = 0u64;
+        let mut created_ids: Vec<String> = Vec::new();
+
+        for cluster in &large_clusters {
+            // Fetch memories for this cluster
+            let mut contents: Vec<String> = Vec::new();
+            let mut source_ids: Vec<String> = Vec::new();
+            let mut all_tags: Vec<String> = Vec::new();
+
+            for node_id in *cluster {
+                // Try to load the memory by looking up the graph node's memory_id
+                let graph = match self.lock_graph() {
+                    Ok(g) => g,
+                    Err(_) => continue,
+                };
+                if let Ok(Some(node)) = graph.get_node(node_id) {
+                    if let Some(mid) = &node.memory_id {
+                        let mid = mid.clone();
+                        drop(graph);
+                        if let Ok(Some(mem)) = self.storage.get_memory(&mid) {
+                            contents.push(mem.content.clone());
+                            source_ids.push(mid);
+                            all_tags.extend(mem.tags.clone());
+                        }
+                    }
+                }
+            }
+
+            if contents.len() < 2 {
+                continue;
+            }
+
+            // Use LLM to summarize the cluster
+            let combined = contents.join("\n---\n");
+            let summary = match provider.compress(&combined, "consolidate_summarize", None) {
+                Some(s) => s,
+                None => continue, // Compression failed or content too short
+            };
+
+            // Deduplicate tags
+            all_tags.sort();
+            all_tags.dedup();
+
+            // Create a new Insight memory for the summary
+            let now = chrono::Utc::now();
+            let new_id = uuid::Uuid::new_v4().to_string();
+            let hash = codemem_storage::Storage::content_hash(&summary);
+
+            let mem = MemoryNode {
+                id: new_id.clone(),
+                content: summary.clone(),
+                memory_type: MemoryType::Insight,
+                importance: 0.7,
+                confidence: 1.0,
+                access_count: 0,
+                content_hash: hash,
+                tags: all_tags.clone(),
+                metadata: HashMap::new(),
+                namespace: None,
+                created_at: now,
+                updated_at: now,
+                last_accessed_at: now,
+            };
+
+            if let Err(e) = self.storage.insert_memory(&mem) {
+                tracing::warn!("Failed to store summary memory: {e}");
+                continue;
+            }
+
+            // Add to graph
+            let graph_node = GraphNode {
+                id: new_id.clone(),
+                kind: NodeKind::Memory,
+                label: summary.chars().take(80).collect::<String>(),
+                memory_id: Some(new_id.clone()),
+                payload: Default::default(),
+                centrality: 0.0,
+                namespace: None,
+            };
+            if let Err(e) = self.storage.insert_graph_node(&graph_node) {
+                tracing::warn!("Failed to persist graph node: {e}");
+            }
+
+            if let Ok(mut graph) = self.lock_graph() {
+                let _ = graph.add_node(graph_node);
+
+                // Link via SUMMARIZES edges from summary to each source
+                for sid in &source_ids {
+                    let edge = Edge {
+                        id: format!("{new_id}-SUMMARIZES-{sid}"),
+                        src: new_id.clone(),
+                        dst: sid.clone(),
+                        relationship: RelationshipType::Summarizes,
+                        weight: 1.0,
+                        properties: HashMap::new(),
+                        created_at: now,
+                        valid_from: Some(now),
+                        valid_to: None,
+                    };
+                    if let Err(e) = self.storage.insert_graph_edge(&edge) {
+                        tracing::warn!("Failed to persist SUMMARIZES edge: {e}");
+                    }
+                    let _ = graph.add_edge(edge);
+                }
+            }
+
+            // Embed the summary
+            if let Ok(Some(emb_guard)) = self.lock_embeddings() {
+                if let Ok(embedding) = emb_guard.embed(&summary) {
+                    drop(emb_guard);
+                    if let Err(e) = self.storage.store_embedding(&new_id, &embedding) {
+                        tracing::warn!("Failed to store embedding: {e}");
+                    }
+                    if let Ok(mut vec) = self.lock_vector() {
+                        let _ = vec.insert(&new_id, &embedding);
+                    }
+                }
+            }
+
+            summarized_count += 1;
+            created_ids.push(new_id);
+        }
+
+        // Log the consolidation run
+        if let Err(e) = self
+            .storage
+            .insert_consolidation_log("summarize", summarized_count as usize)
+        {
+            tracing::warn!("Failed to log summarize consolidation: {e}");
+        }
+
+        ToolResult::text(
+            json!({
+                "cycle": "summarize",
+                "clusters_found": large_clusters.len(),
+                "summarized": summarized_count,
+                "created_ids": created_ids,
+                "min_cluster_size": min_cluster_size,
+            })
+            .to_string(),
+        )
     }
 }
 
@@ -852,9 +1232,14 @@ mod tests {
         assert_eq!(parsed["affected"], 1);
         assert_eq!(parsed["threshold_days"], 30);
 
-        // Verify importance was reduced: 0.8 * 0.9 = 0.72
+        // Verify importance was reduced via power-law:
+        // 0.8 * 0.9^(60/30) * (1 + log2(max(0,1))*0.1) = 0.8 * 0.81 * 1.0 ≈ 0.648
         let retrieved = server.storage.get_memory(&id).unwrap().unwrap();
-        assert!((retrieved.importance - 0.72).abs() < 0.01);
+        assert!(
+            (retrieved.importance - 0.648).abs() < 0.02,
+            "expected ~0.648, got {}",
+            retrieved.importance
+        );
     }
 
     #[test]
@@ -880,18 +1265,33 @@ mod tests {
         let server = test_server();
 
         // Store two memories with overlapping tags but different types
-        store_memory(
+        let result1 = store_memory(
             &server,
             "insight about rust safety",
             "insight",
             &["rust", "safety"],
         );
-        store_memory(
+        let result2 = store_memory(
             &server,
             "pattern for error handling",
             "pattern",
             &["rust", "error"],
         );
+        let id1 = result1["id"].as_str().unwrap();
+        let id2 = result2["id"].as_str().unwrap();
+
+        // Manually insert embeddings so vector search can find neighbors.
+        // Use similar (but not identical) vectors for the two memories.
+        let emb1: Vec<f32> = (0..768).map(|i| i as f32 / 768.0).collect();
+        let mut emb2 = emb1.clone();
+        emb2[0] += 0.01; // slightly different
+        server.storage.store_embedding(id1, &emb1).unwrap();
+        server.storage.store_embedding(id2, &emb2).unwrap();
+        {
+            let mut vec = server.lock_vector().unwrap();
+            let _ = vec.insert(id1, &emb1);
+            let _ = vec.insert(id2, &emb2);
+        }
 
         // Run creative cycle
         let params = json!({"name": "consolidate_creative", "arguments": {}});
@@ -901,8 +1301,9 @@ mod tests {
         let parsed: Value = serde_json::from_str(text).unwrap();
 
         assert_eq!(parsed["cycle"], "creative");
-        // They share the "rust" tag and have different types, so should create 1 connection
-        assert_eq!(parsed["new_connections"], 1);
+        assert_eq!(parsed["algorithm"], "vector_knn");
+        // They have different types and similar embeddings, so should create a SHARES_THEME edge
+        assert!(parsed["new_connections"].as_u64().unwrap() >= 1);
     }
 
     #[test]

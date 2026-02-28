@@ -18,6 +18,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Compound indexes and file hashes",
         sql: include_str!("migrations/002_compound_indexes.sql"),
     },
+    Migration {
+        version: 3,
+        description: "Temporal edges (valid_from, valid_to)",
+        sql: include_str!("migrations/003_temporal_edges.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.
@@ -80,11 +85,11 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         run_migrations(&conn).unwrap();
 
-        // Verify schema_version has 2 entries
+        // Verify schema_version has 3 entries
         let count: u32 = conn
             .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
 
         // Verify memories table has session_id column
         let has_session_id: bool = conn
@@ -109,6 +114,6 @@ mod tests {
         let count: u32 = conn
             .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
     }
 }

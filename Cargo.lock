@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-bench"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-embeddings"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -653,7 +653,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-graph"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-hooks"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -685,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-index"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -708,8 +708,9 @@ dependencies = [
 
 [[package]]
 name = "codemem-mcp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "codemem-core",
  "codemem-embeddings",
@@ -717,6 +718,7 @@ dependencies = [
  "codemem-index",
  "codemem-storage",
  "codemem-vector",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "tempfile",
@@ -728,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-storage"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -743,7 +745,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-vector"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "codemem-core",
  "serde",
@@ -755,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-viz"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -772,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-watch"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "codemem-core",
  "crossbeam-channel",
