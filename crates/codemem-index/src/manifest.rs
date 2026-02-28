@@ -74,7 +74,7 @@ pub fn parse_cargo_toml(path: &Path) -> Option<ManifestResult> {
     let content = std::fs::read_to_string(path).ok()?;
     let manifest_path = path.to_string_lossy().to_string();
 
-    let toml_value: toml::Value = content.parse().ok()?;
+    let toml_value: toml::Value = toml::from_str(&content).ok()?;
     let table = toml_value.as_table()?;
 
     let mut result = ManifestResult::new();

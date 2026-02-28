@@ -46,21 +46,21 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Database
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
 
 # Vector search
 usearch = "2"
 
 # Graph
-petgraph = "0.6"
+petgraph = "0.8"
 
 # Embeddings
 candle-core = { version = "0.9", default-features = false }
 candle-nn = { version = "0.9", default-features = false }
 candle-transformers = { version = "0.9", default-features = false }
-tokenizers = { version = "0.21", features = ["http"] }
-ndarray = "0.16"
-hf-hub = "0.4"
+tokenizers = { version = "0.22", features = ["http"] }
+ndarray = "0.17"
+hf-hub = "0.5"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -75,27 +75,27 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utilities
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
-thiserror = "1"
+thiserror = "2"
 anyhow = "1"
-dirs = "5"
-lru = "0.12"
+dirs = "6"
+lru = "0.16"
 chrono = { version = "0.4", features = ["serde"] }
 similar = "2"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+reqwest = { version = "0.13", features = ["blocking", "json"] }
 openssl = { version = "0.10", features = ["vendored"] }
 
 # File watching
-notify = "7"
-notify-debouncer-mini = "0.5"
+notify = "8"
+notify-debouncer-mini = "0.7"
 crossbeam-channel = "0.5"
 
 # Indexing
-tree-sitter = "0.24"
+tree-sitter = "0.26"
 walkdir = "2"
 ignore = "0.4"
 
 # Benchmarking
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [profile.release]
 lto = true

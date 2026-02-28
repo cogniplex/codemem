@@ -81,7 +81,7 @@ fn extract_symbols_recursive(
 
     // Recurse for children
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_symbols_recursive(child, source, file_path, symbols);
         }
     }
@@ -150,7 +150,7 @@ fn extract_method(node: Node, source: &[u8], file_path: &str) -> Option<Symbol> 
 fn extract_type_declaration(node: Node, source: &[u8], file_path: &str, symbols: &mut Vec<Symbol>) {
     // type_declaration can have multiple type_spec or type_alias children
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             match child.kind() {
                 "type_spec" => {
                     if let Some(sym) = extract_type_spec(child, node, source, file_path) {
@@ -231,7 +231,7 @@ fn extract_const_declaration(
 ) {
     let doc_comment = extract_go_doc_comment(node, source);
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "const_spec" {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = node_text(name_node, source);
@@ -261,7 +261,7 @@ fn extract_var_declaration(node: Node, source: &[u8], file_path: &str, symbols: 
     // Only extract package-level vars that look like they could be important
     // (exported names)
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "var_spec" {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = node_text(name_node, source);
@@ -313,7 +313,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -337,7 +337,7 @@ fn extract_references_recursive(
                 new_scope.push(qn);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -352,7 +352,7 @@ fn extract_references_recursive(
 
     // Default recursion
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_references_recursive(child, source, file_path, scope, references);
         }
     }
@@ -372,7 +372,7 @@ fn extract_import_references(
     };
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "import_spec" {
                 if let Some(path_node) = child.child_by_field_name("path") {
                     let path_text = node_text(path_node, source);
@@ -389,7 +389,7 @@ fn extract_import_references(
             // Handle import_spec_list (grouped imports)
             if child.kind() == "import_spec_list" {
                 for j in 0..child.child_count() {
-                    if let Some(spec) = child.child(j) {
+                    if let Some(spec) = child.child(j as u32) {
                         if spec.kind() == "import_spec" {
                             if let Some(path_node) = spec.child_by_field_name("path") {
                                 let path_text = node_text(path_node, source);
@@ -490,7 +490,7 @@ fn get_receiver_type(node: Node, source: &[u8]) -> Option<String> {
     // The receiver is a parameter_list like `(s *Server)` or `(s Server)`
     // We want the type name
     for i in 0..receiver.child_count() {
-        if let Some(child) = receiver.child(i) {
+        if let Some(child) = receiver.child(i as u32) {
             if child.kind() == "parameter_declaration" {
                 if let Some(type_node) = child.child_by_field_name("type") {
                     let type_text = node_text(type_node, source);

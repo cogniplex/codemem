@@ -81,7 +81,7 @@ fn extract_symbols_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, true, symbols,
                             );
@@ -147,7 +147,7 @@ fn extract_symbols_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_symbols_recursive(
                                 child, source, file_path, &new_scope, false, symbols,
                             );
@@ -162,7 +162,7 @@ fn extract_symbols_recursive(
 
     // Default recursion for nodes we didn't handle specially
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_symbols_recursive(child, source, file_path, scope, in_class, symbols);
         }
     }
@@ -479,7 +479,7 @@ fn extract_exported_declaration(
     // Look for the declaration child inside the export_statement
     let mut found = false;
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             match child.kind() {
                 "function_declaration" => {
                     if let Some(sym) =
@@ -500,7 +500,7 @@ fn extract_exported_declaration(
                         new_scope.push(name);
                         if let Some(body) = child.child_by_field_name("body") {
                             for j in 0..body.child_count() {
-                                if let Some(body_child) = body.child(j) {
+                                if let Some(body_child) = body.child(j as u32) {
                                     extract_symbols_recursive(
                                         body_child, source, file_path, &new_scope, true, symbols,
                                     );
@@ -550,7 +550,7 @@ fn extract_exported_declaration(
                         new_scope.push(name);
                         if let Some(body) = child.child_by_field_name("body") {
                             for j in 0..body.child_count() {
-                                if let Some(body_child) = body.child(j) {
+                                if let Some(body_child) = body.child(j as u32) {
                                     extract_symbols_recursive(
                                         body_child, source, file_path, &new_scope, false, symbols,
                                     );
@@ -600,7 +600,7 @@ fn extract_lexical_arrow_functions_inner(
 ) {
     // lexical_declaration has variable_declarator children
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "variable_declarator" {
                 let value = child.child_by_field_name("value");
                 let is_fn = value.is_some_and(|v| {
@@ -685,7 +685,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -703,7 +703,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -720,7 +720,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -733,7 +733,7 @@ fn extract_references_recursive(
         "export_statement" => {
             // Recurse into exported declarations for heritage/references
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     extract_references_recursive(child, source, file_path, scope, references);
                 }
             }
@@ -746,7 +746,7 @@ fn extract_references_recursive(
                 new_scope.push(name);
                 if let Some(body) = node.child_by_field_name("body") {
                     for i in 0..body.child_count() {
-                        if let Some(child) = body.child(i) {
+                        if let Some(child) = body.child(i as u32) {
                             extract_references_recursive(
                                 child, source, file_path, &new_scope, references,
                             );
@@ -761,7 +761,7 @@ fn extract_references_recursive(
 
     // Default recursion
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             extract_references_recursive(child, source, file_path, scope, references);
         }
     }
@@ -844,11 +844,11 @@ fn extract_class_heritage_references(
 
     // Iterate over children looking for class_heritage nodes
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "class_heritage" {
                 // class_heritage contains extends_clause and/or implements_clause
                 for j in 0..child.child_count() {
-                    if let Some(heritage_child) = child.child(j) {
+                    if let Some(heritage_child) = child.child(j as u32) {
                         match heritage_child.kind() {
                             "extends_clause" => {
                                 // `extends BaseClass`
@@ -891,7 +891,7 @@ fn extract_heritage_type_refs(
     references: &mut Vec<Reference>,
 ) {
     for i in 0..clause_node.child_count() {
-        if let Some(child) = clause_node.child(i) {
+        if let Some(child) = clause_node.child(i as u32) {
             // The type names appear as identifier or member_expression children
             // Skip keywords like "extends", "implements", and commas
             match child.kind() {
@@ -953,7 +953,7 @@ fn is_exported(node: Node) -> bool {
 fn extract_ts_member_visibility(node: Node, source: &[u8]) -> Visibility {
     // Check for accessibility_modifier child
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == "accessibility_modifier" {
                 let text = node_text(child, source);
                 return match text.as_str() {
