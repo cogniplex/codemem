@@ -29,10 +29,8 @@ impl Storage {
         self.conn.lock().expect("Storage mutex poisoned")
     }
 
-    /// Open (or create) a Codemem database at the given path.
-    pub fn open(path: &Path) -> Result<Self, CodememError> {
-        let conn = Connection::open(path).map_err(|e| CodememError::Storage(e.to_string()))?;
-
+    /// Apply standard pragmas to a connection.
+    fn apply_pragmas(conn: &Connection) -> Result<(), CodememError> {
         // WAL mode for concurrent reads
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -54,10 +52,27 @@ impl Storage {
         // 5s busy timeout
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(())
+    }
 
-        // Apply schema via migrations
+    /// Open (or create) a Codemem database at the given path.
+    pub fn open(path: &Path) -> Result<Self, CodememError> {
+        let conn = Connection::open(path).map_err(|e| CodememError::Storage(e.to_string()))?;
+        Self::apply_pragmas(&conn)?;
         migrations::run_migrations(&conn)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
 
+    /// Open an existing database without running migrations.
+    ///
+    /// Use this in lifecycle hooks (context, prompt, summarize) where the
+    /// database has already been migrated by `codemem init` or `codemem serve`,
+    /// to avoid SQLITE_BUSY race conditions with the concurrent MCP server.
+    pub fn open_without_migrations(path: &Path) -> Result<Self, CodememError> {
+        let conn = Connection::open(path).map_err(|e| CodememError::Storage(e.to_string()))?;
+        Self::apply_pragmas(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })

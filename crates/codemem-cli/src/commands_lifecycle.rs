@@ -4,7 +4,7 @@
 
 pub(crate) fn cmd_sessions_list(namespace: Option<&str>) -> anyhow::Result<()> {
     let db_path = crate::codemem_db_path();
-    let storage = codemem_storage::Storage::open(&db_path)?;
+    let storage = codemem_storage::Storage::open_without_migrations(&db_path)?;
     let sessions = storage.list_sessions(namespace)?;
 
     if sessions.is_empty() {
@@ -35,7 +35,7 @@ pub(crate) fn cmd_sessions_list(namespace: Option<&str>) -> anyhow::Result<()> {
 
 pub(crate) fn cmd_sessions_start(namespace: Option<&str>) -> anyhow::Result<()> {
     let db_path = crate::codemem_db_path();
-    let storage = codemem_storage::Storage::open(&db_path)?;
+    let storage = codemem_storage::Storage::open_without_migrations(&db_path)?;
 
     let session_id = uuid::Uuid::new_v4().to_string();
     storage.start_session(&session_id, namespace)?;
@@ -54,7 +54,7 @@ pub(crate) fn cmd_sessions_start(namespace: Option<&str>) -> anyhow::Result<()> 
 
 pub(crate) fn cmd_sessions_end(id: &str, summary: Option<&str>) -> anyhow::Result<()> {
     let db_path = crate::codemem_db_path();
-    let storage = codemem_storage::Storage::open(&db_path)?;
+    let storage = codemem_storage::Storage::open_without_migrations(&db_path)?;
     storage.end_session(id, summary)?;
 
     println!("Session ended: {}", id);
@@ -90,7 +90,7 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
         .unwrap_or("");
 
     let db_path = crate::codemem_db_path();
-    let storage = match codemem_storage::Storage::open(&db_path) {
+    let storage = match codemem_storage::Storage::open_without_migrations(&db_path) {
         Ok(s) => s,
         Err(_) => {
             // No database yet — nothing to inject
@@ -285,7 +285,7 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
     }
 
     let db_path = crate::codemem_db_path();
-    let storage = match codemem_storage::Storage::open(&db_path) {
+    let storage = match codemem_storage::Storage::open_without_migrations(&db_path) {
         Ok(s) => s,
         Err(_) => {
             let output = serde_json::json!({"continue": true});
@@ -373,7 +373,7 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
     }
 
     let db_path = crate::codemem_db_path();
-    let storage = match codemem_storage::Storage::open(&db_path) {
+    let storage = match codemem_storage::Storage::open_without_migrations(&db_path) {
         Ok(s) => s,
         Err(_) => {
             let output = serde_json::json!({"continue": true});
