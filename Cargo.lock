@@ -589,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-bench"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-cli"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "chrono",
  "dirs",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-embeddings"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-graph"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -679,7 +679,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-hooks"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -697,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-index"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -727,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-mcp"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -749,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-storage"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-vector"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "codemem-core",
  "serde",
@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-viz"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-watch"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "codemem-core",
  "crossbeam-channel",
@@ -2551,9 +2551,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
-version = "0.1.13"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "062b52cd41eb8d929e81b592a47df833c33c15684933a9329440137a6d9f134c"
+checksum = "1744e39d1d6a9948f4f388969627434e31128196de472883b39f148769bfe30a"
 dependencies = [
  "libc",
 ]
