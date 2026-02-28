@@ -405,9 +405,17 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
     let nodes_stored = graph_nodes.len();
     storage.insert_graph_nodes_batch(&graph_nodes)?;
 
-    // Collect all edges into a Vec for batch insert
+    // Collect all edges, filtering out edges that reference nodes not in the graph
+    // (e.g., external stdlib symbols that weren't indexed)
+    let node_ids: std::collections::HashSet<String> =
+        graph_nodes.iter().map(|n| n.id.clone()).collect();
     let graph_edges: Vec<codemem_core::Edge> = edges
         .iter()
+        .filter(|edge| {
+            let src = format!("sym:{}", edge.source_qualified_name);
+            let dst = format!("sym:{}", edge.target_qualified_name);
+            node_ids.contains(&src) && node_ids.contains(&dst)
+        })
         .map(|edge| codemem_core::Edge {
             id: format!(
                 "ref:{}->{}:{}",
