@@ -1276,7 +1276,12 @@ mod tests {
         assert!(!result.is_error);
         let text = &result.content[0].text;
         let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
-        assert!(parsed["latencies"]["recall_memory"]["count"].as_u64().unwrap() >= 1);
+        assert!(
+            parsed["latencies"]["recall_memory"]["count"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
         assert_eq!(parsed["counters"]["tool_calls_total"], 1);
         assert!((parsed["gauges"]["memory_count"].as_f64().unwrap() - 7.0).abs() < f64::EPSILON);
     }

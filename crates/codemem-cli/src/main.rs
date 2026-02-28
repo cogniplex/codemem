@@ -474,8 +474,7 @@ mod tests {
 
     #[test]
     fn parse_export_with_format() {
-        let cli =
-            Cli::try_parse_from(["codemem", "export", "--format", "csv"]).unwrap();
+        let cli = Cli::try_parse_from(["codemem", "export", "--format", "csv"]).unwrap();
         match cli.command {
             Commands::Export { format, .. } => {
                 assert_eq!(format, "csv");

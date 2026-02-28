@@ -284,12 +284,7 @@ fn extract_struct(node: Node, source: &[u8], file_path: &str, scope: &[String]) 
     })
 }
 
-fn extract_method(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_method(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -575,7 +570,14 @@ fn extract_base_types(
                 }
                 _ => {
                     // Recurse into nested nodes (e.g., simple_base_type wrapping identifier)
-                    extract_base_types(child, source, file_path, source_qn, is_interface, references);
+                    extract_base_types(
+                        child,
+                        source,
+                        file_path,
+                        source_qn,
+                        is_interface,
+                        references,
+                    );
                     if child.kind() != ":" && child.kind() != "," {
                         first = false;
                     }
@@ -589,9 +591,7 @@ fn extract_base_types(
 fn looks_like_interface(name: &str) -> bool {
     let name = name.split('<').next().unwrap_or(name);
     let name = name.split('.').next_back().unwrap_or(name);
-    name.starts_with('I')
-        && name.len() > 1
-        && name.chars().nth(1).is_some_and(|c| c.is_uppercase())
+    name.starts_with('I') && name.len() > 1 && name.chars().nth(1).is_some_and(|c| c.is_uppercase())
 }
 
 // -- Helper Functions ---------------------------------------------------------
@@ -793,10 +793,7 @@ namespace MyApp.Services {
         let extractor = CSharpExtractor::new();
         let symbols = extractor.extract_symbols(&tree, source.as_bytes(), "UserService.cs");
 
-        let ns = symbols
-            .iter()
-            .find(|s| s.name == "MyApp.Services")
-            .unwrap();
+        let ns = symbols.iter().find(|s| s.name == "MyApp.Services").unwrap();
         assert_eq!(ns.kind, SymbolKind::Module);
 
         let class = symbols.iter().find(|s| s.name == "UserService").unwrap();
@@ -806,10 +803,7 @@ namespace MyApp.Services {
 
         let method = symbols.iter().find(|s| s.name == "Create").unwrap();
         assert_eq!(method.kind, SymbolKind::Method);
-        assert_eq!(
-            method.qualified_name,
-            "MyApp.Services.UserService.Create"
-        );
+        assert_eq!(method.qualified_name, "MyApp.Services.UserService.Create");
     }
 
     #[test]
@@ -1008,16 +1002,10 @@ public class Example {
         let extractor = CSharpExtractor::new();
         let symbols = extractor.extract_symbols(&tree, source.as_bytes(), "Example.cs");
 
-        let public_m = symbols
-            .iter()
-            .find(|s| s.name == "PublicMethod")
-            .unwrap();
+        let public_m = symbols.iter().find(|s| s.name == "PublicMethod").unwrap();
         assert_eq!(public_m.visibility, Visibility::Public);
 
-        let private_m = symbols
-            .iter()
-            .find(|s| s.name == "PrivateMethod")
-            .unwrap();
+        let private_m = symbols.iter().find(|s| s.name == "PrivateMethod").unwrap();
         assert_eq!(private_m.visibility, Visibility::Private);
 
         let protected_m = symbols
@@ -1026,16 +1014,10 @@ public class Example {
             .unwrap();
         assert_eq!(protected_m.visibility, Visibility::Protected);
 
-        let internal_m = symbols
-            .iter()
-            .find(|s| s.name == "InternalMethod")
-            .unwrap();
+        let internal_m = symbols.iter().find(|s| s.name == "InternalMethod").unwrap();
         assert_eq!(internal_m.visibility, Visibility::Public); // internal -> Public
 
-        let default_m = symbols
-            .iter()
-            .find(|s| s.name == "DefaultMethod")
-            .unwrap();
+        let default_m = symbols.iter().find(|s| s.name == "DefaultMethod").unwrap();
         assert_eq!(default_m.visibility, Visibility::Private); // default -> Private
     }
 
@@ -1060,9 +1042,7 @@ public class App {
             .filter(|r| r.kind == ReferenceKind::Call)
             .collect();
         assert!(
-            calls
-                .iter()
-                .any(|r| r.target_name.contains("WriteLine")),
+            calls.iter().any(|r| r.target_name.contains("WriteLine")),
             "calls: {:#?}",
             calls
         );

@@ -1,7 +1,7 @@
 //! `codemem doctor` — health checks for the Codemem installation.
 
-use colored::Colorize;
 use codemem_core::VectorBackend;
+use colored::Colorize;
 
 pub(crate) fn cmd_doctor() -> anyhow::Result<()> {
     println!("{}", "Codemem Doctor".bold());
@@ -81,31 +81,29 @@ pub(crate) fn cmd_doctor() -> anyhow::Result<()> {
             }
         }
     } else {
-        print_check("Vector index", true, "not yet created (will be created on first use)");
+        print_check(
+            "Vector index",
+            true,
+            "not yet created (will be created on first use)",
+        );
     }
 
     // 3. Embedding model probe
     match codemem_embeddings::from_env() {
-        Ok(emb) => {
-            match emb.embed("hello world") {
-                Ok(v) => print_check(
-                    "Embedding provider",
-                    true,
-                    &format!("{}-dim vectors", v.len()),
-                ),
-                Err(e) => {
-                    print_check("Embedding provider", false, &format!("probe failed: {e}"));
-                    all_ok = false;
-                }
+        Ok(emb) => match emb.embed("hello world") {
+            Ok(v) => print_check(
+                "Embedding provider",
+                true,
+                &format!("{}-dim vectors", v.len()),
+            ),
+            Err(e) => {
+                print_check("Embedding provider", false, &format!("probe failed: {e}"));
+                all_ok = false;
             }
-        }
+        },
         Err(e) => {
             // Not an error if using default Candle provider — it may need a model download
-            print_check(
-                "Embedding provider",
-                false,
-                &format!("not available: {e}"),
-            );
+            print_check("Embedding provider", false, &format!("not available: {e}"));
             all_ok = false;
         }
     }

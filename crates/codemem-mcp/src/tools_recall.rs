@@ -755,7 +755,9 @@ mod tests {
         // The result may contain the memory content or a "no memories" message
         // depending on whether the BM25+scoring threshold is crossed.
         assert!(
-            text.contains("architecture") || text.contains("design") || text.contains("No matching memories"),
+            text.contains("architecture")
+                || text.contains("design")
+                || text.contains("No matching memories"),
             "Unexpected recall response: {text}"
         );
     }

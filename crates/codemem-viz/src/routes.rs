@@ -542,11 +542,7 @@ pub async fn api_timeline(
         let date = m.created_at.format("%Y-%m-%d").to_string();
         let mtype = m.memory_type.to_string();
         all_types.insert(mtype.clone());
-        *day_map
-            .entry(date)
-            .or_default()
-            .entry(mtype)
-            .or_insert(0) += 1;
+        *day_map.entry(date).or_default().entry(mtype).or_insert(0) += 1;
     }
 
     let mut types: Vec<String> = all_types.into_iter().collect();
@@ -583,13 +579,15 @@ pub async fn api_distribution(
     let mut importance_histogram: BTreeMap<String, usize> = BTreeMap::new();
 
     for m in &memories {
-        *type_counts
-            .entry(m.memory_type.to_string())
-            .or_insert(0) += 1;
+        *type_counts.entry(m.memory_type.to_string()).or_insert(0) += 1;
 
         // Bucket importance into 0.0-0.1, 0.1-0.2, ... 0.9-1.0
         let bucket = (m.importance * 10.0).floor().min(9.0) as u8;
-        let label = format!("{:.1}-{:.1}", bucket as f64 / 10.0, (bucket + 1) as f64 / 10.0);
+        let label = format!(
+            "{:.1}-{:.1}",
+            bucket as f64 / 10.0,
+            (bucket + 1) as f64 / 10.0
+        );
         *importance_histogram.entry(label).or_insert(0) += 1;
     }
 
@@ -636,12 +634,7 @@ mod tests {
         }
     }
 
-    fn make_test_graph_node(
-        id: &str,
-        kind: NodeKind,
-        label: &str,
-        ns: Option<&str>,
-    ) -> GraphNode {
+    fn make_test_graph_node(id: &str, kind: NodeKind, label: &str, ns: Option<&str>) -> GraphNode {
         GraphNode {
             id: id.to_string(),
             kind,
@@ -851,8 +844,20 @@ mod tests {
         let date1 = chrono::Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap();
         let date2 = chrono::Utc.with_ymd_and_hms(2024, 2, 20, 12, 0, 0).unwrap();
 
-        let m1 = make_test_memory("decision about error handling", None, MemoryType::Decision, 0.7, date1);
-        let m2 = make_test_memory("pattern for retry logic", None, MemoryType::Pattern, 0.6, date2);
+        let m1 = make_test_memory(
+            "decision about error handling",
+            None,
+            MemoryType::Decision,
+            0.7,
+            date1,
+        );
+        let m2 = make_test_memory(
+            "pattern for retry logic",
+            None,
+            MemoryType::Pattern,
+            0.6,
+            date2,
+        );
         storage.insert_memory(&m1).unwrap();
         storage.insert_memory(&m2).unwrap();
 
@@ -886,8 +891,20 @@ mod tests {
         let storage = Storage::open_in_memory().unwrap();
 
         let now = chrono::Utc::now();
-        let m1 = make_test_memory("use Result instead of panic", None, MemoryType::Decision, 0.3, now);
-        let m2 = make_test_memory("builder pattern for configs", None, MemoryType::Pattern, 0.8, now);
+        let m1 = make_test_memory(
+            "use Result instead of panic",
+            None,
+            MemoryType::Decision,
+            0.3,
+            now,
+        );
+        let m2 = make_test_memory(
+            "builder pattern for configs",
+            None,
+            MemoryType::Pattern,
+            0.8,
+            now,
+        );
         storage.insert_memory(&m1).unwrap();
         storage.insert_memory(&m2).unwrap();
 
@@ -908,7 +925,13 @@ mod tests {
     async fn api_memory_detail_found() {
         let storage = Storage::open_in_memory().unwrap();
         let now = chrono::Utc::now();
-        let m = make_test_memory("important architectural decision", None, MemoryType::Decision, 0.9, now);
+        let m = make_test_memory(
+            "important architectural decision",
+            None,
+            MemoryType::Decision,
+            0.9,
+            now,
+        );
         let mem_id = m.id.clone();
         storage.insert_memory(&m).unwrap();
 
@@ -948,9 +971,12 @@ mod tests {
 
         let state: AppState = Arc::new(Mutex::new(storage));
         let query = NeighborQuery { depth: Some(2) };
-        let result =
-            api_graph_neighbors(State(state.clone()), Path("node-a".to_string()), Query(query))
-                .await;
+        let result = api_graph_neighbors(
+            State(state.clone()),
+            Path("node-a".to_string()),
+            Query(query),
+        )
+        .await;
         assert!(result.is_ok());
         let neighbors = result.unwrap().0;
         // BFS from A with depth 2 should reach A, B, and C
@@ -966,7 +992,13 @@ mod tests {
     async fn api_search_with_results() {
         let storage = Storage::open_in_memory().unwrap();
         let now = chrono::Utc::now();
-        let m = make_test_memory("rust pattern matching is powerful", None, MemoryType::Insight, 0.7, now);
+        let m = make_test_memory(
+            "rust pattern matching is powerful",
+            None,
+            MemoryType::Insight,
+            0.7,
+            now,
+        );
         storage.insert_memory(&m).unwrap();
 
         let state: AppState = Arc::new(Mutex::new(storage));
@@ -986,8 +1018,20 @@ mod tests {
         let storage = Storage::open_in_memory().unwrap();
         let now = chrono::Utc::now();
 
-        let m1 = make_test_memory("memory in project alpha", Some("proj-a"), MemoryType::Context, 0.5, now);
-        let m2 = make_test_memory("memory in project beta", Some("proj-b"), MemoryType::Context, 0.5, now);
+        let m1 = make_test_memory(
+            "memory in project alpha",
+            Some("proj-a"),
+            MemoryType::Context,
+            0.5,
+            now,
+        );
+        let m2 = make_test_memory(
+            "memory in project beta",
+            Some("proj-b"),
+            MemoryType::Context,
+            0.5,
+            now,
+        );
         storage.insert_memory(&m1).unwrap();
         storage.insert_memory(&m2).unwrap();
 

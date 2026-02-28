@@ -112,12 +112,7 @@ fn extract_symbols_recursive(
     }
 }
 
-fn extract_class(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_class(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name = find_type_identifier(node, source)?;
 
     let qualified_name = qualified(scope, &name);
@@ -139,12 +134,7 @@ fn extract_class(
     })
 }
 
-fn extract_object(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_object(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name = find_type_identifier(node, source)?;
 
     let qualified_name = qualified(scope, &name);
@@ -294,11 +284,7 @@ fn extract_import_reference(
     // Fallback: parse from the full node text
     if import_path.is_empty() {
         let text = node_text(node, source);
-        import_path = text
-            .trim()
-            .strip_prefix("import")?
-            .trim()
-            .to_string();
+        import_path = text.trim().strip_prefix("import")?.trim().to_string();
     }
 
     if import_path.is_empty() {
@@ -359,12 +345,7 @@ fn extract_inheritance_reference(
     // delegation_specifier contains the supertype (e.g., "BaseClass" or "Interface()")
     // Extract the type name, stripping any constructor call parentheses
     let text = node_text(node, source);
-    let type_name = text
-        .split('(')
-        .next()
-        .unwrap_or(&text)
-        .trim()
-        .to_string();
+    let type_name = text.split('(').next().unwrap_or(&text).trim().to_string();
 
     if type_name.is_empty() {
         return None;
@@ -506,9 +487,14 @@ fn collect_modifier_tokens(node: Node, source: &[u8], modifiers: &mut Vec<String
         if let Some(child) = node.child(i as u32) {
             let kind = child.kind();
             match kind {
-                "visibility_modifier" | "inheritance_modifier" | "member_modifier"
-                | "class_modifier" | "function_modifier" | "property_modifier"
-                | "parameter_modifier" | "platform_modifier" => {
+                "visibility_modifier"
+                | "inheritance_modifier"
+                | "member_modifier"
+                | "class_modifier"
+                | "function_modifier"
+                | "property_modifier"
+                | "parameter_modifier"
+                | "platform_modifier" => {
                     let text = node_text(child, source);
                     if !text.is_empty() && !modifiers.contains(&text) {
                         modifiers.push(text);
@@ -754,9 +740,7 @@ class Dog(name: String) : Animal(name) {
             .filter(|r| r.kind == ReferenceKind::Inherits)
             .collect();
         assert!(
-            inherits
-                .iter()
-                .any(|r| r.target_name.contains("Animal")),
+            inherits.iter().any(|r| r.target_name.contains("Animal")),
             "inherits: {:#?}",
             inherits
         );

@@ -118,12 +118,7 @@ fn extract_symbols_recursive(
     }
 }
 
-fn extract_class(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_class(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -145,12 +140,7 @@ fn extract_class(
     })
 }
 
-fn extract_module(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_module(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -172,12 +162,7 @@ fn extract_module(
     })
 }
 
-fn extract_method(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_method(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -494,7 +479,10 @@ fn extract_ruby_comment(node: Node, source: &[u8]) -> Option<String> {
                     let expected_next = if relevant.is_empty() {
                         node_start_row
                     } else {
-                        relevant.last().map(|n: &Node| n.start_position().row).unwrap()
+                        relevant
+                            .last()
+                            .map(|n: &Node| n.start_position().row)
+                            .unwrap()
                     };
                     if expected_next - c_end <= 1 {
                         relevant.push(*c);

@@ -139,12 +139,8 @@ mod tests {
     #[test]
     fn set_json_path_unknown_key_errors() {
         let mut json = serde_json::json!({"scoring": {}});
-        let err = set_json_path(
-            &mut json,
-            "scoring.nonexistent",
-            serde_json::json!(1.0),
-        )
-        .unwrap_err();
+        let err =
+            set_json_path(&mut json, "scoring.nonexistent", serde_json::json!(1.0)).unwrap_err();
         assert!(err.to_string().contains("Unknown config key"));
     }
 }

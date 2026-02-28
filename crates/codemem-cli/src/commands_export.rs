@@ -127,10 +127,7 @@ pub(crate) fn cmd_export(
             let mut by_type: std::collections::BTreeMap<String, Vec<&serde_json::Value>> =
                 std::collections::BTreeMap::new();
             for obj in &records {
-                let mt = obj["memory_type"]
-                    .as_str()
-                    .unwrap_or("unknown")
-                    .to_string();
+                let mt = obj["memory_type"].as_str().unwrap_or("unknown").to_string();
                 by_type.entry(mt).or_default().push(obj);
             }
 
@@ -166,9 +163,7 @@ pub(crate) fn cmd_export(
             }
         }
         other => {
-            anyhow::bail!(
-                "Unknown format: {other}. Supported formats: jsonl, json, csv, markdown"
-            );
+            anyhow::bail!("Unknown format: {other}. Supported formats: jsonl, json, csv, markdown");
         }
     }
 
@@ -538,9 +533,6 @@ mod tests {
 
     #[test]
     fn csv_escape_combined() {
-        assert_eq!(
-            csv_escape("a,b\n\"c\""),
-            "\"a,b\n\"\"c\"\"\""
-        );
+        assert_eq!(csv_escape("a,b\n\"c\""), "\"a,b\n\"\"c\"\"\"");
     }
 }

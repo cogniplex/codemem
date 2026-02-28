@@ -182,12 +182,7 @@ fn extract_function(
     })
 }
 
-fn extract_class(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_class(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -210,12 +205,7 @@ fn extract_class(
     })
 }
 
-fn extract_method(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_method(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -294,12 +284,7 @@ fn extract_interface(
     })
 }
 
-fn extract_trait(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_trait(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -457,7 +442,10 @@ fn extract_use_references(
     }
 
     // Fallback: if no children matched, try extracting from the full text
-    if references.iter().all(|r| r.line != node.start_position().row) {
+    if references
+        .iter()
+        .all(|r| r.line != node.start_position().row)
+    {
         let text = node_text(node, source);
         // Parse "use Foo\Bar\Baz;" style
         let import_path = text

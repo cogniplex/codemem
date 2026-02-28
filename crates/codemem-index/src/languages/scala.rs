@@ -135,12 +135,7 @@ fn extract_symbols_recursive(
     }
 }
 
-fn extract_class(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_class(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -163,12 +158,7 @@ fn extract_class(
     })
 }
 
-fn extract_trait(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_trait(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -191,12 +181,7 @@ fn extract_trait(
     })
 }
 
-fn extract_object(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_object(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source);
 
@@ -733,9 +718,9 @@ class App {}
             .filter(|r| r.kind == ReferenceKind::Import)
             .collect();
         assert!(
-            imports
-                .iter()
-                .any(|r| r.target_name.contains("scala.collection.mutable.ListBuffer")),
+            imports.iter().any(|r| r
+                .target_name
+                .contains("scala.collection.mutable.ListBuffer")),
             "imports: {:#?}",
             imports
         );
@@ -757,8 +742,7 @@ class MyService extends BaseService with Serializable {
 "#;
         let tree = parse_scala(source);
         let extractor = ScalaExtractor::new();
-        let references =
-            extractor.extract_references(&tree, source.as_bytes(), "MyService.scala");
+        let references = extractor.extract_references(&tree, source.as_bytes(), "MyService.scala");
 
         let inherits: Vec<_> = references
             .iter()
@@ -793,16 +777,10 @@ class Example {
         let extractor = ScalaExtractor::new();
         let symbols = extractor.extract_symbols(&tree, source.as_bytes(), "Example.scala");
 
-        let public_m = symbols
-            .iter()
-            .find(|s| s.name == "publicMethod")
-            .unwrap();
+        let public_m = symbols.iter().find(|s| s.name == "publicMethod").unwrap();
         assert_eq!(public_m.visibility, Visibility::Public);
 
-        let private_m = symbols
-            .iter()
-            .find(|s| s.name == "privateMethod")
-            .unwrap();
+        let private_m = symbols.iter().find(|s| s.name == "privateMethod").unwrap();
         assert_eq!(private_m.visibility, Visibility::Private);
 
         let protected_m = symbols

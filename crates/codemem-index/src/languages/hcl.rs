@@ -134,7 +134,10 @@ fn extract_block_symbol(
             }
         }
         "module" | "provider" => {
-            let name = labels.first().cloned().unwrap_or_else(|| block_type.clone());
+            let name = labels
+                .first()
+                .cloned()
+                .unwrap_or_else(|| block_type.clone());
             let qualified_name = build_qualified_name(&block_type, &labels, scope);
             let signature = extract_block_signature(node, source);
             let doc_comment = extract_hcl_comment(node, source);
@@ -163,7 +166,10 @@ fn extract_block_symbol(
             }
         }
         "variable" | "output" => {
-            let name = labels.first().cloned().unwrap_or_else(|| block_type.clone());
+            let name = labels
+                .first()
+                .cloned()
+                .unwrap_or_else(|| block_type.clone());
             let qualified_name = build_qualified_name(&block_type, &labels, scope);
             let signature = extract_block_signature(node, source);
             let doc_comment = extract_hcl_comment(node, source);
@@ -585,10 +591,7 @@ resource "aws_s3_bucket" "my_bucket" {
 
         let resource = symbols.iter().find(|s| s.name == "my_bucket").unwrap();
         assert_eq!(resource.kind, SymbolKind::Class);
-        assert_eq!(
-            resource.qualified_name,
-            "resource.aws_s3_bucket.my_bucket"
-        );
+        assert_eq!(resource.qualified_name, "resource.aws_s3_bucket.my_bucket");
         assert_eq!(resource.visibility, Visibility::Public);
         assert!(
             resource.signature.contains("resource"),
@@ -728,7 +731,9 @@ resource "aws_instance" "web" {
             .collect();
 
         assert!(
-            calls.iter().any(|r| r.target_name.starts_with("var.ami_id")),
+            calls
+                .iter()
+                .any(|r| r.target_name.starts_with("var.ami_id")),
             "expected var.ami_id reference, got: {:#?}",
             calls
         );
@@ -765,11 +770,7 @@ resource "aws_s3_bucket" "artifacts" {
             .doc_comment
             .as_ref()
             .expect("expected doc comment on resource");
-        assert!(
-            doc.contains("main S3 bucket"),
-            "doc: {}",
-            doc
-        );
+        assert!(doc.contains("main S3 bucket"), "doc: {}", doc);
     }
 
     #[test]

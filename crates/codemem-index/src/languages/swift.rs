@@ -62,7 +62,9 @@ fn extract_symbols_recursive(
         // "struct", or "enum").
         "class_declaration" => {
             let extract_fn = match class_declaration_keyword(node) {
-                Some("struct") => extract_struct as fn(Node, &[u8], &str, &[String]) -> Option<Symbol>,
+                Some("struct") => {
+                    extract_struct as fn(Node, &[u8], &str, &[String]) -> Option<Symbol>
+                }
                 Some("enum") => extract_enum,
                 _ => extract_class,
             };
@@ -127,9 +129,7 @@ fn recurse_into_body(
             if kind.ends_with("_body") {
                 for j in 0..child.child_count() {
                     if let Some(grandchild) = child.child(j as u32) {
-                        extract_symbols_recursive(
-                            grandchild, source, file_path, scope, symbols,
-                        );
+                        extract_symbols_recursive(grandchild, source, file_path, scope, symbols);
                     }
                 }
             }
@@ -137,12 +137,7 @@ fn recurse_into_body(
     }
 }
 
-fn extract_class(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_class(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name = find_declaration_name(node, source)?;
     let qualified_name = qualified(scope, &name);
     let visibility = extract_visibility(node, source);
@@ -189,12 +184,7 @@ fn extract_protocol(
     })
 }
 
-fn extract_struct(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_struct(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name = find_declaration_name(node, source)?;
     let qualified_name = qualified(scope, &name);
     let visibility = extract_visibility(node, source);
@@ -215,12 +205,7 @@ fn extract_struct(
     })
 }
 
-fn extract_enum(
-    node: Node,
-    source: &[u8],
-    file_path: &str,
-    scope: &[String],
-) -> Option<Symbol> {
+fn extract_enum(node: Node, source: &[u8], file_path: &str, scope: &[String]) -> Option<Symbol> {
     let name = find_declaration_name(node, source)?;
     let qualified_name = qualified(scope, &name);
     let visibility = extract_visibility(node, source);
@@ -365,11 +350,7 @@ fn extract_import_reference(
 ) -> Option<Reference> {
     // import_declaration text is like: "import Foundation" or "import UIKit"
     let text = node_text(node, source);
-    let import_path = text
-        .trim()
-        .strip_prefix("import")?
-        .trim()
-        .to_string();
+    let import_path = text.trim().strip_prefix("import")?.trim().to_string();
 
     if import_path.is_empty() {
         return None;
@@ -398,7 +379,8 @@ fn extract_call_reference(
 ) -> Option<Reference> {
     // call_expression typically has a "function" child in tree-sitter-swift
     // Try to get the callable name from the first child or field
-    let callee = node.child_by_field_name("function")
+    let callee = node
+        .child_by_field_name("function")
         .or_else(|| node.child(0))?;
     let target = node_text(callee, source);
 
@@ -528,8 +510,11 @@ fn find_declaration_name(node: Node, source: &[u8]) -> Option<String> {
         if let Some(child) = node.child(i as u32) {
             let kind = child.kind();
             // Skip the keyword itself
-            if kind == "class" || kind == "struct" || kind == "protocol"
-                || kind == "enum" || kind == "func"
+            if kind == "class"
+                || kind == "struct"
+                || kind == "protocol"
+                || kind == "enum"
+                || kind == "func"
             {
                 past_keyword = true;
                 continue;
@@ -565,7 +550,9 @@ fn extract_visibility(node: Node, source: &[u8]) -> Visibility {
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i as u32) {
             let kind = child.kind();
-            if kind == "modifiers" || kind == "modifier" || kind == "visibility_modifier"
+            if kind == "modifiers"
+                || kind == "modifier"
+                || kind == "visibility_modifier"
                 || kind == "access_level_modifier"
             {
                 return visibility_from_modifier_node(child, source);

@@ -38,9 +38,9 @@ const IGNORE_DIRS: &[&str] = &[
 
 /// Watchable file extensions (code files).
 const WATCHABLE_EXTENSIONS: &[&str] = &[
-    "rs", "ts", "tsx", "js", "jsx", "py", "go", "c", "cpp", "cc", "cxx", "h", "hpp", "java",
-    "rb", "cs", "kt", "kts", "swift", "php", "scala", "sc", "tf", "hcl", "tfvars",
-    "toml", "json", "yaml", "yml",
+    "rs", "ts", "tsx", "js", "jsx", "py", "go", "c", "cpp", "cc", "cxx", "h", "hpp", "java", "rb",
+    "cs", "kt", "kts", "swift", "php", "scala", "sc", "tf", "hcl", "tfvars", "toml", "json",
+    "yaml", "yml",
 ];
 
 /// Check if a file extension is watchable.
