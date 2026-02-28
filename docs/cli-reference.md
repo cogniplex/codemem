@@ -104,7 +104,7 @@ codemem stats
 
 ## `codemem serve`
 
-Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 33 MCP tools.
+Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 38 MCP tools.
 
 **Syntax**
 
@@ -196,7 +196,7 @@ codemem viz --no-open
 
 ## `codemem index`
 
-Index a codebase for structural analysis using tree-sitter. Parses source files across 6 supported languages (Rust, TypeScript, Python, Go, C/C++, Java) and extracts functions, structs, classes, imports, and call relationships.
+Index a codebase for structural analysis using tree-sitter. Parses source files across 13 supported languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) and extracts functions, structs, classes, imports, and call relationships.
 
 **Syntax**
 
@@ -222,12 +222,12 @@ codemem index --path ~/projects/my-app --verbose
 
 ## `codemem export`
 
-Export memories to JSONL (JSON Lines) format for backup, migration, or external analysis. Each line is a self-contained JSON object representing one memory.
+Export memories in multiple formats for backup, migration, or external analysis.
 
 **Syntax**
 
 ```
-codemem export [--namespace <ns>] [--memory-type <type>] [--output <file>]
+codemem export [--namespace <ns>] [--memory-type <type>] [--output <file>] [--format <fmt>]
 ```
 
 **Flags**
@@ -237,13 +237,16 @@ codemem export [--namespace <ns>] [--memory-type <type>] [--output <file>]
 | `--namespace <ns>` | Export only memories from a specific namespace |
 | `--memory-type <type>` | Export only memories of a given type (Decision, Pattern, Preference, Style, Habit, Insight, Context) |
 | `--output <file>` | Output file path (defaults to stdout) |
+| `--format <fmt>` | Output format: `jsonl` (default), `json`, `csv`, `markdown`/`md` |
 
 **Example**
 
 ```bash
 codemem export > all-memories.jsonl
+codemem export --format csv --output memories.csv
+codemem export --format markdown --output memories.md
 codemem export --namespace /home/user/projects/api --output api-memories.jsonl
-codemem export --memory-type Pattern --output patterns.jsonl
+codemem export --memory-type Pattern --format json --output patterns.json
 ```
 
 ---
@@ -392,4 +395,66 @@ Reads JSON `{session_id, cwd}` from stdin. Outputs JSON `{continue: true}`.
 
 ```
 codemem summarize
+```
+
+---
+
+## `codemem doctor`
+
+Run diagnostic health checks on the Codemem installation. Validates database integrity, schema version, memory count, vector index, embedding provider, and configuration.
+
+**Syntax**
+
+```
+codemem doctor
+```
+
+**Output:** A checklist of OK/FAIL results for each health check.
+
+---
+
+## `codemem config get <key>`
+
+Read a configuration value by dot-separated key path (e.g., `scoring.vector_similarity`).
+
+**Syntax**
+
+```
+codemem config get <key>
+```
+
+**Example:**
+
+```
+codemem config get scoring.vector_similarity
+```
+
+---
+
+## `codemem config set <key> <value>`
+
+Set a configuration value by dot-separated key path. The value is parsed as JSON (number, string, boolean, etc.).
+
+**Syntax**
+
+```
+codemem config set <key> <value>
+```
+
+**Example:**
+
+```
+codemem config set scoring.vector_similarity 0.3
+```
+
+---
+
+## `codemem migrate`
+
+Show and apply pending schema migrations. Reports the current schema version and whether any migrations were applied.
+
+**Syntax**
+
+```
+codemem migrate
 ```

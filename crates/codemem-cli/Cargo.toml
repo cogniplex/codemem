@@ -42,6 +42,7 @@ codemem-index = { workspace = true }
 codemem-watch = { workspace = true }
 reqwest = { workspace = true }
 openssl = { workspace = true }
+colored = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 codemem-embeddings = { workspace = true, features = ["metal", "accelerate"] }

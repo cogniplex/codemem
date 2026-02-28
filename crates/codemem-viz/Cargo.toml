@@ -21,3 +21,6 @@ ndarray = { workspace = true }
 tower-http = { version = "0.6", features = ["cors"] }
 open = "5"
 anyhow = { workspace = true }
+
+[dev-dependencies]
+chrono = { workspace = true }

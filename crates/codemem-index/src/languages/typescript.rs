@@ -28,7 +28,7 @@ impl LanguageExtractor for TypeScriptExtractor {
     }
 
     fn file_extensions(&self) -> &[&str] {
-        &["ts", "tsx"]
+        &["ts", "tsx", "js", "jsx"]
     }
 
     fn tree_sitter_language(&self) -> tree_sitter::Language {

@@ -5,7 +5,7 @@ use axum::{
 use codemem_core::{GraphNode, MemoryNode, NodeKind, StorageBackend};
 use codemem_storage::Storage;
 use ndarray::{Array1, Array2};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::pca::power_iteration_top_k;
@@ -478,9 +478,194 @@ pub async fn api_graph_browse(
     }))
 }
 
+// -- D3 Graph -----------------------------------------------------------------
+
+pub async fn api_graph_d3(
+    State(storage): State<AppState>,
+    Query(query): Query<GraphD3Query>,
+) -> ApiResult<D3Graph> {
+    let storage = storage.lock().map_err(lock_err)?;
+    let mut nodes = storage.all_graph_nodes().map_err(lock_err)?;
+    let edges = if let Some(ref ns) = query.namespace {
+        nodes.retain(|n| n.namespace.as_deref() == Some(ns.as_str()));
+        storage.graph_edges_for_namespace(ns)
+    } else {
+        storage.all_graph_edges()
+    }
+    .map_err(lock_err)?;
+
+    let node_ids: HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
+
+    let d3_nodes: Vec<D3Node> = nodes
+        .into_iter()
+        .map(|n| D3Node {
+            id: n.id,
+            label: n.label,
+            kind: n.kind.to_string(),
+            centrality: n.centrality,
+            namespace: n.namespace,
+        })
+        .collect();
+
+    let d3_links: Vec<D3Link> = edges
+        .into_iter()
+        .filter(|e| node_ids.contains(&e.src) && node_ids.contains(&e.dst))
+        .map(|e| D3Link {
+            source: e.src,
+            target: e.dst,
+            relationship: e.relationship.to_string(),
+            weight: e.weight,
+        })
+        .collect();
+
+    Ok(Json(D3Graph {
+        nodes: d3_nodes,
+        links: d3_links,
+    }))
+}
+
+// -- Timeline -----------------------------------------------------------------
+
+pub async fn api_timeline(
+    State(storage): State<AppState>,
+    Query(query): Query<TimelineQuery>,
+) -> ApiResult<TimelineResponse> {
+    let storage = storage.lock().map_err(lock_err)?;
+    let memories = storage
+        .list_memories_filtered(query.namespace.as_deref(), None)
+        .map_err(lock_err)?;
+
+    let mut all_types: HashSet<String> = HashSet::new();
+    let mut day_map: BTreeMap<String, HashMap<String, usize>> = BTreeMap::new();
+
+    for m in &memories {
+        let date = m.created_at.format("%Y-%m-%d").to_string();
+        let mtype = m.memory_type.to_string();
+        all_types.insert(mtype.clone());
+        *day_map
+            .entry(date)
+            .or_default()
+            .entry(mtype)
+            .or_insert(0) += 1;
+    }
+
+    let mut types: Vec<String> = all_types.into_iter().collect();
+    types.sort();
+
+    let buckets: Vec<TimelineBucket> = day_map
+        .into_iter()
+        .map(|(date, counts)| {
+            let total = counts.values().sum();
+            TimelineBucket {
+                date,
+                counts,
+                total,
+            }
+        })
+        .collect();
+
+    Ok(Json(TimelineResponse { buckets, types }))
+}
+
+// -- Distribution -------------------------------------------------------------
+
+pub async fn api_distribution(
+    State(storage): State<AppState>,
+    Query(query): Query<DistributionQuery>,
+) -> ApiResult<DistributionResponse> {
+    let storage = storage.lock().map_err(lock_err)?;
+    let memories = storage
+        .list_memories_filtered(query.namespace.as_deref(), None)
+        .map_err(lock_err)?;
+
+    let total = memories.len();
+    let mut type_counts: HashMap<String, usize> = HashMap::new();
+    let mut importance_histogram: BTreeMap<String, usize> = BTreeMap::new();
+
+    for m in &memories {
+        *type_counts
+            .entry(m.memory_type.to_string())
+            .or_insert(0) += 1;
+
+        // Bucket importance into 0.0-0.1, 0.1-0.2, ... 0.9-1.0
+        let bucket = (m.importance * 10.0).floor().min(9.0) as u8;
+        let label = format!("{:.1}-{:.1}", bucket as f64 / 10.0, (bucket + 1) as f64 / 10.0);
+        *importance_histogram.entry(label).or_insert(0) += 1;
+    }
+
+    Ok(Json(DistributionResponse {
+        type_counts,
+        importance_histogram,
+        total,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+    use codemem_core::{Edge as CoreEdge, MemoryType, RelationshipType};
+
+    fn make_test_memory(
+        content: &str,
+        ns: Option<&str>,
+        mtype: MemoryType,
+        importance: f64,
+        created_at: chrono::DateTime<chrono::Utc>,
+    ) -> MemoryNode {
+        let id = format!("mem-{:x}", {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            content.hash(&mut h);
+            h.finish()
+        });
+        MemoryNode {
+            id,
+            content: content.to_string(),
+            memory_type: mtype,
+            importance,
+            confidence: 1.0,
+            access_count: 0,
+            content_hash: Storage::content_hash(content),
+            tags: vec![],
+            metadata: HashMap::new(),
+            namespace: ns.map(|s| s.to_string()),
+            created_at,
+            updated_at: created_at,
+            last_accessed_at: created_at,
+        }
+    }
+
+    fn make_test_graph_node(
+        id: &str,
+        kind: NodeKind,
+        label: &str,
+        ns: Option<&str>,
+    ) -> GraphNode {
+        GraphNode {
+            id: id.to_string(),
+            kind,
+            label: label.to_string(),
+            payload: HashMap::new(),
+            centrality: 0.5,
+            memory_id: None,
+            namespace: ns.map(|s| s.to_string()),
+        }
+    }
+
+    fn make_test_edge(id: &str, src: &str, dst: &str) -> CoreEdge {
+        CoreEdge {
+            id: id.to_string(),
+            src: src.to_string(),
+            dst: dst.to_string(),
+            relationship: RelationshipType::RelatesTo,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        }
+    }
 
     #[test]
     fn truncate_str_short_string() {
@@ -609,5 +794,213 @@ mod tests {
         assert!(browse.nodes.is_empty());
         assert_eq!(browse.total, 0);
         assert_eq!(browse.edge_count, 0);
+    }
+
+    // -- Integration tests with data ------------------------------------------
+
+    #[tokio::test]
+    async fn api_graph_d3_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = GraphD3Query { namespace: None };
+        let result = api_graph_d3(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        let d3 = result.unwrap().0;
+        assert!(d3.nodes.is_empty());
+        assert!(d3.links.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_graph_d3_with_data() {
+        let storage = Storage::open_in_memory().unwrap();
+        let node_a = make_test_graph_node("node-a", NodeKind::Function, "fn_alpha", None);
+        let node_b = make_test_graph_node("node-b", NodeKind::Function, "fn_beta", None);
+        storage.insert_graph_node(&node_a).unwrap();
+        storage.insert_graph_node(&node_b).unwrap();
+
+        let edge = make_test_edge("edge-ab", "node-a", "node-b");
+        storage.insert_graph_edge(&edge).unwrap();
+
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = GraphD3Query { namespace: None };
+        let result = api_graph_d3(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        let d3 = result.unwrap().0;
+        assert_eq!(d3.nodes.len(), 2);
+        assert_eq!(d3.links.len(), 1);
+        assert_eq!(d3.links[0].source, "node-a");
+        assert_eq!(d3.links[0].target, "node-b");
+    }
+
+    #[tokio::test]
+    async fn api_timeline_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = TimelineQuery { namespace: None };
+        let result = api_timeline(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        let timeline = result.unwrap().0;
+        assert!(timeline.buckets.is_empty());
+        assert!(timeline.types.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_timeline_with_data() {
+        let storage = Storage::open_in_memory().unwrap();
+
+        let date1 = chrono::Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap();
+        let date2 = chrono::Utc.with_ymd_and_hms(2024, 2, 20, 12, 0, 0).unwrap();
+
+        let m1 = make_test_memory("decision about error handling", None, MemoryType::Decision, 0.7, date1);
+        let m2 = make_test_memory("pattern for retry logic", None, MemoryType::Pattern, 0.6, date2);
+        storage.insert_memory(&m1).unwrap();
+        storage.insert_memory(&m2).unwrap();
+
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = TimelineQuery { namespace: None };
+        let result = api_timeline(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        let timeline = result.unwrap().0;
+        assert_eq!(timeline.buckets.len(), 2);
+        assert_eq!(timeline.buckets[0].date, "2024-01-15");
+        assert_eq!(timeline.buckets[1].date, "2024-02-20");
+        assert_eq!(timeline.buckets[0].total, 1);
+        assert_eq!(timeline.buckets[1].total, 1);
+    }
+
+    #[tokio::test]
+    async fn api_distribution_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = DistributionQuery { namespace: None };
+        let result = api_distribution(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        let dist = result.unwrap().0;
+        assert!(dist.type_counts.is_empty());
+        assert!(dist.importance_histogram.is_empty());
+        assert_eq!(dist.total, 0);
+    }
+
+    #[tokio::test]
+    async fn api_distribution_with_data() {
+        let storage = Storage::open_in_memory().unwrap();
+
+        let now = chrono::Utc::now();
+        let m1 = make_test_memory("use Result instead of panic", None, MemoryType::Decision, 0.3, now);
+        let m2 = make_test_memory("builder pattern for configs", None, MemoryType::Pattern, 0.8, now);
+        storage.insert_memory(&m1).unwrap();
+        storage.insert_memory(&m2).unwrap();
+
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = DistributionQuery { namespace: None };
+        let result = api_distribution(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        let dist = result.unwrap().0;
+        assert_eq!(dist.total, 2);
+        assert_eq!(dist.type_counts.get("decision"), Some(&1));
+        assert_eq!(dist.type_counts.get("pattern"), Some(&1));
+        // importance 0.3 -> bucket "0.3-0.4", importance 0.8 -> bucket "0.8-0.9"
+        assert_eq!(dist.importance_histogram.get("0.3-0.4"), Some(&1));
+        assert_eq!(dist.importance_histogram.get("0.8-0.9"), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn api_memory_detail_found() {
+        let storage = Storage::open_in_memory().unwrap();
+        let now = chrono::Utc::now();
+        let m = make_test_memory("important architectural decision", None, MemoryType::Decision, 0.9, now);
+        let mem_id = m.id.clone();
+        storage.insert_memory(&m).unwrap();
+
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let result = api_memory_detail(State(state), Path(mem_id)).await;
+        assert!(result.is_ok());
+        let json = result.unwrap().0;
+        assert_eq!(json["content"], "important architectural decision");
+    }
+
+    #[tokio::test]
+    async fn api_memory_detail_not_found() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let result = api_memory_detail(State(state), Path("nonexistent-id".to_string())).await;
+        assert!(result.is_err());
+        let (status, _msg) = result.unwrap_err();
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_graph_neighbors_with_data() {
+        let storage = Storage::open_in_memory().unwrap();
+
+        // Create 3 nodes: A -> B -> C
+        let node_a = make_test_graph_node("node-a", NodeKind::Module, "module_a", None);
+        let node_b = make_test_graph_node("node-b", NodeKind::Function, "fn_b", None);
+        let node_c = make_test_graph_node("node-c", NodeKind::Function, "fn_c", None);
+        storage.insert_graph_node(&node_a).unwrap();
+        storage.insert_graph_node(&node_b).unwrap();
+        storage.insert_graph_node(&node_c).unwrap();
+
+        let edge_ab = make_test_edge("edge-ab", "node-a", "node-b");
+        let edge_bc = make_test_edge("edge-bc", "node-b", "node-c");
+        storage.insert_graph_edge(&edge_ab).unwrap();
+        storage.insert_graph_edge(&edge_bc).unwrap();
+
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = NeighborQuery { depth: Some(2) };
+        let result =
+            api_graph_neighbors(State(state.clone()), Path("node-a".to_string()), Query(query))
+                .await;
+        assert!(result.is_ok());
+        let neighbors = result.unwrap().0;
+        // BFS from A with depth 2 should reach A, B, and C
+        assert_eq!(neighbors.nodes.len(), 3);
+        assert_eq!(neighbors.edges.len(), 2);
+        let node_ids: HashSet<String> = neighbors.nodes.iter().map(|n| n.id.clone()).collect();
+        assert!(node_ids.contains("node-a"));
+        assert!(node_ids.contains("node-b"));
+        assert!(node_ids.contains("node-c"));
+    }
+
+    #[tokio::test]
+    async fn api_search_with_results() {
+        let storage = Storage::open_in_memory().unwrap();
+        let now = chrono::Utc::now();
+        let m = make_test_memory("rust pattern matching is powerful", None, MemoryType::Insight, 0.7, now);
+        storage.insert_memory(&m).unwrap();
+
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = SearchQuery {
+            q: Some("pattern".to_string()),
+            namespace: None,
+        };
+        let result = api_search(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        let results = result.unwrap().0;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("pattern matching"));
+    }
+
+    #[tokio::test]
+    async fn api_memories_namespace_filter() {
+        let storage = Storage::open_in_memory().unwrap();
+        let now = chrono::Utc::now();
+
+        let m1 = make_test_memory("memory in project alpha", Some("proj-a"), MemoryType::Context, 0.5, now);
+        let m2 = make_test_memory("memory in project beta", Some("proj-b"), MemoryType::Context, 0.5, now);
+        storage.insert_memory(&m1).unwrap();
+        storage.insert_memory(&m2).unwrap();
+
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = MemoryQuery {
+            namespace: Some("proj-a".to_string()),
+            memory_type: None,
+        };
+        let result = api_memories(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        let items = result.unwrap().0;
+        assert_eq!(items.len(), 1);
+        assert!(items[0].content.contains("project alpha"));
+        assert_eq!(items[0].namespace, Some("proj-a".to_string()));
     }
 }

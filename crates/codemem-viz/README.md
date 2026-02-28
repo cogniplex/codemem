@@ -16,7 +16,10 @@ Axum-based REST API with an embedded HTML/JS frontend. Projects 768-dim memory e
 - `GET /api/graph/nodes` — Graph nodes
 - `GET /api/graph/edges` — Graph edges
 - `GET /api/graph/browse` — Paginated graph browsing
+- `GET /api/graph/d3` — D3-compatible graph format (nodes + links)
 - `GET /api/search` — Memory search
+- `GET /api/timeline` — Memory creation timeline (grouped by day and type)
+- `GET /api/distribution` — Memory type distribution stats
 
 ## Usage
 

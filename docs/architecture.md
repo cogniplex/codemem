@@ -2,6 +2,14 @@
 
 Codemem is a standalone Rust memory engine for AI coding assistants. A single binary (`cargo install codemem-cli`) stores code exploration findings so repositories do not need re-exploring across sessions, supports cross-repo structural relationships for monorepo intelligence, and wires into any MCP-compatible tool via hooks (passive capture) and MCP tools (active query).
 
+## How Codemem Works
+
+`codemem init` registers 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop) and a stdio MCP server. The PostToolUse hook intercepts Read/Grep/Edit/Write tool calls, extracts structured observations (file paths, symbols, diff summaries), embeds them with BAAI/bge-base-en-v1.5 (768-dim, contextually enriched with metadata + graph neighbors), and stores them as typed memory nodes (Decision, Pattern, Insight, etc.) with graph edges (CALLS, IMPORTS, EVOLVED_INTO, etc.) in a single SQLite WAL database + usearch HNSW index. SessionStart injects prior context; Stop generates a structured session summary.
+
+Recall uses 9-component hybrid scoring: vector cosine (25%), graph strength via PageRank/betweenness/degree/cluster coefficient (25%), Okapi BM25 with camelCase/snake_case tokenization (15%), temporal alignment (10%), tag matching (10%), importance (5%), confidence (5%), recency (5%). The graph layer (petgraph) runs 25 algorithms — PageRank, Louvain community detection, betweenness centrality, SCC, topological sort — cached per session. `recall_with_impact` returns blast-radius data alongside results. All weights are runtime-configurable via `set_scoring_weights` and persist in `~/.codemem/config.toml`.
+
+Consolidation runs 5 cycles: Decay (power-law `importance × 0.9^(days/30) × (1 + log₂(access_count) × 0.1)`), Creative (O(n log n) vector KNN + Union-Find to create SHARES_THEME edges across memory types), Cluster (cosine similarity > 0.92 deduplication), Summarize (LLM-powered connected-component summarization via Ollama/OpenAI/Anthropic), Forget (prune below threshold). Memories support self-editing: `refine_memory` creates EVOLVED_INTO provenance chains, `split_memory` decomposes via PART_OF edges, `merge_memories` combines via SUMMARIZES edges — all with temporal edge tracking (valid_from/valid_to).
+
 ---
 
 ## 1. System Overview
@@ -12,11 +20,11 @@ The following diagram shows the full Codemem system: AI assistant integration po
 graph TB
     subgraph "AI Coding Assistant"
         H[4 Lifecycle Hooks<br/>SessionStart, UserPromptSubmit,<br/>PostToolUse, Stop]
-        M[MCP Tools<br/>33 tools via JSON-RPC stdio]
+        M[MCP Tools<br/>38 tools via JSON-RPC stdio]
     end
 
     subgraph "Codemem Binary"
-        CLI[codemem-cli<br/>15 commands]
+        CLI[codemem-cli<br/>18 commands]
         HOOKS[codemem-hooks<br/>Payload parsing + extractors + diff]
         MCP[codemem-mcp<br/>JSON-RPC server + BM25]
         WATCH[codemem-watch<br/>File watcher, 50ms debounce]
@@ -27,7 +35,7 @@ graph TB
             VEC[codemem-vector<br/>usearch HNSW]
             STORE[codemem-storage<br/>rusqlite WAL + sessions]
             GRAPH[codemem-graph<br/>petgraph + cached centrality]
-            IDX[codemem-index<br/>tree-sitter, 6 languages]
+            IDX[codemem-index<br/>tree-sitter, 13 languages]
         end
 
         VIZ[codemem-viz<br/>Dashboard]
@@ -121,10 +129,10 @@ graph BT
 | codemem-vector | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200, efSearch=100, persistent ID mapping |
 | codemem-graph | petgraph + SQLite persistence. Split into `traversal.rs` (GraphBackend trait impl: BFS/DFS/shortest path), `algorithms.rs` (PageRank, personalized PageRank, Louvain, betweenness, SCC, topological layers). Cached centrality scores (`recompute_centrality()`) |
 | codemem-embeddings | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization. Safe concurrency via `LockPoisoned` error handling |
-| codemem-index | tree-sitter code indexing, 6 language extractors (Rust, TypeScript, Python, Go, C/C++, Java), manifest parsing (Cargo.toml), reference resolution, incremental indexing |
-| codemem-mcp | JSON-RPC stdio server, 33 MCP tools. Split into `tools_memory.rs` (CRUD), `tools_graph.rs` (analysis), `tools_recall.rs` (advanced recall/namespaces), `tools_consolidation.rs` (lifecycle), `scoring.rs` (hybrid scorer), `types.rs` (protocol types). BM25 scoring, contextual enrichment, pattern detection. RwLock-based scoring weights, typed lock helpers |
+| codemem-index | tree-sitter code indexing, 13 language extractors (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform), manifest parsing (Cargo.toml), reference resolution, incremental indexing |
+| codemem-mcp | JSON-RPC stdio server, 38 MCP tools. Split into `tools_memory.rs` (CRUD + self-editing), `tools_graph.rs` (analysis), `tools_recall.rs` (advanced recall/namespaces), `tools_consolidation.rs` (lifecycle + LLM summarization), `scoring.rs` (hybrid scorer), `types.rs` (protocol types), `compress.rs` (LLM compression), `patterns.rs` (cross-session detection), `metrics.rs` (operational metrics). BM25 scoring, contextual enrichment, temporal edges, power-law decay, semantic clustering |
 | codemem-hooks | PostToolUse JSON parser, extractors per tool type (Read, Glob, Grep, Edit, Write), diff-aware memory via `similar` crate (semantic summaries), edge materialization, content hashing |
-| codemem-cli | clap derive, 15 commands. Split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`. Includes `compress` module for LLM-powered observation compression |
+| codemem-cli | clap derive, 18 commands. Split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`, `commands_doctor.rs`, `commands_config.rs`, `commands_migrate.rs`. Multi-format export (JSONL/JSON/CSV/Markdown), health checks, config management |
 | codemem-watch | Real-time file watcher via `notify` + `notify-debouncer-mini` (50ms debounce), proper `.gitignore` parsing via `ignore` crate, 17 file extensions, crossbeam channels |
 | codemem-viz | Axum REST API + embedded HTML frontend, PCA projection of embeddings to 3D, interactive dashboard |
 | codemem-bench | Criterion benchmarks (vector, storage, graph), 20% CI regression threshold |
@@ -580,7 +588,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 | `petgraph` | Directed graph data structure and algorithms |
 | `tokenizers` | HuggingFace tokenizer for bge-base-en-v1.5 |
 | `hf-hub` | Model download from HuggingFace Hub |
-| `tree-sitter` + language grammars | Code parsing for 6 languages (Rust, TypeScript, Python, Go, C/C++, Java) |
+| `tree-sitter` + language grammars | Code parsing for 13 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) |
 | `clap` | CLI framework with derive macros |
 | `serde` / `serde_json` | Serialization for JSON-RPC, storage, and configuration |
 | `tokio` | Async runtime for MCP server and viz dashboard |
@@ -603,7 +611,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 
 ---
 
-## 12. MCP Tools (33 total)
+## 12. MCP Tools (38 total)
 
 ### Memory Operations
 | Tool | Description |
@@ -623,7 +631,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 ### Code Index Operations
 | Tool | Description |
 |------|-------------|
-| `index_codebase` | Index a directory with tree-sitter (6 languages) |
+| `index_codebase` | Index a directory with tree-sitter (13 languages) |
 | `search_symbols` | Search indexed code symbols |
 | `get_symbol_info` | Get detailed info about a specific symbol |
 | `get_dependencies` | Get package/module dependency graph |

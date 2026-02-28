@@ -7,6 +7,7 @@ pub(crate) fn cmd_export(
     namespace: Option<&str>,
     memory_type: Option<&str>,
     output: Option<&std::path::Path>,
+    format: &str,
 ) -> anyhow::Result<()> {
     let db_path = crate::codemem_db_path();
     let storage = codemem_storage::Storage::open(&db_path)?;
@@ -19,23 +20,17 @@ pub(crate) fn cmd_export(
         None => storage.list_memory_ids()?,
     };
 
-    let mut writer: Box<dyn std::io::Write> = match output {
-        Some(path) => Box::new(std::fs::File::create(path)?),
-        None => Box::new(std::io::stdout()),
-    };
-
-    let mut count = 0usize;
+    // Collect all matching memories into JSON objects
+    let mut records: Vec<serde_json::Value> = Vec::new();
 
     for id in &ids {
         if let Some(memory) = storage.get_memory(id)? {
-            // Apply memory_type filter
             if let Some(ref filter_type) = memory_type_filter {
                 if memory.memory_type != *filter_type {
                     continue;
                 }
             }
 
-            // Get edges for this memory
             let edges: Vec<serde_json::Value> = storage
                 .get_edges_for_node(id)
                 .unwrap_or_default()
@@ -51,7 +46,7 @@ pub(crate) fn cmd_export(
                 })
                 .collect();
 
-            let obj = serde_json::json!({
+            records.push(serde_json::json!({
                 "id": memory.id,
                 "content": memory.content,
                 "memory_type": memory.memory_type.to_string(),
@@ -63,18 +58,131 @@ pub(crate) fn cmd_export(
                 "created_at": memory.created_at.to_rfc3339(),
                 "updated_at": memory.updated_at.to_rfc3339(),
                 "edges": edges,
-            });
-
-            // JSONL: one JSON object per line (compact)
-            let line = serde_json::to_string(&obj)?;
-            writeln!(writer, "{line}")?;
-            count += 1;
+            }));
         }
     }
 
-    // Print count to stderr (so it doesn't mix with JSONL output on stdout)
+    let mut writer: Box<dyn std::io::Write> = match output {
+        Some(path) => Box::new(std::fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+
+    let count = records.len();
+
+    match format {
+        "jsonl" => {
+            for obj in &records {
+                let line = serde_json::to_string(obj)?;
+                writeln!(writer, "{line}")?;
+            }
+        }
+        "json" => {
+            let pretty = serde_json::to_string_pretty(&records)?;
+            writeln!(writer, "{pretty}")?;
+        }
+        "csv" => {
+            // Header
+            writeln!(
+                writer,
+                "id,content,memory_type,importance,confidence,tags,namespace,created_at,updated_at"
+            )?;
+            for obj in &records {
+                writeln!(
+                    writer,
+                    "{},{},{},{},{},{},{},{},{}",
+                    csv_escape(obj["id"].as_str().unwrap_or("")),
+                    csv_escape(obj["content"].as_str().unwrap_or("")),
+                    csv_escape(obj["memory_type"].as_str().unwrap_or("")),
+                    obj["importance"].as_f64().unwrap_or(0.0),
+                    obj["confidence"].as_f64().unwrap_or(0.0),
+                    csv_escape(
+                        &obj["tags"]
+                            .as_array()
+                            .map(|a| a
+                                .iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(";"))
+                            .unwrap_or_default()
+                    ),
+                    csv_escape(obj["namespace"].as_str().unwrap_or("")),
+                    csv_escape(obj["created_at"].as_str().unwrap_or("")),
+                    csv_escape(obj["updated_at"].as_str().unwrap_or("")),
+                )?;
+            }
+        }
+        "markdown" | "md" => {
+            writeln!(writer, "# Codemem Export")?;
+            writeln!(writer)?;
+            writeln!(writer, "**Total memories:** {count}")?;
+            if let Some(ns) = namespace {
+                writeln!(writer, "**Namespace:** {ns}")?;
+            }
+            if let Some(mt) = memory_type {
+                writeln!(writer, "**Type filter:** {mt}")?;
+            }
+            writeln!(writer)?;
+
+            // Group by memory type
+            let mut by_type: std::collections::BTreeMap<String, Vec<&serde_json::Value>> =
+                std::collections::BTreeMap::new();
+            for obj in &records {
+                let mt = obj["memory_type"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string();
+                by_type.entry(mt).or_default().push(obj);
+            }
+
+            for (mt, memories) in &by_type {
+                writeln!(writer, "## {} ({} memories)", mt, memories.len())?;
+                writeln!(writer)?;
+                for obj in memories {
+                    let id = obj["id"].as_str().unwrap_or("?");
+                    let content = obj["content"].as_str().unwrap_or("");
+                    let importance = obj["importance"].as_f64().unwrap_or(0.0);
+                    let tags = obj["tags"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default();
+
+                    writeln!(writer, "### `{id}`")?;
+                    writeln!(writer)?;
+                    writeln!(writer, "- **Importance:** {importance:.2}")?;
+                    if !tags.is_empty() {
+                        writeln!(writer, "- **Tags:** {tags}")?;
+                    }
+                    writeln!(writer)?;
+                    writeln!(writer, "{content}")?;
+                    writeln!(writer)?;
+                    writeln!(writer, "---")?;
+                    writeln!(writer)?;
+                }
+            }
+        }
+        other => {
+            anyhow::bail!(
+                "Unknown format: {other}. Supported formats: jsonl, json, csv, markdown"
+            );
+        }
+    }
+
     eprintln!("Exported {count} memories.");
     Ok(())
+}
+
+/// RFC 4180 CSV field escaping: double-quote fields containing commas, newlines, or quotes.
+fn csv_escape(field: &str) -> String {
+    if field.contains(',') || field.contains('\n') || field.contains('"') {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
+    }
 }
 
 pub(crate) fn cmd_import(
@@ -402,4 +510,37 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
 
     println!("\nDone. Run `codemem stats` to see updated totals.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csv_escape_plain_text() {
+        assert_eq!(csv_escape("hello world"), "hello world");
+    }
+
+    #[test]
+    fn csv_escape_with_commas() {
+        assert_eq!(csv_escape("hello,world"), "\"hello,world\"");
+    }
+
+    #[test]
+    fn csv_escape_with_quotes() {
+        assert_eq!(csv_escape("he said \"hi\""), "\"he said \"\"hi\"\"\"");
+    }
+
+    #[test]
+    fn csv_escape_with_newlines() {
+        assert_eq!(csv_escape("line1\nline2"), "\"line1\nline2\"");
+    }
+
+    #[test]
+    fn csv_escape_combined() {
+        assert_eq!(
+            csv_escape("a,b\n\"c\""),
+            "\"a,b\n\"\"c\"\"\""
+        );
+    }
 }

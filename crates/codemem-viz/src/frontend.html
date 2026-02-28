@@ -13,6 +13,7 @@
 }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/force-graph@1/dist/force-graph.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
@@ -206,9 +207,31 @@ body {
   position: relative;
   min-width: 0;
 }
-#vector-view, #graph-view, #explorer-view {
+#vector-view, #graph-view, #explorer-view, #timeline-view, #distribution-view {
   position: absolute;
   inset: 0;
+}
+#timeline-view, #distribution-view {
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.chart-container {
+  background: rgba(255,255,255,0.03);
+  border-radius: 10px;
+  padding: 20px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.chart-container h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #b4adff;
+  margin-bottom: 12px;
+}
+.chart-container canvas {
+  max-height: 350px;
 }
 #vector-view canvas, #graph-view canvas { display: block; }
 .view-hidden { display: none !important; }
@@ -1053,6 +1076,8 @@ body {
     <button class="tab-btn active" data-tab="explorer">Explorer</button>
     <button class="tab-btn" data-tab="graph">Knowledge Graph</button>
     <button class="tab-btn" data-tab="vector">Vector Space</button>
+    <button class="tab-btn" data-tab="timeline">Timeline</button>
+    <button class="tab-btn" data-tab="distribution">Distribution</button>
   </div>
   <div class="stats-pills">
     <div class="stat-pill"><span class="num" id="stat-nodes">--</span> nodes</div>
@@ -1121,6 +1146,22 @@ body {
       <div id="vector-empty" class="empty-state hidden">
         <div class="icon">&#9673;</div>
         <p>No vector data</p>
+      </div>
+    </div>
+    <div id="timeline-view" class="view-hidden">
+      <div class="chart-container">
+        <h3>Memories Created Over Time</h3>
+        <canvas id="timeline-chart"></canvas>
+      </div>
+    </div>
+    <div id="distribution-view" class="view-hidden">
+      <div class="chart-container" style="max-width:500px;">
+        <h3>Memory Types</h3>
+        <canvas id="type-chart"></canvas>
+      </div>
+      <div class="chart-container">
+        <h3>Importance Distribution</h3>
+        <canvas id="importance-chart"></canvas>
       </div>
     </div>
     <div id="legend"></div>
@@ -1240,6 +1281,8 @@ const sidePanel = document.getElementById('side-panel');
 const tooltip = document.getElementById('tooltip');
 const vectorView = document.getElementById('vector-view');
 const graphView = document.getElementById('graph-view');
+const timelineView = document.getElementById('timeline-view');
+const distributionView = document.getElementById('distribution-view');
 const vectorLoading = document.getElementById('vector-loading');
 const graphLoading = document.getElementById('graph-loading');
 const vectorEmpty = document.getElementById('vector-empty');
@@ -2493,11 +2536,13 @@ topBarTabs.forEach(btn => {
     searchDropdown.classList.remove('visible');
     const explorerView = document.getElementById('explorer-view');
 
+    const allViews = [explorerView, graphView, vectorView, timelineView, distributionView];
+    function hideAllViews() { allViews.forEach(v => v.classList.add('view-hidden')); }
+
     if (activeTab === 'vector') {
       if (focusMode) exitFocusMode();
+      hideAllViews();
       vectorView.classList.remove('view-hidden');
-      graphView.classList.add('view-hidden');
-      explorerView.classList.add('view-hidden');
       sidePanel.style.display = '';
       relFiltersContainer.classList.add('hidden');
       if (vectorData.length === 0) {
@@ -2507,9 +2552,8 @@ topBarTabs.forEach(btn => {
       }
     } else if (activeTab === 'graph') {
       if (focusMode) exitFocusMode();
+      hideAllViews();
       graphView.classList.remove('view-hidden');
-      vectorView.classList.add('view-hidden');
-      explorerView.classList.add('view-hidden');
       sidePanel.style.display = '';
       relFiltersContainer.classList.remove('hidden');
       if (!forceGraph) {
@@ -2519,12 +2563,25 @@ topBarTabs.forEach(btn => {
       }
     } else if (activeTab === 'explorer') {
       if (focusMode) exitFocusMode();
+      hideAllViews();
       explorerView.classList.remove('view-hidden');
-      vectorView.classList.add('view-hidden');
-      graphView.classList.add('view-hidden');
       sidePanel.style.display = 'none';
       relFiltersContainer.classList.add('hidden');
       initExplorerView();
+    } else if (activeTab === 'timeline') {
+      if (focusMode) exitFocusMode();
+      hideAllViews();
+      timelineView.classList.remove('view-hidden');
+      sidePanel.style.display = 'none';
+      relFiltersContainer.classList.add('hidden');
+      loadTimelineChart();
+    } else if (activeTab === 'distribution') {
+      if (focusMode) exitFocusMode();
+      hideAllViews();
+      distributionView.classList.remove('view-hidden');
+      sidePanel.style.display = 'none';
+      relFiltersContainer.classList.add('hidden');
+      loadDistributionCharts();
     }
   });
 });
@@ -3060,6 +3117,130 @@ function buildExplorerConnections(centerId, neighborData, container) {
       if (card) card.classList.add('selected');
     });
   });
+}
+
+// ====================================================================
+// Timeline Chart
+// ====================================================================
+let timelineChart = null;
+async function loadTimelineChart() {
+  const ns = namespaceSelect.value;
+  const url = ns ? `/api/timeline?namespace=${encodeURIComponent(ns)}` : '/api/timeline';
+  try {
+    const data = await apiFetch(url);
+    const labels = data.buckets.map(b => b.date);
+    const typeColors = {
+      decision: '#7c6cf0', pattern: '#47c9e5', preference: '#f0a64c',
+      style: '#e06088', habit: '#62d98c', insight: '#c084fc', context: '#6b7094'
+    };
+    const datasets = data.types.map(t => ({
+      label: t,
+      data: data.buckets.map(b => b.counts[t] || 0),
+      backgroundColor: typeColors[t] || '#6b7094',
+    }));
+
+    const ctx = document.getElementById('timeline-chart');
+    if (timelineChart) timelineChart.destroy();
+    timelineChart = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#c8cad0', font: { size: 11 } } },
+        },
+        scales: {
+          x: {
+            stacked: true,
+            ticks: { color: '#6b7094', maxRotation: 45 },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+          y: {
+            stacked: true,
+            ticks: { color: '#6b7094' },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+        },
+      },
+    });
+  } catch (e) {
+    console.error('Timeline load error:', e);
+  }
+}
+
+// ====================================================================
+// Distribution Charts
+// ====================================================================
+let typeChart = null, importanceChart = null;
+async function loadDistributionCharts() {
+  const ns = namespaceSelect.value;
+  const url = ns ? `/api/distribution?namespace=${encodeURIComponent(ns)}` : '/api/distribution';
+  try {
+    const data = await apiFetch(url);
+    const typeColors = {
+      decision: '#7c6cf0', pattern: '#47c9e5', preference: '#f0a64c',
+      style: '#e06088', habit: '#62d98c', insight: '#c084fc', context: '#6b7094'
+    };
+
+    // Type doughnut
+    const typeLabels = Object.keys(data.type_counts).sort();
+    const typeData = typeLabels.map(t => data.type_counts[t]);
+    const typeBgColors = typeLabels.map(t => typeColors[t] || '#6b7094');
+
+    const ctx1 = document.getElementById('type-chart');
+    if (typeChart) typeChart.destroy();
+    typeChart = new Chart(ctx1, {
+      type: 'doughnut',
+      data: {
+        labels: typeLabels,
+        datasets: [{ data: typeData, backgroundColor: typeBgColors, borderWidth: 0 }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { color: '#c8cad0', font: { size: 11 } } },
+        },
+      },
+    });
+
+    // Importance histogram
+    const impLabels = Object.keys(data.importance_histogram).sort();
+    const impData = impLabels.map(k => data.importance_histogram[k]);
+
+    const ctx2 = document.getElementById('importance-chart');
+    if (importanceChart) importanceChart.destroy();
+    importanceChart = new Chart(ctx2, {
+      type: 'bar',
+      data: {
+        labels: impLabels,
+        datasets: [{
+          label: 'Count',
+          data: impData,
+          backgroundColor: '#7c6cf0',
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            ticks: { color: '#6b7094', font: { size: 10 } },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+          y: {
+            ticks: { color: '#6b7094' },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+        },
+      },
+    });
+  } catch (e) {
+    console.error('Distribution load error:', e);
+  }
 }
 
 // ====================================================================

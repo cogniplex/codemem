@@ -1,6 +1,6 @@
 //! codemem-mcp: MCP server for Codemem (JSON-RPC 2.0 over stdio).
 //!
-//! Implements 37 tools: store_memory, recall_memory, update_memory,
+//! Implements 38 tools: store_memory, recall_memory, update_memory,
 //! delete_memory, associate_memories, graph_traverse, codemem_stats, codemem_health,
 //! index_codebase, search_symbols, get_symbol_info, get_dependencies, get_impact,
 //! get_clusters, get_cross_repo, get_pagerank, search_code, set_scoring_weights,
@@ -8,7 +8,8 @@
 //! namespace_stats, delete_namespace, consolidate_decay, consolidate_creative,
 //! consolidate_cluster, consolidate_forget, consolidation_status,
 //! recall_with_impact, get_decision_chain, detect_patterns, pattern_insights,
-//! refine_memory, split_memory, merge_memories, consolidate_summarize.
+//! refine_memory, split_memory, merge_memories, consolidate_summarize,
+//! codemem_metrics.
 //!
 //! Transport: Newline-delimited JSON-RPC messages over stdio.
 //! All logging goes to stderr; stdout is reserved for JSON-RPC only.
@@ -26,6 +27,7 @@ use std::sync::{Mutex, RwLock};
 
 pub mod bm25;
 pub(crate) mod compress;
+pub mod metrics;
 pub mod patterns;
 pub mod scoring;
 pub mod tools_consolidation;
@@ -67,6 +69,8 @@ pub struct McpServer {
     /// Loaded configuration (used by scoring_weights initialization and persistence).
     #[allow(dead_code)]
     pub(crate) config: codemem_core::CodememConfig,
+    /// Operational metrics collector.
+    pub(crate) metrics: std::sync::Arc<metrics::InMemoryMetrics>,
 }
 
 impl McpServer {
@@ -90,6 +94,7 @@ impl McpServer {
             scoring_weights: RwLock::new(config.scoring.clone()),
             bm25_index: Mutex::new(bm25::Bm25Index::new()),
             config,
+            metrics: std::sync::Arc::new(metrics::InMemoryMetrics::new()),
         }
     }
 
@@ -444,6 +449,15 @@ impl McpServer {
     // ── Tool Dispatch ───────────────────────────────────────────────────────
 
     fn dispatch_tool(&self, name: &str, args: &Value) -> ToolResult {
+        let start = std::time::Instant::now();
+        let result = self.dispatch_tool_inner(name, args);
+        let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+        codemem_core::Metrics::record_latency(&*self.metrics, name, elapsed);
+        codemem_core::Metrics::increment_counter(&*self.metrics, "tool_calls_total", 1);
+        result
+    }
+
+    fn dispatch_tool_inner(&self, name: &str, args: &Value) -> ToolResult {
         match name {
             "store_memory" => self.tool_store_memory(args),
             "recall_memory" => self.tool_recall_memory(args),
@@ -482,6 +496,7 @@ impl McpServer {
             "split_memory" => self.tool_split_memory(args),
             "merge_memories" => self.tool_merge_memories(args),
             "consolidate_summarize" => self.tool_consolidate_summarize(args),
+            "codemem_metrics" => self.tool_metrics(),
             _ => ToolResult::tool_error(format!("Unknown tool: {name}")),
         }
     }
@@ -1000,6 +1015,14 @@ fn tool_definitions() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "name": "codemem_metrics",
+            "description": "Return operational metrics: per-tool latency percentiles (p50/p95/p99), call counters, and gauge values. No parameters required.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
     ]
 }
 
@@ -1023,12 +1046,12 @@ mod tests {
     }
 
     #[test]
-    fn handle_tools_list_returns_37_tools() {
+    fn handle_tools_list_returns_38_tools() {
         let server = test_server();
         let resp = server.handle_request("tools/list", None, json!(2));
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 37);
+        assert_eq!(tools.len(), 38);
 
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"store_memory"));
@@ -1064,6 +1087,7 @@ mod tests {
         assert!(names.contains(&"split_memory"));
         assert!(names.contains(&"merge_memories"));
         assert!(names.contains(&"consolidate_summarize"));
+        assert!(names.contains(&"codemem_metrics"));
     }
 
     #[test]

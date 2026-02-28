@@ -13,7 +13,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **Offline** | Yes | Partial | Partial | No | Partial | Partial | No (needs embedding API) | No | Yes |
 | **Embedding** | Pluggable via env var: Candle (local, default), Ollama, OpenAI-compatible (768-dim) | Chroma (via uvx) | Pluggable (API or local) | LLM-managed | Configurable | Pluggable | Pluggable (OpenAI/Voyage) | Qdrant | ONNX (384-dim) |
 | **Code-aware** | Yes (hooks + tree-sitter) | No | No | No | No | Partial (codify tool) | Yes (AST splitting) | No | No |
-| **MCP tools** | 33 | 3 | Yes (official) | Yes (Graphiti MCP) | Yes | Yes (cognee-mcp) | Yes (4 tools) | Yes (4 tools) | Manual |
+| **MCP tools** | 38 | 3 | Yes (official) | Yes (Graphiti MCP) | Yes | Yes (cognee-mcp) | Yes (4 tools) | Yes (4 tools) | Manual |
 | **Graph** | Built-in (petgraph, 25 algos) | No | Neo4j (optional) | Neo4j/FalkorDB | No | Neo4j/FalkorDB/Kuzu | No | FalkorDB | Optional |
 | **Compression** | Pluggable LLM (optional) | AI-powered (always on) | No | No | No | No | No | No | No |
 | **Consolidation** | 4 cycles (decay/creative/cluster/forget) | No | Auto-extraction | Temporal updates | Self-editing memory | ECL pipeline | No | HippoRAG-inspired | NightlyLearner |
@@ -30,7 +30,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **Install** | `curl -fsSL .../install.sh \| sh` or `brew install cogniplex/tap/codemem` | `pip install mem0ai` + vector DB + graph DB |
 | **Storage** | Single SQLite file + HNSW index | Triple-store: vector DB (24+ providers) + graph DB (Neo4j/Memgraph) + relational DB |
 | **Auto-capture** | PostToolUse hooks capture Read/Grep/Edit/Write automatically | Manual `add()` calls only |
-| **Code awareness** | 6 language extractors, structural indexing, code-aware memory types | General-purpose fact extraction from conversations |
+| **Code awareness** | 13 language extractors, structural indexing, code-aware memory types | General-purpose fact extraction from conversations |
 | **Recall scoring** | 9-component hybrid (vector + graph strength via PageRank/betweenness + BM25 + temporal + tags + importance + confidence + recency) | Vector similarity + optional graph traversal |
 | **Contextual embeddings** | Yes (metadata + graph context enrichment at ingestion) | No |
 | **Local-only** | Yes, fully offline | Requires external embedding API for full functionality |
@@ -77,7 +77,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | Aspect | Codemem | Cognee |
 |--------|--------|--------|
 | **Knowledge extraction** | Hook-based capture + structural code indexing | LLM-based triplet extraction from any data source |
-| **Code support** | 6 language extractors (Rust, TS, Python, Go, C/C++, Java) via tree-sitter | `codify` tool for Python codebases |
+| **Code support** | 13 language extractors (Rust, TS/JS, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) via tree-sitter | `codify` tool for Python codebases |
 | **Pipeline** | Ingest -> enrich -> embed -> store -> graph | ECL: Extract -> Cognify -> Load |
 | **Accuracy** | 9-component hybrid scoring | Claims 92.5% vs 60% traditional RAG |
 | **Dependencies** | None (single binary) | Python + choice of graph/vector/relational backends |
@@ -93,8 +93,8 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | Aspect | Codemem | claude-context |
 |--------|--------|---------------|
 | **Scope** | Full memory engine (capture + recall + graph + consolidation) | Code search/retrieval only |
-| **Code parsing** | tree-sitter (6 languages) | AST splitting (14 languages) |
-| **MCP tools** | 33 tools | 4 tools (index, search, clear, status) |
+| **Code parsing** | tree-sitter (13 languages) | AST splitting (14 languages) |
+| **MCP tools** | 38 tools | 4 tools (index, search, clear, status) |
 | **Memory** | Persistent across sessions with 7 memory types | Index only (no persistent learning) |
 | **Embedding** | Pluggable: Candle (local, default), Ollama, OpenAI-compatible (Voyage AI, etc.) | External API required (OpenAI/Voyage/Ollama/Gemini) |
 | **Search** | Hybrid (vector + graph + BM25 + temporal + tags + ...) | Hybrid (BM25 + dense vector) |
@@ -115,14 +115,14 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **Runtime deps** | None | Node.js + Bun + uv + Python + Express on port 37777 |
 | **Hooks** | 4 lifecycle hooks (same events) | 5 lifecycle hooks |
 | **Knowledge graph** | petgraph with 25 algorithms (PageRank, Louvain, betweenness, SCC) | None |
-| **Code intelligence** | tree-sitter indexing, 6 languages, structural relationships | None (stores raw text observations) |
+| **Code intelligence** | tree-sitter indexing, 13 languages, structural relationships | None (stores raw text observations) |
 | **Scoring** | 9-component hybrid (vector + graph + BM25 + temporal + tags + importance + confidence + recency) | FTS5 keyword + Chroma vector (separate) |
 | **Embeddings** | Pluggable: Candle BERT (Metal/CUDA, default), Ollama, OpenAI-compatible | Chroma (external process via uvx) |
 | **BM25** | Okapi BM25 with code-aware tokenizer | SQLite FTS5 (not code-aware) |
 | **Observation compression** | Pluggable LLM (Ollama/OpenAI/Anthropic), optional | Claude Agent SDK (always on) |
 | **Contextual embeddings** | Metadata + graph neighbors enriched before embedding | Raw text embedding |
 | **Consolidation** | 4 biologically-inspired cycles | None |
-| **MCP tools** | 33 | 3 (search, timeline, get_observations) |
+| **MCP tools** | 38 | 3 (search, timeline, get_observations) |
 | **Session summaries** | Structured (files/decisions/searches) | AI-generated |
 | **Web viewer** | PCA visualization | React UI with SSE, infinite scroll |
 | **Privacy** | Namespace scoping | `<private>` tag exclusion |

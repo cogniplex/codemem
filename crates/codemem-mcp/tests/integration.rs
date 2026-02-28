@@ -278,12 +278,12 @@ fn stats_empty_server() {
 // ── Tools List ─────────────────────────────────────────────────────────────
 
 #[test]
-fn tools_list_returns_all_37_tools() {
+fn tools_list_returns_all_38_tools() {
     let server = test_server();
     let resp = server.handle_request("tools/list", None, json!(1));
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 37);
+    assert_eq!(tools.len(), 38);
 
     let expected = [
         "store_memory",
@@ -323,6 +323,7 @@ fn tools_list_returns_all_37_tools() {
         "split_memory",
         "merge_memories",
         "consolidate_summarize",
+        "codemem_metrics",
     ];
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     for expected_name in &expected {

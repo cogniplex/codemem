@@ -39,6 +39,7 @@ const IGNORE_DIRS: &[&str] = &[
 /// Watchable file extensions (code files).
 const WATCHABLE_EXTENSIONS: &[&str] = &[
     "rs", "ts", "tsx", "js", "jsx", "py", "go", "c", "cpp", "cc", "cxx", "h", "hpp", "java",
+    "rb", "cs", "kt", "kts", "swift", "php", "scala", "sc", "tf", "hcl", "tfvars",
     "toml", "json", "yaml", "yml",
 ];
 
@@ -112,6 +113,13 @@ pub fn detect_language(path: &Path) -> Option<&'static str> {
             "c" | "h" => Some("c"),
             "cpp" | "cc" | "cxx" | "hpp" => Some("cpp"),
             "java" => Some("java"),
+            "rb" => Some("ruby"),
+            "cs" => Some("csharp"),
+            "kt" | "kts" => Some("kotlin"),
+            "swift" => Some("swift"),
+            "php" => Some("php"),
+            "scala" | "sc" => Some("scala"),
+            "tf" | "hcl" | "tfvars" => Some("hcl"),
             _ => None,
         })
 }

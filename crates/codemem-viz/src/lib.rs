@@ -40,6 +40,9 @@ pub async fn serve(
             get(routes::api_graph_neighbors),
         )
         .route("/api/graph/browse", get(routes::api_graph_browse))
+        .route("/api/graph", get(routes::api_graph_d3))
+        .route("/api/timeline", get(routes::api_timeline))
+        .route("/api/distribution", get(routes::api_distribution))
         .route("/api/search", get(routes::api_search))
         .layer(CorsLayer::permissive())
         .with_state(state);

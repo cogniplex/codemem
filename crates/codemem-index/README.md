@@ -1,6 +1,6 @@
 # codemem-index
 
-Tree-sitter code indexing for 6 languages with incremental change detection.
+Tree-sitter code indexing for 13 languages with incremental change detection.
 
 ## Overview
 
@@ -8,7 +8,7 @@ Parses source files to extract symbols (functions, structs, classes, methods, in
 
 ## Supported Languages
 
-Rust (.rs), TypeScript (.ts/.tsx), Python (.py), Go (.go), C/C++ (.c/.h/.cpp/.hpp), Java (.java)
+Rust (.rs), TypeScript/JavaScript (.ts/.tsx/.js/.jsx), Python (.py), Go (.go), C/C++ (.c/.h/.cpp/.hpp), Java (.java), Ruby (.rb), C# (.cs), Kotlin (.kt/.kts), Swift (.swift), PHP (.php), Scala (.scala/.sc), HCL/Terraform (.tf/.hcl)
 
 ## Key Types
 

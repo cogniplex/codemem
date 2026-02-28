@@ -1,5 +1,6 @@
 use codemem_core::{Edge, GraphNode};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
@@ -98,4 +99,68 @@ pub struct BrowseResponse {
     pub total: usize,
     pub kinds: HashMap<String, usize>,
     pub edge_count: usize,
+}
+
+// -- D3 Graph -----------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct GraphD3Query {
+    pub namespace: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct D3Node {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub centrality: f64,
+    pub namespace: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct D3Link {
+    pub source: String,
+    pub target: String,
+    pub relationship: String,
+    pub weight: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct D3Graph {
+    pub nodes: Vec<D3Node>,
+    pub links: Vec<D3Link>,
+}
+
+// -- Timeline -----------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct TimelineQuery {
+    pub namespace: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TimelineBucket {
+    pub date: String,
+    pub counts: HashMap<String, usize>,
+    pub total: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TimelineResponse {
+    pub buckets: Vec<TimelineBucket>,
+    pub types: Vec<String>,
+}
+
+// -- Distribution -------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct DistributionQuery {
+    pub namespace: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DistributionResponse {
+    pub type_counts: HashMap<String, usize>,
+    pub importance_histogram: BTreeMap<String, usize>,
+    pub total: usize,
 }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 37 MCP tools, 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), optional LLM observation compression, real-time file watching, and cross-session pattern detection.
+Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 38 MCP tools, 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), optional LLM observation compression, real-time file watching, and cross-session pattern detection.
 
 ## Workspace Structure (12 crates)
 
@@ -15,11 +15,11 @@ Codemem is a standalone Rust memory engine for AI coding assistants — a single
 | codemem-vector | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200 |
 | codemem-graph | petgraph + SQLite; split into `traversal.rs` (GraphBackend impl), `algorithms.rs` (PageRank, Louvain, SCC, betweenness, topological), cached centrality |
 | codemem-embeddings | Pluggable via `from_env()`: Candle (local BERT, default), Ollama, OpenAI-compatible. `CachedProvider` wrapper, BAAI/bge-base-en-v1.5 (768-dim), LRU cache 10K. Safe concurrency via `LockPoisoned` error handling |
-| codemem-index | tree-sitter code indexing, 6 languages (Rust, TS, Python, Go, C/C++, Java) |
-| codemem-mcp | JSON-RPC stdio server, 37 MCP tools; split into `tools_memory.rs`, `tools_graph.rs`, `tools_recall.rs`, `tools_consolidation.rs`, `scoring.rs`, `types.rs`, `compress.rs`, `patterns.rs`. RwLock-based scoring weights, typed lock helpers, temporal edges, self-editing tools (refine/split/merge), LLM-powered consolidation |
+| codemem-index | tree-sitter code indexing, 14 languages (Rust, TS, JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) |
+| codemem-mcp | JSON-RPC stdio server, 38 MCP tools; split into `tools_memory.rs`, `tools_graph.rs`, `tools_recall.rs`, `tools_consolidation.rs`, `scoring.rs`, `types.rs`, `compress.rs`, `patterns.rs`, `metrics.rs`. RwLock-based scoring weights, typed lock helpers, temporal edges, self-editing tools (refine/split/merge), LLM-powered consolidation, operational metrics |
 | codemem-hooks | PostToolUse JSON parser, per-tool extractors, diff-aware memory (semantic summaries) |
-| codemem-cli | clap derive, 15 commands; split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs` |
-| codemem-viz | PCA visualization dashboard |
+| codemem-cli | clap derive, 18 commands; split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`, `commands_doctor.rs`, `commands_config.rs`, `commands_migrate.rs` |
+| codemem-viz | PCA visualization dashboard with timeline, distribution, and D3 graph endpoints |
 | codemem-bench | Criterion benchmarks, 20% regression threshold |
 | codemem-watch | Real-time file watcher via notify (<50ms debounce), proper .gitignore parsing via `ignore` crate |
 
@@ -63,6 +63,6 @@ cargo build --release          # Optimized release binary
 ## Documentation
 
 - [Architecture](docs/architecture.md) — System design with Mermaid diagrams
-- [MCP Tools](docs/mcp-tools.md) — All 37 tools reference
-- [CLI Reference](docs/cli-reference.md) — All 15 commands
+- [MCP Tools](docs/mcp-tools.md) — All 38 tools reference
+- [CLI Reference](docs/cli-reference.md) — All 18 commands
 - [Comparison](docs/comparison.md) — vs claude-mem, AgentDB, AutoMem, and more

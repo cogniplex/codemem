@@ -43,7 +43,7 @@ Downloads the local embedding model (~440MB, one-time), registers lifecycle hook
 
 ### That's it
 
-Codemem now automatically captures context, injects prior knowledge at session start, and provides 33 MCP tools to your assistant.
+Codemem now automatically captures context, injects prior knowledge at session start, and provides 38 MCP tools to your assistant.
 
 ### Map your codebase (optional)
 
@@ -68,14 +68,16 @@ See [`examples/agents/code-mapper.md`](examples/agents/code-mapper.md) for the f
 ## Key Features
 
 - **Graph-vector hybrid architecture** -- HNSW vector search (768-dim) + petgraph knowledge graph with 25 algorithms (PageRank, Louvain, betweenness centrality, BFS/DFS, and more)
-- **33 MCP tools** -- Memory CRUD, graph traversal, code search, consolidation, impact analysis, and pattern detection over JSON-RPC
+- **38 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, consolidation, impact analysis, metrics, and pattern detection over JSON-RPC
 - **4 lifecycle hooks** -- Automatic context injection (SessionStart), prompt capture (UserPromptSubmit), observation capture (PostToolUse), and session summaries (Stop)
 - **9-component hybrid scoring** -- Vector similarity, graph strength, BM25 token overlap, temporal alignment, tag matching, importance, confidence, and recency
-- **Code-aware indexing** -- tree-sitter structural extraction for 6 languages (Rust, TypeScript, Python, Go, C/C++, Java)
+- **Code-aware indexing** -- tree-sitter structural extraction for 13 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform)
 - **Contextual embeddings** -- Metadata and graph context enriched before embedding for higher recall precision
 - **Pluggable embeddings** -- Candle (local BERT, default), Ollama, or any OpenAI-compatible API
 - **Cross-session intelligence** -- Pattern detection, file hotspot tracking, decision chains, and session continuity
-- **Memory consolidation** -- 4 neuroscience-inspired cycles: Decay, Creative/REM, Cluster, Forget
+- **Memory consolidation** -- 5 neuroscience-inspired cycles: Decay (power-law), Creative/REM (semantic KNN), Cluster (cosine + union-find), Summarize (LLM-powered), Forget
+- **Self-editing memory** -- Refine, split, and merge memories with full provenance tracking via temporal graph edges
+- **Operational metrics** -- Per-tool latency percentiles (p50/p95/p99), call counters, and gauges via `codemem_metrics` tool
 - **Real-time file watching** -- notify-based watcher with <50ms debounce and .gitignore support
 - **Persistent config** -- TOML-based configuration at `~/.codemem/config.toml`
 - **Production hardened** -- Zero `.unwrap()` in production code, safe concurrency, versioned schema migrations
@@ -144,16 +146,18 @@ Scoring weights, vector/graph tuning, and storage settings persist in `~/.codeme
 
 ## MCP Tools
 
-33 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
+38 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
 
 | Category | Tools |
 |----------|-------|
 | Core Memory (8) | `store_memory`, `recall_memory`, `update_memory`, `delete_memory`, `associate_memories`, `graph_traverse`, `codemem_stats`, `codemem_health` |
+| Self-Editing (3) | `refine_memory`, `split_memory`, `merge_memories` |
 | Structural Index (10) | `index_codebase`, `search_symbols`, `get_symbol_info`, `get_dependencies`, `get_impact`, `get_clusters`, `get_cross_repo`, `get_pagerank`, `search_code`, `set_scoring_weights` |
 | Export/Import (2) | `export_memories`, `import_memories` |
 | Recall & Namespace (4) | `recall_with_expansion`, `list_namespaces`, `namespace_stats`, `delete_namespace` |
-| Consolidation (5) | `consolidate_decay`, `consolidate_creative`, `consolidate_cluster`, `consolidate_forget`, `consolidation_status` |
+| Consolidation (6) | `consolidate_decay`, `consolidate_creative`, `consolidate_cluster`, `consolidate_forget`, `consolidate_summarize`, `consolidation_status` |
 | Impact & Patterns (4) | `recall_with_impact`, `get_decision_chain`, `detect_patterns`, `pattern_insights` |
+| Observability (1) | `codemem_metrics` |
 
 ## CLI
 
@@ -166,8 +170,11 @@ codemem index         # Index codebase with tree-sitter
 codemem consolidate   # Run consolidation cycles
 codemem viz           # Interactive memory graph dashboard
 codemem watch         # Real-time file watcher
-codemem export/import # Backup and restore
+codemem export/import # Backup and restore (JSONL, JSON, CSV, Markdown)
 codemem sessions      # Session management (list, start, end)
+codemem doctor        # Health checks on installation
+codemem config        # Get/set configuration values
+codemem migrate       # Run pending schema migrations
 ```
 
 See [CLI Reference](docs/cli-reference.md) for full usage.
@@ -185,8 +192,8 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 ## Documentation
 
 - [Architecture](docs/architecture.md) -- System design, data flow diagrams, storage schema
-- [MCP Tools Reference](docs/mcp-tools.md) -- All 33 tools with parameters and examples
-- [CLI Reference](docs/cli-reference.md) -- All 15 commands
+- [MCP Tools Reference](docs/mcp-tools.md) -- All 38 tools with parameters and examples
+- [CLI Reference](docs/cli-reference.md) -- All 18 commands
 - [Comparison](docs/comparison.md) -- vs Mem0, Zep/Graphiti, Letta, claude-mem, and more
 
 ## Building from Source

@@ -659,6 +659,9 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// Mutex to serialize tests that manipulate environment variables.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// A mock embedding provider for testing CachedProvider behavior.
     struct MockProvider {
         dims: usize,
@@ -790,6 +793,7 @@ mod tests {
 
     #[test]
     fn from_env_unknown_provider() {
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         // Set env var to trigger the error path
         std::env::set_var("CODEMEM_EMBED_PROVIDER", "nonexistent_provider_xyz");
         let result = from_env();
@@ -833,5 +837,29 @@ mod tests {
         assert_eq!(DIMENSIONS, 768);
         assert_eq!(CACHE_CAPACITY, 10_000);
         assert_eq!(MODEL_NAME, "bge-base-en-v1.5");
+    }
+
+    #[test]
+    fn from_env_ollama_provider() {
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("CODEMEM_EMBED_PROVIDER", "ollama");
+        let result = from_env();
+        std::env::remove_var("CODEMEM_EMBED_PROVIDER");
+
+        let provider = result.expect("from_env should succeed for ollama");
+        assert_eq!(provider.name(), "ollama");
+    }
+
+    #[test]
+    fn from_env_openai_provider() {
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("CODEMEM_EMBED_PROVIDER", "openai");
+        std::env::set_var("OPENAI_API_KEY", "test-key-123");
+        let result = from_env();
+        std::env::remove_var("CODEMEM_EMBED_PROVIDER");
+        std::env::remove_var("OPENAI_API_KEY");
+
+        let provider = result.expect("from_env should succeed for openai");
+        assert_eq!(provider.name(), "openai");
     }
 }

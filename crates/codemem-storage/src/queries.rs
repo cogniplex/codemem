@@ -6,6 +6,30 @@ use rusqlite::params;
 use std::collections::HashMap;
 
 impl Storage {
+    // ── Health / Diagnostics ────────────────────────────────────────────
+
+    /// Run SQLite `PRAGMA integrity_check`. Returns `true` if the database is OK.
+    pub fn integrity_check(&self) -> Result<bool, CodememError> {
+        let conn = self.conn();
+        let result: String = conn
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(result == "ok")
+    }
+
+    /// Return the current schema version (max applied migration number).
+    pub fn schema_version(&self) -> Result<u32, CodememError> {
+        let conn = self.conn();
+        let version: u32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(version)
+    }
+
     // ── Stats ───────────────────────────────────────────────────────────
 
     /// Get database statistics.

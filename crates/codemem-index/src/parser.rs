@@ -120,6 +120,13 @@ mod tests {
         assert!(parser.supports_extension("py"));
         assert!(parser.supports_extension("go"));
         assert!(parser.supports_extension("java"));
-        assert!(!parser.supports_extension("scala"));
+        assert!(parser.supports_extension("scala"));
+        assert!(parser.supports_extension("rb"));
+        assert!(parser.supports_extension("cs"));
+        assert!(parser.supports_extension("kt"));
+        assert!(parser.supports_extension("swift"));
+        assert!(parser.supports_extension("php"));
+        assert!(parser.supports_extension("tf"));
+        assert!(!parser.supports_extension("xyz"));
     }
 }

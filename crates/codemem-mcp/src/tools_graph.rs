@@ -1,5 +1,5 @@
 //! Graph & analysis tools: traverse, stats, health, index, symbols, deps, impact,
-//! clusters, cross-repo, pagerank, search-code, scoring weights.
+//! clusters, cross-repo, pagerank, search-code, scoring weights, metrics.
 
 use crate::types::{IndexCache, ToolResult};
 use crate::McpServer;
@@ -774,6 +774,15 @@ impl McpServer {
             serde_json::to_string_pretty(&response).expect("JSON serialization of literal"),
         )
     }
+
+    /// Return a snapshot of operational metrics (latency percentiles, counters, gauges).
+    pub(crate) fn tool_metrics(&self) -> ToolResult {
+        let snapshot = self.metrics.snapshot();
+        match serde_json::to_string_pretty(&snapshot) {
+            Ok(json) => ToolResult::text(json),
+            Err(e) => ToolResult::tool_error(format!("Failed to serialize metrics: {e}")),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1253,5 +1262,22 @@ mod tests {
         // so vector_similarity = 0.5 / 1.25 = 0.4
         let vs = parsed["weights"]["vector_similarity"].as_f64().unwrap();
         assert!((vs - 0.4).abs() < 1e-10);
+    }
+
+    #[test]
+    fn tool_metrics_returns_snapshot() {
+        let server = test_server();
+        // Record some metrics manually
+        codemem_core::Metrics::record_latency(&*server.metrics, "recall_memory", 12.5);
+        codemem_core::Metrics::increment_counter(&*server.metrics, "tool_calls_total", 1);
+        codemem_core::Metrics::record_gauge(&*server.metrics, "memory_count", 7.0);
+
+        let result = server.tool_metrics();
+        assert!(!result.is_error);
+        let text = &result.content[0].text;
+        let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert!(parsed["latencies"]["recall_memory"]["count"].as_u64().unwrap() >= 1);
+        assert_eq!(parsed["counters"]["tool_calls_total"], 1);
+        assert!((parsed["gauges"]["memory_count"].as_f64().unwrap() - 7.0).abs() < f64::EPSILON);
     }
 }

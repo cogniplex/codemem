@@ -1,10 +1,13 @@
 //! codemem-cli: CLI entry point for the Codemem memory engine.
 
+mod commands_config;
 mod commands_consolidation;
 mod commands_data;
+mod commands_doctor;
 mod commands_export;
 mod commands_init;
 mod commands_lifecycle;
+mod commands_migrate;
 mod commands_search;
 mod compress;
 
@@ -92,7 +95,7 @@ enum Commands {
         verbose: bool,
     },
 
-    /// Export memories to JSONL format
+    /// Export memories to JSONL, JSON, CSV, or Markdown format
     Export {
         /// Filter by namespace
         #[arg(long)]
@@ -103,6 +106,9 @@ enum Commands {
         /// Output file (defaults to stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Output format: jsonl (default), json, csv, markdown
+        #[arg(short, long, default_value = "jsonl")]
+        format: String,
     },
 
     /// Import memories from JSONL format
@@ -128,6 +134,18 @@ enum Commands {
         action: SessionAction,
     },
 
+    /// Run health checks on the Codemem installation
+    Doctor,
+
+    /// Manage Codemem configuration
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+
+    /// Run pending database schema migrations
+    Migrate,
+
     /// SessionStart hook: inject prior context into a new session (reads JSON from stdin)
     Context,
 
@@ -136,6 +154,22 @@ enum Commands {
 
     /// Stop hook: generate session summary (reads JSON from stdin)
     Summarize,
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Get a configuration value by dot-separated key path
+    Get {
+        /// Key path (e.g. "scoring.vector_similarity")
+        key: String,
+    },
+    /// Set a configuration value
+    Set {
+        /// Key path (e.g. "scoring.vector_similarity")
+        key: String,
+        /// Value to set (JSON-compatible)
+        value: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -222,11 +256,13 @@ fn main() -> anyhow::Result<()> {
             namespace,
             memory_type,
             output,
+            format,
         } => {
             commands_export::cmd_export(
                 namespace.as_deref(),
                 memory_type.as_deref(),
                 output.as_deref(),
+                &format,
             )?;
         }
         Commands::Import {
@@ -241,6 +277,20 @@ fn main() -> anyhow::Result<()> {
                 None => std::env::current_dir()?,
             };
             commands_data::cmd_watch(&watch_dir)?;
+        }
+        Commands::Doctor => {
+            commands_doctor::cmd_doctor()?;
+        }
+        Commands::Config { action } => match action {
+            ConfigAction::Get { key } => {
+                commands_config::cmd_config_get(&key)?;
+            }
+            ConfigAction::Set { key, value } => {
+                commands_config::cmd_config_set(&key, &value)?;
+            }
+        },
+        Commands::Migrate => {
+            commands_migrate::cmd_migrate()?;
         }
         Commands::Sessions { action } => match action {
             SessionAction::List { namespace } => {
@@ -411,10 +461,24 @@ mod tests {
                 namespace,
                 memory_type,
                 output,
+                format,
             } => {
                 assert_eq!(namespace, Some("test-ns".to_string()));
                 assert_eq!(memory_type, Some("decision".to_string()));
                 assert!(output.is_none());
+                assert_eq!(format, "jsonl"); // default
+            }
+            _ => panic!("Expected Export command"),
+        }
+    }
+
+    #[test]
+    fn parse_export_with_format() {
+        let cli =
+            Cli::try_parse_from(["codemem", "export", "--format", "csv"]).unwrap();
+        match cli.command {
+            Commands::Export { format, .. } => {
+                assert_eq!(format, "csv");
             }
             _ => panic!("Expected Export command"),
         }

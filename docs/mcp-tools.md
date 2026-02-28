@@ -1,6 +1,6 @@
 # Codemem MCP Tools API Reference
 
-Codemem exposes 33 tools over JSON-RPC 2.0 (stdio transport). All requests use the
+Codemem exposes 38 tools over JSON-RPC 2.0 (stdio transport). All requests use the
 `tools/call` method with `{"name": "<tool>", "arguments": {...}}` as params.
 
 ---
