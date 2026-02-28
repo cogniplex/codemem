@@ -4,9 +4,11 @@
 //! Respects `.gitignore` and common ignore patterns.
 
 use crossbeam_channel::Receiver;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Events emitted by the file watcher.
@@ -48,8 +50,26 @@ pub fn is_watchable(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Check if a path is inside an ignored directory.
-pub fn should_ignore(path: &Path) -> bool {
+/// Check if a path should be ignored.
+///
+/// Uses the provided `Gitignore` matcher first (checking the full path and
+/// each ancestor directory), then falls back to the hardcoded `IGNORE_DIRS`
+/// list for paths not covered by `.gitignore`.
+pub fn should_ignore(path: &Path, gitignore: Option<&Gitignore>) -> bool {
+    if let Some(gi) = gitignore {
+        // Check the file itself
+        if gi.matched(path, path.is_dir()).is_ignore() {
+            return true;
+        }
+        // Check each ancestor directory against the gitignore
+        let mut current = path.to_path_buf();
+        while current.pop() {
+            if gi.matched(&current, true).is_ignore() {
+                return true;
+            }
+        }
+    }
+    // Fallback to hardcoded dirs
     for component in path.components() {
         if let std::path::Component::Normal(name) = component {
             if let Some(name_str) = name.to_str() {
@@ -60,6 +80,23 @@ pub fn should_ignore(path: &Path) -> bool {
         }
     }
     false
+}
+
+/// Build a `Gitignore` matcher from a project root.
+///
+/// Reads `.gitignore` if present, and also adds the hardcoded `IGNORE_DIRS`
+/// as fallback patterns.
+pub fn build_gitignore(root: &Path) -> Option<Gitignore> {
+    let mut builder = GitignoreBuilder::new(root);
+    // Add .gitignore if it exists
+    if let Some(err) = builder.add(root.join(".gitignore")) {
+        tracing::debug!("No .gitignore found: {err}");
+    }
+    // Add fallback patterns (use glob-style to match as directories anywhere)
+    for dir in IGNORE_DIRS {
+        let _ = builder.add_line(None, &format!("{dir}/"));
+    }
+    builder.build().ok()
 }
 
 /// Detect programming language from file extension.
@@ -83,6 +120,8 @@ pub fn detect_language(path: &Path) -> Option<&'static str> {
 pub struct FileWatcher {
     _debouncer: notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>,
     receiver: Receiver<WatchEvent>,
+    #[allow(dead_code)]
+    gitignore: Arc<Option<Gitignore>>,
 }
 
 impl FileWatcher {
@@ -90,6 +129,9 @@ impl FileWatcher {
     pub fn new(root: &Path) -> Result<Self, codemem_core::CodememError> {
         let (tx, rx) = crossbeam_channel::unbounded::<WatchEvent>();
         let event_tx = tx;
+
+        let gitignore = Arc::new(build_gitignore(root));
+        let gi_clone = Arc::clone(&gitignore);
 
         let mut debouncer = new_debouncer(
             Duration::from_millis(50),
@@ -102,7 +144,8 @@ impl FileWatcher {
                         if !seen.insert(path.clone()) {
                             continue;
                         }
-                        if should_ignore(&path) || !is_watchable(&path) {
+                        if should_ignore(&path, gi_clone.as_ref().as_ref()) || !is_watchable(&path)
+                        {
                             continue;
                         }
                         let watch_event = match event.kind {
@@ -145,6 +188,7 @@ impl FileWatcher {
         Ok(Self {
             _debouncer: debouncer,
             receiver: rx,
+            gitignore,
         })
     }
 
@@ -169,12 +213,63 @@ mod tests {
     }
 
     #[test]
-    fn test_should_ignore() {
-        assert!(should_ignore(Path::new("project/node_modules/foo/bar.js")));
-        assert!(should_ignore(Path::new("project/target/debug/build.rs")));
-        assert!(should_ignore(Path::new(".git/config")));
-        assert!(!should_ignore(Path::new("src/main.rs")));
-        assert!(!should_ignore(Path::new("lib/utils.ts")));
+    fn test_should_ignore_without_gitignore() {
+        assert!(should_ignore(
+            Path::new("project/node_modules/foo/bar.js"),
+            None
+        ));
+        assert!(should_ignore(
+            Path::new("project/target/debug/build.rs"),
+            None
+        ));
+        assert!(should_ignore(Path::new(".git/config"), None));
+        assert!(!should_ignore(Path::new("src/main.rs"), None));
+        assert!(!should_ignore(Path::new("lib/utils.ts"), None));
+    }
+
+    #[test]
+    fn test_should_ignore_with_gitignore() {
+        let dir = tempfile::tempdir().unwrap();
+        let gitignore_path = dir.path().join(".gitignore");
+        std::fs::write(&gitignore_path, "*.log\nsecrets/\n").unwrap();
+
+        let gi = build_gitignore(dir.path()).unwrap();
+
+        // Matches .gitignore pattern (*.log)
+        assert!(should_ignore(&dir.path().join("debug.log"), Some(&gi)));
+
+        // Matches .gitignore pattern (secrets/) -- also caught by hardcoded fallback check
+        // The gitignore matcher matches against paths under the root.
+        // For directory patterns, the path must be checked as a directory.
+        assert!(should_ignore(
+            &dir.path().join("secrets/key.txt"),
+            Some(&gi)
+        ));
+
+        // Matches hardcoded IGNORE_DIRS via the fallback component check
+        assert!(should_ignore(
+            &dir.path().join("node_modules/foo.js"),
+            Some(&gi)
+        ));
+
+        // Not ignored
+        assert!(!should_ignore(&dir.path().join("src/main.rs"), Some(&gi)));
+    }
+
+    #[test]
+    fn test_build_gitignore_without_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // No .gitignore file exists
+        let gi = build_gitignore(dir.path());
+        // Should still return Some since we add fallback patterns
+        assert!(gi.is_some());
+
+        // Hardcoded dirs are still caught by the should_ignore fallback
+        let gi = gi.unwrap();
+        assert!(should_ignore(
+            &dir.path().join("node_modules/foo.js"),
+            Some(&gi)
+        ));
     }
 
     #[test]

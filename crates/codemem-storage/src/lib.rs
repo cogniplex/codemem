@@ -12,9 +12,8 @@ use std::sync::Mutex;
 mod backend;
 mod graph_persistence;
 mod memory;
+mod migrations;
 mod queries;
-
-const SCHEMA: &str = include_str!("schema.sql");
 
 /// SQLite-backed storage for Codemem memories, embeddings, and graph data.
 ///
@@ -56,9 +55,8 @@ impl Storage {
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
-        // Apply schema
-        conn.execute_batch(SCHEMA)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        // Apply schema via migrations
+        migrations::run_migrations(&conn)?;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -71,8 +69,7 @@ impl Storage {
             Connection::open_in_memory().map_err(|e| CodememError::Storage(e.to_string()))?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
-        conn.execute_batch(SCHEMA)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        migrations::run_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })

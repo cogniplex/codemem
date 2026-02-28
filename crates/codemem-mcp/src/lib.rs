@@ -19,10 +19,9 @@ use codemem_graph::GraphEngine;
 use codemem_storage::Storage;
 use codemem_vector::HnswIndex;
 use serde_json::{json, Value};
-use std::cell::UnsafeCell;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 pub mod bm25;
 pub mod patterns;
@@ -59,18 +58,14 @@ pub struct McpServer {
     /// Cached index results for structural queries.
     pub(crate) index_cache: Mutex<Option<IndexCache>>,
     /// Configurable scoring weights for the 9-component hybrid scoring system.
-    /// Wrapped in UnsafeCell for interior mutability; safe because the MCP server
-    /// is single-threaded (stdio JSON-RPC, sequential request processing).
-    pub(crate) scoring_weights: UnsafeCell<ScoringWeights>,
+    pub(crate) scoring_weights: RwLock<ScoringWeights>,
     /// BM25 index for code-aware token overlap scoring.
     /// Updated incrementally on store/update/delete operations.
     pub(crate) bm25_index: Mutex<bm25::Bm25Index>,
+    /// Loaded configuration (used by scoring_weights initialization and future features).
+    #[allow(dead_code)]
+    pub(crate) config: codemem_core::CodememConfig,
 }
-
-// SAFETY: McpServer is used single-threaded (stdio JSON-RPC, sequential processing).
-// UnsafeCell<ScoringWeights> is the only non-Sync field; all access is sequential.
-unsafe impl Send for McpServer {}
-unsafe impl Sync for McpServer {}
 
 impl McpServer {
     /// Create a server with storage, vector, graph, and optional embeddings backends.
@@ -80,6 +75,7 @@ impl McpServer {
         graph: GraphEngine,
         embeddings: Option<Box<dyn codemem_embeddings::EmbeddingProvider>>,
     ) -> Self {
+        let config = codemem_core::CodememConfig::load_or_default();
         Self {
             name: "codemem".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -89,8 +85,9 @@ impl McpServer {
             embeddings: embeddings.map(Mutex::new),
             db_path: None,
             index_cache: Mutex::new(None),
-            scoring_weights: UnsafeCell::new(ScoringWeights::default()),
+            scoring_weights: RwLock::new(config.scoring.clone()),
             bm25_index: Mutex::new(bm25::Bm25Index::new()),
+            config,
         }
     }
 
@@ -115,11 +112,11 @@ impl McpServer {
         server.db_path = Some(db_path.to_path_buf());
 
         // Recompute centrality metrics (PageRank + betweenness) on startup
-        server.graph.lock().unwrap().recompute_centrality();
+        server.lock_graph()?.recompute_centrality();
 
         // Populate BM25 index from all existing memories
         if let Ok(ids) = server.storage.list_memory_ids() {
-            let mut bm25 = server.bm25_index.lock().unwrap();
+            let mut bm25 = server.lock_bm25()?;
             for id in &ids {
                 if let Ok(Some(memory)) = server.storage.get_memory(id) {
                     bm25.add_document(id, &memory.content);
@@ -136,6 +133,68 @@ impl McpServer {
         let vector = HnswIndex::with_defaults().unwrap();
         let graph = GraphEngine::new();
         Self::new(Box::new(storage), vector, graph, None)
+    }
+
+    // ── Lock Helpers ─────────────────────────────────────────────────────────
+
+    pub(crate) fn lock_vector(&self) -> Result<std::sync::MutexGuard<'_, HnswIndex>, CodememError> {
+        self.vector
+            .lock()
+            .map_err(|e| CodememError::LockPoisoned(format!("vector: {e}")))
+    }
+
+    pub(crate) fn lock_graph(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, GraphEngine>, CodememError> {
+        self.graph
+            .lock()
+            .map_err(|e| CodememError::LockPoisoned(format!("graph: {e}")))
+    }
+
+    pub(crate) fn lock_bm25(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, bm25::Bm25Index>, CodememError> {
+        self.bm25_index
+            .lock()
+            .map_err(|e| CodememError::LockPoisoned(format!("bm25: {e}")))
+    }
+
+    pub(crate) fn lock_embeddings(
+        &self,
+    ) -> Result<
+        Option<std::sync::MutexGuard<'_, Box<dyn codemem_embeddings::EmbeddingProvider>>>,
+        CodememError,
+    > {
+        match &self.embeddings {
+            Some(m) => Ok(Some(m.lock().map_err(|e| {
+                CodememError::LockPoisoned(format!("embeddings: {e}"))
+            })?)),
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) fn lock_index_cache(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Option<types::IndexCache>>, CodememError> {
+        self.index_cache
+            .lock()
+            .map_err(|e| CodememError::LockPoisoned(format!("index_cache: {e}")))
+    }
+
+    pub(crate) fn scoring_weights(
+        &self,
+    ) -> Result<std::sync::RwLockReadGuard<'_, codemem_core::ScoringWeights>, CodememError> {
+        self.scoring_weights
+            .read()
+            .map_err(|e| CodememError::LockPoisoned(format!("scoring_weights read: {e}")))
+    }
+
+    pub(crate) fn scoring_weights_mut(
+        &self,
+    ) -> Result<std::sync::RwLockWriteGuard<'_, codemem_core::ScoringWeights>, CodememError> {
+        self.scoring_weights
+            .write()
+            .map_err(|e| CodememError::LockPoisoned(format!("scoring_weights write: {e}")))
     }
 
     // ── Contextual Enrichment ────────────────────────────────────────────────
@@ -171,7 +230,10 @@ impl McpServer {
 
         // Graph relationships — pull connected edges for this node
         if let Some(nid) = node_id {
-            let graph = self.graph.lock().unwrap();
+            let graph = match self.lock_graph() {
+                Ok(g) => g,
+                Err(_) => return format!("{ctx}\n{content}"),
+            };
             if let Ok(edges) = graph.get_edges(nid) {
                 let mut rels: Vec<String> = Vec::new();
                 for edge in edges.iter().take(8) {
@@ -256,8 +318,15 @@ impl McpServer {
     pub fn save_index(&self) {
         if let Some(ref db_path) = self.db_path {
             let index_path = db_path.with_extension("idx");
-            if let Err(e) = self.vector.lock().unwrap().save(&index_path) {
-                tracing::warn!("Failed to save vector index: {e}");
+            match self.lock_vector() {
+                Ok(vec) => {
+                    if let Err(e) = vec.save(&index_path) {
+                        tracing::warn!("Failed to save vector index: {e}");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to acquire vector lock for save: {e}");
+                }
             }
         }
     }

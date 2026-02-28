@@ -34,6 +34,15 @@ pub enum CodememError {
     #[error("Duplicate content (hash: {0})")]
     Duplicate(String),
 
+    #[error("Internal error: {0}")]
+    Internal(String),
+
+    #[error("Configuration error: {0}")]
+    Config(String),
+
+    #[error("Lock poisoned: {0}")]
+    LockPoisoned(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

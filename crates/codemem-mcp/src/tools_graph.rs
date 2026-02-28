@@ -19,7 +19,10 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .unwrap_or("bfs");
 
-        let graph = self.graph.lock().unwrap();
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
         let nodes = match algorithm {
             "bfs" => graph.bfs(start, depth),
             "dfs" => graph.dfs(start, depth),
@@ -39,7 +42,9 @@ impl McpServer {
                         })
                     })
                     .collect();
-                ToolResult::text(serde_json::to_string_pretty(&output).unwrap())
+                ToolResult::text(
+                    serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
+                )
             }
             Err(e) => ToolResult::tool_error(format!("Traversal failed: {e}")),
         }
@@ -51,8 +56,23 @@ impl McpServer {
             Err(e) => return ToolResult::tool_error(format!("Stats error: {e}")),
         };
 
-        let vector_stats = self.vector.lock().unwrap().stats();
-        let graph_stats = self.graph.lock().unwrap().stats();
+        let vector_stats = match self.lock_vector() {
+            Ok(v) => v.stats(),
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+        let graph_stats = match self.lock_graph() {
+            Ok(g) => g.stats(),
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+
+        let cache_info = match self.lock_embeddings() {
+            Ok(Some(emb)) => {
+                let (size, cap) = emb.cache_stats();
+                Some(json!({"size": size, "capacity": cap}))
+            }
+            Ok(None) => None,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
         ToolResult::text(
             serde_json::to_string_pretty(&json!({
@@ -75,13 +95,10 @@ impl McpServer {
                 },
                 "embeddings": {
                     "available": self.embeddings.is_some(),
-                    "cache": self.embeddings.as_ref().map(|e| {
-                        let (size, cap) = e.lock().unwrap().cache_stats();
-                        json!({"size": size, "capacity": cap})
-                    }),
+                    "cache": cache_info,
                 }
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 
@@ -101,7 +118,7 @@ impl McpServer {
                 "graph": if graph_ok { "ok" } else { "error" },
                 "embeddings": if embeddings_ok { "ok" } else { "not_configured" },
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 
@@ -138,7 +155,10 @@ impl McpServer {
         let edges = resolver.resolve_all(&all_references);
 
         // Persist symbols as graph nodes
-        let mut graph = self.graph.lock().unwrap();
+        let mut graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
         for sym in &all_symbols {
             let kind = match sym.kind {
                 codemem_index::SymbolKind::Function => NodeKind::Function,
@@ -211,9 +231,14 @@ impl McpServer {
 
         // Embed symbol signatures with contextual enrichment
         let mut symbols_embedded = 0usize;
-        if let Some(ref emb_service) = self.embeddings {
-            let emb = emb_service.lock().unwrap();
-            let mut vec = self.vector.lock().unwrap();
+        if let Some(emb) = match self.lock_embeddings() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        } {
+            let mut vec = match self.lock_vector() {
+                Ok(v) => v,
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            };
             for sym in &all_symbols {
                 let embed_text = self.enrich_symbol_text(sym, &edges);
                 let sym_id = format!("sym:{}", sym.qualified_name);
@@ -230,11 +255,15 @@ impl McpServer {
 
         // Cache results
         {
-            let mut cache = self.index_cache.lock().unwrap();
-            *cache = Some(IndexCache {
-                symbols: all_symbols,
-                root_path: path.to_string(),
-            });
+            match self.lock_index_cache() {
+                Ok(mut cache) => {
+                    *cache = Some(IndexCache {
+                        symbols: all_symbols,
+                        root_path: path.to_string(),
+                    });
+                }
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            }
         }
 
         ToolResult::text(
@@ -247,7 +276,7 @@ impl McpServer {
                 "edges_resolved": edges_resolved,
                 "symbols_embedded": symbols_embedded,
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 
@@ -261,7 +290,10 @@ impl McpServer {
 
         let kind_filter: Option<&str> = args.get("kind").and_then(|v| v.as_str());
 
-        let cache = self.index_cache.lock().unwrap();
+        let cache = match self.lock_index_cache() {
+            Ok(c) => c,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
         let symbols = match cache.as_ref() {
             Some(c) => &c.symbols,
             None => {
@@ -305,7 +337,9 @@ impl McpServer {
             return ToolResult::text("No matching symbols found.");
         }
 
-        ToolResult::text(serde_json::to_string_pretty(&matches).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&matches).expect("JSON serialization of literal"),
+        )
     }
 
     pub(crate) fn tool_get_symbol_info(&self, args: &Value) -> ToolResult {
@@ -314,7 +348,10 @@ impl McpServer {
             None => return ToolResult::tool_error("Missing 'qualified_name' parameter"),
         };
 
-        let cache = self.index_cache.lock().unwrap();
+        let cache = match self.lock_index_cache() {
+            Ok(c) => c,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
         let symbols = match cache.as_ref() {
             Some(c) => &c.symbols,
             None => {
@@ -340,7 +377,7 @@ impl McpServer {
                 "doc_comment": sym.doc_comment,
                 "parent": sym.parent,
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 
@@ -356,7 +393,10 @@ impl McpServer {
             .unwrap_or("both");
 
         let node_id = format!("sym:{qualified_name}");
-        let graph = self.graph.lock().unwrap();
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
         let edges = match graph.get_edges(&node_id) {
             Ok(e) => e,
@@ -388,7 +428,9 @@ impl McpServer {
             ));
         }
 
-        ToolResult::text(serde_json::to_string_pretty(&filtered).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&filtered).expect("JSON serialization of literal"),
+        )
     }
 
     pub(crate) fn tool_get_impact(&self, args: &Value) -> ToolResult {
@@ -400,7 +442,10 @@ impl McpServer {
         let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
 
         let node_id = format!("sym:{qualified_name}");
-        let graph = self.graph.lock().unwrap();
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
         // BFS from the node to find all reachable nodes within N hops
         let nodes = match graph.bfs(&node_id, depth) {
@@ -446,7 +491,7 @@ impl McpServer {
                 "reachable_nodes": reachable.len(),
                 "reachable": reachable,
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 
@@ -456,7 +501,10 @@ impl McpServer {
             .and_then(|v| v.as_f64())
             .unwrap_or(1.0);
 
-        let graph = self.graph.lock().unwrap();
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
         let communities = graph.louvain_communities(resolution);
 
         let output: Vec<Value> = communities
@@ -477,7 +525,7 @@ impl McpServer {
                 "resolution": resolution,
                 "clusters": output,
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 
@@ -487,7 +535,10 @@ impl McpServer {
         let scan_root = match path {
             Some(p) => std::path::PathBuf::from(p),
             None => {
-                let cache = self.index_cache.lock().unwrap();
+                let cache = match self.lock_index_cache() {
+                    Ok(c) => c,
+                    Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                };
                 match cache.as_ref() {
                     Some(c) => std::path::PathBuf::from(&c.root_path),
                     None => {
@@ -544,7 +595,7 @@ impl McpServer {
                 "dependencies_count": deps.len(),
                 "dependencies": deps,
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 
@@ -552,7 +603,10 @@ impl McpServer {
         let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
         let damping = args.get("damping").and_then(|v| v.as_f64()).unwrap_or(0.85);
 
-        let graph = self.graph.lock().unwrap();
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
         let scores = graph.pagerank(damping, 100, 1e-6);
 
         // Sort by score descending
@@ -579,7 +633,7 @@ impl McpServer {
                 "top_k": top_k,
                 "results": results,
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 
@@ -591,18 +645,24 @@ impl McpServer {
 
         let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
-        let results: Vec<(String, f32)> = if let Some(ref emb_service) = self.embeddings {
-            match emb_service.lock().unwrap().embed(query) {
-                Ok(query_embedding) => self
-                    .vector
-                    .lock()
-                    .unwrap()
-                    .search(&query_embedding, k * 3)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|(id, _)| id.starts_with("sym:"))
-                    .take(k)
-                    .collect(),
+        let results: Vec<(String, f32)> = if let Some(emb_guard) = match self.lock_embeddings() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        } {
+            match emb_guard.embed(query) {
+                Ok(query_embedding) => {
+                    drop(emb_guard);
+                    let vec = match self.lock_vector() {
+                        Ok(v) => v,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    };
+                    vec.search(&query_embedding, k * 3)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|(id, _)| id.starts_with("sym:"))
+                        .take(k)
+                        .collect()
+                }
                 Err(e) => {
                     return ToolResult::tool_error(format!("Embedding failed: {e}"));
                 }
@@ -633,7 +693,9 @@ impl McpServer {
             }
         }
 
-        ToolResult::text(serde_json::to_string_pretty(&output).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
+        )
     }
 
     /// MCP tool: set_scoring_weights -- update the server's scoring weights at runtime.
@@ -680,8 +742,10 @@ impl McpServer {
         };
         let normalized = raw.normalized();
 
-        // SAFETY: Single-threaded MCP server; no concurrent access to scoring_weights.
-        unsafe { *self.scoring_weights.get() = normalized.clone() };
+        match self.scoring_weights_mut() {
+            Ok(mut w) => *w = normalized.clone(),
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        }
 
         let response = json!({
             "updated": true,
@@ -697,7 +761,9 @@ impl McpServer {
             }
         });
 
-        ToolResult::text(serde_json::to_string_pretty(&response).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&response).expect("JSON serialization of literal"),
+        )
     }
 }
 

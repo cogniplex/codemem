@@ -74,7 +74,10 @@ impl McpServer {
         }
 
         // Update BM25 index
-        self.bm25_index.lock().unwrap().add_document(&id, content);
+        match self.lock_bm25() {
+            Ok(mut bm25) => bm25.add_document(&id, content),
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        }
 
         // Create graph node for the memory (before embedding so graph context is available)
         let graph_node = GraphNode {
@@ -90,13 +93,21 @@ impl McpServer {
         if let Err(e) = self.storage.insert_graph_node(&graph_node) {
             tracing::warn!("Failed to persist graph node: {e}");
         }
-        if let Err(e) = self.graph.lock().unwrap().add_node(graph_node) {
-            tracing::warn!("Failed to add graph node: {e}");
+        match self.lock_graph() {
+            Ok(mut graph) => {
+                if let Err(e) = graph.add_node(graph_node) {
+                    tracing::warn!("Failed to add graph node: {e}");
+                }
+            }
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
         }
 
         // Handle optional `links` parameter: create RELATES_TO edges to linked nodes
         if let Some(links) = args.get("links").and_then(|v| v.as_array()) {
-            let mut graph = self.graph.lock().unwrap();
+            let mut graph = match self.lock_graph() {
+                Ok(g) => g,
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            };
             for link_val in links {
                 if let Some(link_id) = link_val.as_str() {
                     let edge = Edge {
@@ -120,7 +131,10 @@ impl McpServer {
 
         // Generate contextual embedding and insert into vector index
         // (after graph node + links so enrichment can reference them)
-        if let Some(ref emb_service) = self.embeddings {
+        if let Some(emb_guard) = match self.lock_embeddings() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        } {
             let enriched = self.enrich_memory_text(
                 content,
                 memory_type,
@@ -128,13 +142,19 @@ impl McpServer {
                 memory.namespace.as_deref(),
                 Some(&id),
             );
-            match emb_service.lock().unwrap().embed(&enriched) {
+            match emb_guard.embed(&enriched) {
                 Ok(embedding) => {
+                    drop(emb_guard);
                     if let Err(e) = self.storage.store_embedding(&id, &embedding) {
                         tracing::warn!("Failed to store embedding: {e}");
                     }
-                    if let Err(e) = self.vector.lock().unwrap().insert(&id, &embedding) {
-                        tracing::warn!("Failed to index vector: {e}");
+                    match self.lock_vector() {
+                        Ok(mut vec) => {
+                            if let Err(e) = vec.insert(&id, &embedding) {
+                                tracing::warn!("Failed to index vector: {e}");
+                            }
+                        }
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
                     }
                 }
                 Err(e) => {
@@ -153,7 +173,7 @@ impl McpServer {
                 "importance": importance,
                 "embedded": self.embeddings.is_some(),
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 
@@ -186,14 +206,21 @@ impl McpServer {
         namespace_filter: Option<&str>,
     ) -> ToolResult {
         // Try vector search first (if embeddings available)
-        let vector_results: Vec<(String, f32)> = if let Some(ref emb_service) = self.embeddings {
-            match emb_service.lock().unwrap().embed(query) {
-                Ok(query_embedding) => self
-                    .vector
-                    .lock()
-                    .unwrap()
-                    .search(&query_embedding, k * 2) // over-fetch for re-ranking
-                    .unwrap_or_default(),
+        let vector_results: Vec<(String, f32)> = if let Some(emb_guard) =
+            match self.lock_embeddings() {
+                Ok(g) => g,
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            } {
+            match emb_guard.embed(query) {
+                Ok(query_embedding) => {
+                    drop(emb_guard);
+                    let vec = match self.lock_vector() {
+                        Ok(v) => v,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    };
+                    vec.search(&query_embedding, k * 2) // over-fetch for re-ranking
+                        .unwrap_or_default()
+                }
                 Err(e) => {
                     tracing::warn!("Query embedding failed: {e}");
                     vec![]
@@ -206,8 +233,14 @@ impl McpServer {
         let query_lower = query.to_lowercase();
         let query_tokens: Vec<&str> = query_lower.split_whitespace().collect();
 
-        let graph = self.graph.lock().unwrap();
-        let bm25 = self.bm25_index.lock().unwrap();
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+        let bm25 = match self.lock_bm25() {
+            Ok(b) => b,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
         // Build scored results
         let mut results: Vec<SearchResult> = Vec::new();
@@ -236,9 +269,12 @@ impl McpServer {
 
                     let breakdown =
                         compute_score(&memory, query, &query_tokens, 0.0, &graph, &bm25);
-                    // SAFETY: Single-threaded MCP server; no concurrent access.
-                    let score =
-                        breakdown.total_with_weights(unsafe { &*self.scoring_weights.get() });
+                    let weights = match self.scoring_weights() {
+                        Ok(w) => w,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    };
+                    let score = breakdown.total_with_weights(&weights);
+                    drop(weights);
                     if score > 0.01 {
                         results.push(SearchResult {
                             memory,
@@ -269,9 +305,12 @@ impl McpServer {
                     let similarity = 1.0 - (*distance as f64);
                     let breakdown =
                         compute_score(&memory, query, &query_tokens, similarity, &graph, &bm25);
-                    // SAFETY: Single-threaded MCP server; no concurrent access.
-                    let score =
-                        breakdown.total_with_weights(unsafe { &*self.scoring_weights.get() });
+                    let weights = match self.scoring_weights() {
+                        Ok(w) => w,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    };
+                    let score = breakdown.total_with_weights(&weights);
+                    drop(weights);
                     results.push(SearchResult {
                         memory,
                         score,
@@ -308,10 +347,16 @@ impl McpServer {
         }
 
         // Update BM25 index with new content
-        self.bm25_index.lock().unwrap().add_document(id, content);
+        match self.lock_bm25() {
+            Ok(mut bm25) => bm25.add_document(id, content),
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        }
 
         // Re-embed with contextual enrichment
-        if let Some(ref emb_service) = self.embeddings {
+        if let Some(emb_guard) = match self.lock_embeddings() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        } {
             // Fetch the updated memory to get its metadata for enrichment
             let (mem_type, tags, namespace) = if let Ok(Some(mem)) = self.storage.get_memory(id) {
                 (mem.memory_type, mem.tags, mem.namespace)
@@ -320,11 +365,17 @@ impl McpServer {
             };
             let enriched =
                 self.enrich_memory_text(content, mem_type, &tags, namespace.as_deref(), Some(id));
-            if let Ok(embedding) = emb_service.lock().unwrap().embed(&enriched) {
+            let emb_result = emb_guard.embed(&enriched);
+            drop(emb_guard);
+            if let Ok(embedding) = emb_result {
                 let _ = self.storage.store_embedding(id, &embedding);
-                let mut vec = self.vector.lock().unwrap();
-                let _ = vec.remove(id);
-                let _ = vec.insert(id, &embedding);
+                match self.lock_vector() {
+                    Ok(mut vec) => {
+                        let _ = vec.remove(id);
+                        let _ = vec.insert(id, &embedding);
+                    }
+                    Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                }
             }
         }
 
@@ -343,16 +394,29 @@ impl McpServer {
         match self.storage.delete_memory(id) {
             Ok(true) => {
                 // Remove from vector index
-                let _ = self.vector.lock().unwrap().remove(id);
+                match self.lock_vector() {
+                    Ok(mut vec) => {
+                        let _ = vec.remove(id);
+                    }
+                    Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                }
                 // Remove from in-memory graph
-                let _ = self.graph.lock().unwrap().remove_node(id);
+                match self.lock_graph() {
+                    Ok(mut graph) => {
+                        let _ = graph.remove_node(id);
+                    }
+                    Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                }
                 // Remove graph node and edges from SQLite
                 let _ = self.storage.delete_graph_edges_for_node(id);
                 let _ = self.storage.delete_graph_node(id);
                 // Remove embedding from SQLite
                 let _ = self.storage.delete_embedding(id);
                 // Remove from BM25 index
-                self.bm25_index.lock().unwrap().remove_document(id);
+                match self.lock_bm25() {
+                    Ok(mut bm25) => bm25.remove_document(id),
+                    Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                }
                 // Persist vector index to disk
                 self.save_index();
                 ToolResult::text(json!({"id": id, "deleted": true}).to_string())
@@ -398,8 +462,13 @@ impl McpServer {
         }
 
         // Add to in-memory graph
-        if let Err(e) = self.graph.lock().unwrap().add_edge(edge) {
-            tracing::warn!("Failed to add edge to graph: {e}");
+        match self.lock_graph() {
+            Ok(mut graph) => {
+                if let Err(e) = graph.add_edge(edge) {
+                    tracing::warn!("Failed to add edge to graph: {e}");
+                }
+            }
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
         }
 
         ToolResult::text(

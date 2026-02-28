@@ -84,7 +84,10 @@ impl McpServer {
 
         let mut new_connections = 0usize;
         let now = chrono::Utc::now();
-        let mut graph = self.graph.lock().unwrap();
+        let mut graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
         for i in 0..memory_info.len() {
             for j in (i + 1)..memory_info.len() {
@@ -218,8 +221,14 @@ impl McpServer {
         }
 
         // Delete the duplicates
-        let mut vector = self.vector.lock().unwrap();
-        let mut graph = self.graph.lock().unwrap();
+        let mut vector = match self.lock_vector() {
+            Ok(v) => v,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+        let mut graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
         for id in &ids_to_delete {
             let _ = self.storage.delete_memory(id);
             let _ = self.storage.delete_embedding(id);
@@ -272,9 +281,18 @@ impl McpServer {
 
         let deleted = ids.len();
 
-        let mut vector = self.vector.lock().unwrap();
-        let mut graph = self.graph.lock().unwrap();
-        let mut bm25 = self.bm25_index.lock().unwrap();
+        let mut vector = match self.lock_vector() {
+            Ok(v) => v,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+        let mut graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+        let mut bm25 = match self.lock_bm25() {
+            Ok(b) => b,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
         for id in &ids {
             let _ = self.storage.delete_memory(id);
             let _ = self.storage.delete_embedding(id);
@@ -353,14 +371,20 @@ impl McpServer {
         let query_lower = query.to_lowercase();
         let query_tokens: Vec<&str> = query_lower.split_whitespace().collect();
 
-        let vector_results: Vec<(String, f32)> = if let Some(ref emb_service) = self.embeddings {
-            match emb_service.lock().unwrap().embed(query) {
-                Ok(query_embedding) => self
-                    .vector
-                    .lock()
-                    .unwrap()
-                    .search(&query_embedding, k * 2)
-                    .unwrap_or_default(),
+        let vector_results: Vec<(String, f32)> = if let Some(emb_guard) =
+            match self.lock_embeddings() {
+                Ok(g) => g,
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            } {
+            match emb_guard.embed(query) {
+                Ok(query_embedding) => {
+                    drop(emb_guard);
+                    let vec = match self.lock_vector() {
+                        Ok(v) => v,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    };
+                    vec.search(&query_embedding, k * 2).unwrap_or_default()
+                }
                 Err(e) => {
                     tracing::warn!("Query embedding failed: {e}");
                     vec![]
@@ -370,8 +394,14 @@ impl McpServer {
             vec![]
         };
 
-        let graph = self.graph.lock().unwrap();
-        let bm25 = self.bm25_index.lock().unwrap();
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+        let bm25 = match self.lock_bm25() {
+            Ok(b) => b,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
         let mut results: Vec<SearchResult> = Vec::new();
 
@@ -391,9 +421,12 @@ impl McpServer {
 
                     let breakdown =
                         compute_score(&memory, query, &query_tokens, 0.0, &graph, &bm25);
-                    // SAFETY: Single-threaded MCP server; no concurrent access.
-                    let score =
-                        breakdown.total_with_weights(unsafe { &*self.scoring_weights.get() });
+                    let weights = match self.scoring_weights() {
+                        Ok(w) => w,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    };
+                    let score = breakdown.total_with_weights(&weights);
+                    drop(weights);
                     if score > 0.01 {
                         results.push(SearchResult {
                             memory,
@@ -415,9 +448,12 @@ impl McpServer {
                     let similarity = 1.0 - (*distance as f64);
                     let breakdown =
                         compute_score(&memory, query, &query_tokens, similarity, &graph, &bm25);
-                    // SAFETY: Single-threaded MCP server; no concurrent access.
-                    let score =
-                        breakdown.total_with_weights(unsafe { &*self.scoring_weights.get() });
+                    let weights = match self.scoring_weights() {
+                        Ok(w) => w,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    };
+                    let score = breakdown.total_with_weights(&weights);
+                    drop(weights);
                     results.push(SearchResult {
                         memory,
                         score,
@@ -508,7 +544,9 @@ impl McpServer {
             })
             .collect();
 
-        ToolResult::text(serde_json::to_string_pretty(&output).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
+        )
     }
 
     /// MCP tool: get_decision_chain -- follow decision evolution through the graph.
@@ -520,7 +558,10 @@ impl McpServer {
             return ToolResult::tool_error("Must provide either 'file_path' or 'topic' parameter");
         }
 
-        let graph = self.graph.lock().unwrap();
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
         // Find all Decision-type memories matching the file_path or topic
         let ids = match self.storage.list_memory_ids() {
@@ -650,7 +691,9 @@ impl McpServer {
             "decisions": chain,
         });
 
-        ToolResult::text(serde_json::to_string_pretty(&response).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&response).expect("JSON serialization of literal"),
+        )
     }
 
     /// Internal helper: rebuild vector index from all stored embeddings.
@@ -699,7 +742,7 @@ impl McpServer {
                         "patterns": json_patterns,
                         "count": detected.len(),
                     }))
-                    .unwrap(),
+                    .expect("JSON serialization of literal"),
                 )
             }
             Err(e) => ToolResult::tool_error(format!("Pattern detection error: {e}")),

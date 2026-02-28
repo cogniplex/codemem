@@ -335,6 +335,7 @@ impl ScoreBreakdown {
 /// Configurable weights for the 9-component hybrid scoring system.
 /// All weights should sum to 1.0.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ScoringWeights {
     pub vector_similarity: f64,
     pub graph_strength: f64,
@@ -392,6 +393,7 @@ impl ScoringWeights {
 
 /// Configuration for the HNSW vector index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct VectorConfig {
     pub dimensions: usize,
     pub metric: DistanceMetric,
@@ -423,6 +425,7 @@ pub enum DistanceMetric {
 
 /// Configuration for the graph engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GraphConfig {
     pub max_expansion_hops: usize,
     pub bridge_similarity_threshold: f64,

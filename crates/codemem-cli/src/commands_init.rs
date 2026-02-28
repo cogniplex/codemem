@@ -129,7 +129,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
 
         let hooks = settings
             .as_object_mut()
-            .unwrap()
+            .expect("settings initialized as JSON object")
             .entry("hooks")
             .or_insert_with(|| serde_json::json!({}));
 
@@ -194,7 +194,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         for (event_name, cmd_name, hook_value) in &hook_defs {
             let event_hooks = hooks
                 .as_object_mut()
-                .unwrap()
+                .expect("hooks verified as JSON object above")
                 .entry(*event_name)
                 .or_insert_with(|| serde_json::json!([]));
 
@@ -203,20 +203,24 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
             }
 
             // Check if an codemem hook already exists for this event
-            let already_exists = event_hooks.as_array().unwrap().iter().any(|h| {
-                h.get("hooks")
-                    .and_then(|arr| arr.as_array())
-                    .map(|arr| {
-                        arr.iter().any(|entry| {
-                            entry
-                                .get("command")
-                                .and_then(|c| c.as_str())
-                                .map(|c| c.starts_with("codemem "))
-                                .unwrap_or(false)
+            let already_exists = event_hooks
+                .as_array()
+                .expect("event_hooks ensured as array above")
+                .iter()
+                .any(|h| {
+                    h.get("hooks")
+                        .and_then(|arr| arr.as_array())
+                        .map(|arr| {
+                            arr.iter().any(|entry| {
+                                entry
+                                    .get("command")
+                                    .and_then(|c| c.as_str())
+                                    .map(|c| c.starts_with("codemem "))
+                                    .unwrap_or(false)
+                            })
                         })
-                    })
-                    .unwrap_or(false)
-            });
+                        .unwrap_or(false)
+                });
 
             if already_exists {
                 hooks_skipped += 1;
@@ -224,7 +228,10 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                 // Append the hook entries from the value array
                 if let Some(entries) = hook_value.as_array() {
                     for entry in entries {
-                        event_hooks.as_array_mut().unwrap().push(entry.clone());
+                        event_hooks
+                            .as_array_mut()
+                            .expect("event_hooks ensured as array above")
+                            .push(entry.clone());
                     }
                 }
                 println!("[hooks] Added {} -> {} hook", event_name, cmd_name);
@@ -264,7 +271,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         // Ensure mcpServers object exists
         let servers = mcp_config
             .as_object_mut()
-            .unwrap()
+            .expect("mcp_config initialized as JSON object")
             .entry("mcpServers")
             .or_insert_with(|| serde_json::json!({}));
 
@@ -272,7 +279,9 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
             *servers = serde_json::json!({});
         }
 
-        let servers_map = servers.as_object_mut().unwrap();
+        let servers_map = servers
+            .as_object_mut()
+            .expect("servers ensured as JSON object above");
 
         if servers_map.contains_key("codemem") {
             println!(

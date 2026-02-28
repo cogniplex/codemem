@@ -12,6 +12,8 @@ description = "Shared types, traits, and errors for the Codemem memory engine"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+dirs = { workspace = true }

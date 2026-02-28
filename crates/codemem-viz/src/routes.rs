@@ -35,7 +35,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 pub async fn api_stats(State(storage): State<AppState>) -> ApiResult<serde_json::Value> {
     let storage = storage.lock().map_err(lock_err)?;
     let stats = storage.stats().map_err(lock_err)?;
-    Ok(Json(serde_json::to_value(stats).unwrap()))
+    Ok(Json(serde_json::to_value(stats).map_err(lock_err)?))
 }
 
 pub async fn api_namespaces(State(storage): State<AppState>) -> ApiResult<Vec<String>> {
@@ -79,13 +79,13 @@ pub async fn api_memory_detail(
     // Try memory first
     let memory = storage.get_memory(&id).map_err(lock_err)?;
     if let Some(m) = memory {
-        return Ok(Json(serde_json::to_value(m).unwrap()));
+        return Ok(Json(serde_json::to_value(m).map_err(lock_err)?));
     }
 
     // Fall back to graph node -- prevents 404 when clicking graph-only nodes
     let node = storage.get_graph_node(&id).map_err(lock_err)?;
     match node {
-        Some(n) => Ok(Json(serde_json::to_value(n).unwrap())),
+        Some(n) => Ok(Json(serde_json::to_value(n).map_err(lock_err)?)),
         None => Err((
             axum::http::StatusCode::NOT_FOUND,
             format!("Memory or node {} not found", id),
@@ -476,4 +476,138 @@ pub async fn api_graph_browse(
         kinds,
         edge_count,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_str_short_string() {
+        assert_eq!(truncate_str("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_str_exact_length() {
+        assert_eq!(truncate_str("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_str_long_string() {
+        let result = truncate_str("hello world", 5);
+        assert_eq!(result, "hello...");
+    }
+
+    #[test]
+    fn truncate_str_unicode_boundary() {
+        // Multi-byte character: each char is 2 bytes
+        let s = "\u{00e9}\u{00e9}\u{00e9}\u{00e9}"; // 4 x e-acute (2 bytes each)
+        let result = truncate_str(s, 3);
+        // Should back up to char boundary at 2, not split a character
+        assert!(result.ends_with("..."));
+        // The result should be valid UTF-8
+        assert!(result.is_char_boundary(0));
+    }
+
+    #[test]
+    fn truncate_str_empty() {
+        assert_eq!(truncate_str("", 10), "");
+    }
+
+    #[tokio::test]
+    async fn api_stats_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let result = api_stats(State(state)).await;
+        assert!(result.is_ok());
+        let json = result.unwrap().0;
+        assert_eq!(json["memory_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn api_namespaces_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let result = api_namespaces(State(state)).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_memories_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = MemoryQuery {
+            namespace: None,
+            memory_type: None,
+        };
+        let result = api_memories(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_vectors_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = VectorQuery { namespace: None };
+        let result = api_vectors(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_graph_nodes_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = GraphNodeQuery {
+            namespace: None,
+            kind: None,
+        };
+        let result = api_graph_nodes(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_graph_edges_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = EdgeQuery { namespace: None };
+        let result = api_graph_edges(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_search_empty_query() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = SearchQuery {
+            q: None,
+            namespace: None,
+        };
+        let result = api_search(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_graph_browse_empty_db() {
+        let storage = Storage::open_in_memory().unwrap();
+        let state: AppState = Arc::new(Mutex::new(storage));
+        let query = BrowseQuery {
+            namespace: None,
+            kind: None,
+            q: None,
+            offset: None,
+            limit: None,
+        };
+        let result = api_graph_browse(State(state), Query(query)).await;
+        assert!(result.is_ok());
+        let browse = result.unwrap().0;
+        assert!(browse.nodes.is_empty());
+        assert_eq!(browse.total, 0);
+        assert_eq!(browse.edge_count, 0);
+    }
 }

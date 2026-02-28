@@ -140,7 +140,9 @@ impl EmbeddingService {
         let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| CodememError::Embedding(e.to_string()))?;
 
-        let cache = Mutex::new(LruCache::new(NonZeroUsize::new(CACHE_CAPACITY).unwrap()));
+        let cache = Mutex::new(LruCache::new(
+            NonZeroUsize::new(CACHE_CAPACITY).expect("CACHE_CAPACITY is non-zero"),
+        ));
 
         Ok(Self {
             model: Mutex::new(model),
@@ -208,7 +210,10 @@ impl EmbeddingService {
     pub fn embed(&self, text: &str) -> Result<Vec<f32>, CodememError> {
         // Check cache
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| CodememError::LockPoisoned(format!("embedding cache: {e}")))?;
             if let Some(cached) = cache.get(text) {
                 return Ok(cached.clone());
             }
@@ -218,7 +223,10 @@ impl EmbeddingService {
 
         // Store in cache
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| CodememError::LockPoisoned(format!("embedding cache: {e}")))?;
             cache.put(text.to_string(), embedding.clone());
         }
 
@@ -258,7 +266,10 @@ impl EmbeddingService {
             .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
 
         // Forward pass -> [1, seq_len, hidden_size]
-        let model = self.model.lock().unwrap();
+        let model = self
+            .model
+            .lock()
+            .map_err(|e| CodememError::LockPoisoned(format!("embedding model: {e}")))?;
         let hidden_states = model
             .forward(
                 &input_ids_tensor,
@@ -317,7 +328,10 @@ impl EmbeddingService {
         let mut uncached_texts = Vec::new();
 
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| CodememError::LockPoisoned(format!("embedding cache: {e}")))?;
             for (i, text) in texts.iter().enumerate() {
                 if let Some(cached) = cache.get(*text) {
                     results[i] = Some(cached.clone());
@@ -331,14 +345,17 @@ impl EmbeddingService {
         if !uncached_texts.is_empty() {
             let new_embeddings = self.embed_batch_uncached(&uncached_texts)?;
 
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| CodememError::LockPoisoned(format!("embedding cache: {e}")))?;
             for (idx, embedding) in uncached_indices.into_iter().zip(new_embeddings) {
                 cache.put(texts[idx].to_string(), embedding.clone());
                 results[idx] = Some(embedding);
             }
         }
 
-        Ok(results.into_iter().map(|r| r.unwrap()).collect())
+        Ok(results.into_iter().flatten().collect())
     }
 
     /// Embed a batch of texts without caching, using a true batched forward pass.
@@ -402,7 +419,10 @@ impl EmbeddingService {
                 .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
 
             // Single forward pass -> [batch_size, seq_len, hidden_size]
-            let model = self.model.lock().unwrap();
+            let model = self
+                .model
+                .lock()
+                .map_err(|e| CodememError::LockPoisoned(format!("embedding model: {e}")))?;
             let hidden_states = model
                 .forward(&input_ids, &token_type_ids, Some(&attention_mask))
                 .map_err(|e| CodememError::Embedding(format!("Forward error: {e}")))?;
@@ -450,8 +470,10 @@ impl EmbeddingService {
 
     /// Get cache statistics: (current_size, capacity).
     pub fn cache_stats(&self) -> (usize, usize) {
-        let cache = self.cache.lock().unwrap();
-        (cache.len(), CACHE_CAPACITY)
+        match self.cache.lock() {
+            Ok(cache) => (cache.len(), CACHE_CAPACITY),
+            Err(_) => (0, CACHE_CAPACITY),
+        }
     }
 }
 
@@ -487,11 +509,12 @@ pub struct CachedProvider {
 
 impl CachedProvider {
     pub fn new(inner: Box<dyn EmbeddingProvider>, capacity: usize) -> Self {
+        // SAFETY: 1 is non-zero, so the inner expect is infallible
+        let cap =
+            NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(1).expect("1 is non-zero"));
         Self {
             inner,
-            cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(1).unwrap()),
-            )),
+            cache: Mutex::new(LruCache::new(cap)),
         }
     }
 }
@@ -503,14 +526,20 @@ impl EmbeddingProvider for CachedProvider {
 
     fn embed(&self, text: &str) -> Result<Vec<f32>, CodememError> {
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| CodememError::LockPoisoned(format!("cached provider: {e}")))?;
             if let Some(cached) = cache.get(text) {
                 return Ok(cached.clone());
             }
         }
         let embedding = self.inner.embed(text)?;
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| CodememError::LockPoisoned(format!("cached provider: {e}")))?;
             cache.put(text.to_string(), embedding.clone());
         }
         Ok(embedding)
@@ -523,7 +552,10 @@ impl EmbeddingProvider for CachedProvider {
         let mut uncached_idx = Vec::new();
 
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| CodememError::LockPoisoned(format!("cached provider: {e}")))?;
             for (i, text) in texts.iter().enumerate() {
                 if let Some(cached) = cache.get(*text) {
                     results[i] = Some(cached.clone());
@@ -536,14 +568,17 @@ impl EmbeddingProvider for CachedProvider {
 
         if !uncached.is_empty() {
             let new_embeddings = self.inner.embed_batch(&uncached)?;
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| CodememError::LockPoisoned(format!("cached provider: {e}")))?;
             for (idx, embedding) in uncached_idx.into_iter().zip(new_embeddings) {
                 cache.put(texts[idx].to_string(), embedding.clone());
                 results[idx] = Some(embedding);
             }
         }
 
-        Ok(results.into_iter().map(|r| r.unwrap()).collect())
+        Ok(results.into_iter().flatten().collect())
     }
 
     fn name(&self) -> &str {
@@ -551,8 +586,10 @@ impl EmbeddingProvider for CachedProvider {
     }
 
     fn cache_stats(&self) -> (usize, usize) {
-        let cache = self.cache.lock().unwrap();
-        (cache.len(), cache.cap().into())
+        match self.cache.lock() {
+            Ok(cache) => (cache.len(), cache.cap().into()),
+            Err(_) => (0, 0),
+        }
     }
 }
 
@@ -614,5 +651,187 @@ pub fn from_env() -> Result<Box<dyn EmbeddingProvider>, CodememError> {
             "Unknown embedding provider: '{}'. Use 'candle', 'ollama', or 'openai'.",
             other
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A mock embedding provider for testing CachedProvider behavior.
+    struct MockProvider {
+        dims: usize,
+        call_count: AtomicUsize,
+    }
+
+    impl MockProvider {
+        fn new(dims: usize) -> Self {
+            Self {
+                dims,
+                call_count: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl EmbeddingProvider for MockProvider {
+        fn dimensions(&self) -> usize {
+            self.dims
+        }
+
+        fn embed(&self, _text: &str) -> Result<Vec<f32>, CodememError> {
+            self.call_count.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![0.1; self.dims])
+        }
+
+        fn name(&self) -> &str {
+            "mock"
+        }
+    }
+
+    #[test]
+    fn cached_provider_cache_hit() {
+        let mock = MockProvider::new(4);
+        let provider = CachedProvider::new(Box::new(mock), 100);
+
+        // First call: cache miss
+        let v1 = provider.embed("hello").unwrap();
+        assert_eq!(v1.len(), 4);
+
+        // Second call: cache hit (inner should only be called once)
+        let v2 = provider.embed("hello").unwrap();
+        assert_eq!(v1, v2);
+
+        // Access inner mock through the provider trait -- call_count should be 1
+        // We can check cache_stats instead
+        let (size, cap) = provider.cache_stats();
+        assert_eq!(size, 1);
+        assert_eq!(cap, 100);
+    }
+
+    #[test]
+    fn cached_provider_cache_miss() {
+        let mock = MockProvider::new(4);
+        let provider = CachedProvider::new(Box::new(mock), 100);
+
+        provider.embed("hello").unwrap();
+        provider.embed("world").unwrap();
+
+        let (size, _) = provider.cache_stats();
+        assert_eq!(size, 2);
+    }
+
+    #[test]
+    fn cached_provider_batch_empty() {
+        let mock = MockProvider::new(4);
+        let provider = CachedProvider::new(Box::new(mock), 100);
+
+        let result = provider.embed_batch(&[]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn cached_provider_batch_single() {
+        let mock = MockProvider::new(4);
+        let provider = CachedProvider::new(Box::new(mock), 100);
+
+        let result = provider.embed_batch(&["hello"]).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].len(), 4);
+
+        let (size, _) = provider.cache_stats();
+        assert_eq!(size, 1);
+    }
+
+    #[test]
+    fn cached_provider_batch_mixed_cache() {
+        let mock = MockProvider::new(4);
+        let provider = CachedProvider::new(Box::new(mock), 100);
+
+        // Pre-populate cache
+        provider.embed("hello").unwrap();
+
+        // Batch with one cached and one uncached
+        let result = provider.embed_batch(&["hello", "world"]).unwrap();
+        assert_eq!(result.len(), 2);
+
+        let (size, _) = provider.cache_stats();
+        assert_eq!(size, 2);
+    }
+
+    #[test]
+    fn cached_provider_zero_capacity() {
+        // Capacity of 0 should default to 1
+        let mock = MockProvider::new(4);
+        let provider = CachedProvider::new(Box::new(mock), 0);
+
+        provider.embed("a").unwrap();
+        provider.embed("b").unwrap();
+
+        let (size, cap) = provider.cache_stats();
+        // Cap should be 1 (the fallback), so only 1 entry retained
+        assert_eq!(cap, 1);
+        assert_eq!(size, 1);
+    }
+
+    #[test]
+    fn cached_provider_name_delegates() {
+        let mock = MockProvider::new(4);
+        let provider = CachedProvider::new(Box::new(mock), 100);
+        assert_eq!(provider.name(), "mock");
+    }
+
+    #[test]
+    fn cached_provider_dimensions_delegates() {
+        let mock = MockProvider::new(768);
+        let provider = CachedProvider::new(Box::new(mock), 100);
+        assert_eq!(provider.dimensions(), 768);
+    }
+
+    #[test]
+    fn from_env_unknown_provider() {
+        // Set env var to trigger the error path
+        std::env::set_var("CODEMEM_EMBED_PROVIDER", "nonexistent_provider_xyz");
+        let result = from_env();
+        std::env::remove_var("CODEMEM_EMBED_PROVIDER");
+
+        match result {
+            Err(e) => {
+                let err = e.to_string();
+                assert!(
+                    err.contains("Unknown embedding provider"),
+                    "Error should mention unknown provider: {err}"
+                );
+            }
+            Ok(_) => panic!("Expected error for unknown provider"),
+        }
+    }
+
+    #[test]
+    fn embedding_service_missing_model() {
+        match EmbeddingService::new(Path::new("/nonexistent/path")) {
+            Err(e) => {
+                let err = e.to_string();
+                assert!(
+                    err.contains("Model not found"),
+                    "Error should mention missing model: {err}"
+                );
+            }
+            Ok(_) => panic!("Expected error for missing model"),
+        }
+    }
+
+    #[test]
+    fn default_model_dir_path() {
+        let dir = EmbeddingService::default_model_dir();
+        assert!(dir.to_string_lossy().contains(MODEL_NAME));
+        assert!(dir.to_string_lossy().contains(".codemem"));
+    }
+
+    #[test]
+    fn constants_are_sensible() {
+        assert_eq!(DIMENSIONS, 768);
+        assert_eq!(CACHE_CAPACITY, 10_000);
+        assert_eq!(MODEL_NAME, "bge-base-en-v1.5");
     }
 }

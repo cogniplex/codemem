@@ -338,19 +338,6 @@ impl Storage {
 
     // ── Session Management ─────────────────────────────────────────────
 
-    /// Ensure session_id column exists on memories table.
-    pub fn ensure_session_column(&self) -> Result<(), CodememError> {
-        let conn = self.conn();
-        let has_col: bool = conn
-            .prepare("SELECT session_id FROM memories LIMIT 0")
-            .is_ok();
-        if !has_col {
-            conn.execute_batch("ALTER TABLE memories ADD COLUMN session_id TEXT;")
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
-        }
-        Ok(())
-    }
-
     /// Start a new session.
     pub fn start_session(&self, id: &str, namespace: Option<&str>) -> Result<(), CodememError> {
         let conn = self.conn();
@@ -659,13 +646,6 @@ mod tests {
             sessions[0].summary,
             Some("Explored the codebase".to_string())
         );
-    }
-
-    #[test]
-    fn ensure_session_column_idempotent() {
-        let storage = Storage::open_in_memory().unwrap();
-        storage.ensure_session_column().unwrap();
-        storage.ensure_session_column().unwrap();
     }
 
     #[test]

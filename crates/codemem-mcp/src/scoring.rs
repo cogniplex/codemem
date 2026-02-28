@@ -50,7 +50,9 @@ pub(crate) fn format_recall_results(
         })
         .collect();
 
-    ToolResult::text(serde_json::to_string_pretty(&output).unwrap())
+    ToolResult::text(
+        serde_json::to_string_pretty(&output).expect("JSON serialization of search results"),
+    )
 }
 
 /// Compute 9-component hybrid score for a memory against a query.

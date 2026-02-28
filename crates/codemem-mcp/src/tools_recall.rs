@@ -31,14 +31,20 @@ impl McpServer {
         let query_tokens: Vec<&str> = query_lower.split_whitespace().collect();
 
         // Step 1: Run normal vector search (or text fallback)
-        let vector_results: Vec<(String, f32)> = if let Some(ref emb_service) = self.embeddings {
-            match emb_service.lock().unwrap().embed(query) {
-                Ok(query_embedding) => self
-                    .vector
-                    .lock()
-                    .unwrap()
-                    .search(&query_embedding, k * 2)
-                    .unwrap_or_default(),
+        let vector_results: Vec<(String, f32)> = if let Some(emb_guard) =
+            match self.lock_embeddings() {
+                Ok(g) => g,
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            } {
+            match emb_guard.embed(query) {
+                Ok(query_embedding) => {
+                    drop(emb_guard);
+                    let vec = match self.lock_vector() {
+                        Ok(v) => v,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    };
+                    vec.search(&query_embedding, k * 2).unwrap_or_default()
+                }
                 Err(e) => {
                     tracing::warn!("Query embedding failed: {e}");
                     vec![]
@@ -48,8 +54,14 @@ impl McpServer {
             vec![]
         };
 
-        let graph = self.graph.lock().unwrap();
-        let bm25 = self.bm25_index.lock().unwrap();
+        let graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+        let bm25 = match self.lock_bm25() {
+            Ok(b) => b,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
         // Collect initial seed memories with their vector similarity
         struct ScoredMemory {
@@ -77,8 +89,12 @@ impl McpServer {
                     }
                     let breakdown =
                         compute_score(&memory, query, &query_tokens, 0.0, &graph, &bm25);
-                    let score =
-                        breakdown.total_with_weights(unsafe { &*self.scoring_weights.get() });
+                    let weights = match self.scoring_weights() {
+                        Ok(w) => w,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    };
+                    let score = breakdown.total_with_weights(&weights);
+                    drop(weights);
                     if score > 0.01 {
                         seen_ids.insert(memory.id.clone());
                         all_memories.push(ScoredMemory {
@@ -169,6 +185,10 @@ impl McpServer {
         }
 
         // Step 5-6: Score all memories and sort
+        let weights = match self.scoring_weights() {
+            Ok(w) => w,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
         let mut scored_results: Vec<(SearchResult, String)> = all_memories
             .into_iter()
             .map(|sm| {
@@ -180,7 +200,7 @@ impl McpServer {
                     &graph,
                     &bm25,
                 );
-                let score = breakdown.total_with_weights(unsafe { &*self.scoring_weights.get() });
+                let score = breakdown.total_with_weights(&weights);
                 (
                     SearchResult {
                         memory: sm.memory,
@@ -191,6 +211,7 @@ impl McpServer {
                 )
             })
             .collect();
+        drop(weights);
 
         scored_results.sort_by(|a, b| {
             b.0.score
@@ -220,7 +241,9 @@ impl McpServer {
             })
             .collect();
 
-        ToolResult::text(serde_json::to_string_pretty(&output).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
+        )
     }
 
     /// MCP tool: list_namespaces -- list all namespaces with memory counts.
@@ -243,7 +266,9 @@ impl McpServer {
         }
 
         let response = json!({ "namespaces": ns_list });
-        ToolResult::text(serde_json::to_string_pretty(&response).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&response).expect("JSON serialization of literal"),
+        )
     }
 
     /// MCP tool: namespace_stats -- detailed stats for a single namespace.
@@ -265,7 +290,7 @@ impl McpServer {
                     "count": 0,
                     "message": "No memories found in this namespace"
                 }))
-                .unwrap(),
+                .expect("JSON serialization of literal"),
             );
         }
 
@@ -326,7 +351,9 @@ impl McpServer {
             "newest": newest.map(|d| d.to_rfc3339()),
         });
 
-        ToolResult::text(serde_json::to_string_pretty(&response).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&response).expect("JSON serialization of literal"),
+        )
     }
 
     /// MCP tool: delete_namespace -- delete all memories in a namespace.
@@ -352,9 +379,18 @@ impl McpServer {
         };
 
         let mut deleted = 0usize;
-        let mut graph = self.graph.lock().unwrap();
-        let mut vector = self.vector.lock().unwrap();
-        let mut bm25 = self.bm25_index.lock().unwrap();
+        let mut graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+        let mut vector = match self.lock_vector() {
+            Ok(v) => v,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
+        let mut bm25 = match self.lock_bm25() {
+            Ok(b) => b,
+            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        };
 
         for id in &ids {
             // Delete memory from storage
@@ -392,7 +428,9 @@ impl McpServer {
             "namespace": namespace,
         });
 
-        ToolResult::text(serde_json::to_string_pretty(&response).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&response).expect("JSON serialization of literal"),
+        )
     }
 
     // ── Export/Import Tools ─────────────────────────────────────────────────
@@ -464,7 +502,9 @@ impl McpServer {
             }
         }
 
-        ToolResult::text(serde_json::to_string_pretty(&exported).unwrap())
+        ToolResult::text(
+            serde_json::to_string_pretty(&exported).expect("JSON serialization of literal"),
+        )
     }
 
     /// MCP tool: import_memories -- import memories from a JSON array.
@@ -546,7 +586,10 @@ impl McpServer {
             match self.storage.insert_memory(&memory) {
                 Ok(()) => {
                     // Update BM25 index
-                    self.bm25_index.lock().unwrap().add_document(&id, content);
+                    match self.lock_bm25() {
+                        Ok(mut bm25) => bm25.add_document(&id, content),
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    }
 
                     // Create graph node first (so enrichment can reference it)
                     let graph_node = GraphNode {
@@ -559,10 +602,18 @@ impl McpServer {
                         namespace: None,
                     };
                     let _ = self.storage.insert_graph_node(&graph_node);
-                    let _ = self.graph.lock().unwrap().add_node(graph_node);
+                    match self.lock_graph() {
+                        Ok(mut graph) => {
+                            let _ = graph.add_node(graph_node);
+                        }
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    }
 
                     // Generate contextual embedding and insert into vector index
-                    if let Some(ref emb_service) = self.embeddings {
+                    if let Some(emb_guard) = match self.lock_embeddings() {
+                        Ok(g) => g,
+                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+                    } {
                         let enriched = self.enrich_memory_text(
                             content,
                             memory_type,
@@ -570,9 +621,18 @@ impl McpServer {
                             memory.namespace.as_deref(),
                             Some(&id),
                         );
-                        if let Ok(embedding) = emb_service.lock().unwrap().embed(&enriched) {
+                        let emb_result = emb_guard.embed(&enriched);
+                        drop(emb_guard);
+                        if let Ok(embedding) = emb_result {
                             let _ = self.storage.store_embedding(&id, &embedding);
-                            let _ = self.vector.lock().unwrap().insert(&id, &embedding);
+                            match self.lock_vector() {
+                                Ok(mut vec) => {
+                                    let _ = vec.insert(&id, &embedding);
+                                }
+                                Err(e) => {
+                                    return ToolResult::tool_error(format!("Lock error: {e}"))
+                                }
+                            }
                         }
                     }
 
@@ -597,7 +657,7 @@ impl McpServer {
                 "skipped": skipped,
                 "ids": ids,
             }))
-            .unwrap(),
+            .expect("JSON serialization of literal"),
         )
     }
 }
