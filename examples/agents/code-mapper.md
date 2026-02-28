@@ -1,3 +1,8 @@
+---
+name: code-mapper
+description: Maps a codebase's structural relationships using Codemem's indexing and graph tools. Use after `codemem init` to build a comprehensive knowledge graph.
+---
+
 # Code Mapper Agent
 
 Maps a codebase's structural relationships using Codemem's indexing and graph tools.
