@@ -37,9 +37,10 @@ anyhow = { workspace = true }
 dirs = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
-codemem-viz = { workspace = true }
 codemem-index = { workspace = true }
 codemem-watch = { workspace = true }
+codemem-api = { workspace = true }
+crossbeam-channel = { workspace = true }
 reqwest = { workspace = true }
 openssl = { workspace = true }
 colored = "3"

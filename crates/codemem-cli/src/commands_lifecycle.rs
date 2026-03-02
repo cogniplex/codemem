@@ -217,6 +217,7 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
             sec.push_str(item);
             sec.push('\n');
         }
+        sec.push_str("\n*Consider storing a permanent memory for any recurring pattern.*");
         sections.push(sec);
     }
 
@@ -239,6 +240,15 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
         let mut context = String::from("<codemem-context>\n# Codemem Memory Context\n\n");
         context.push_str("Prior knowledge from this project's memory graph. ");
         context.push_str("Use `recall_memory` and `search_code` MCP tools for details.\n\n");
+        // Usage tips for the assistant
+        context.push_str(
+            "> **Tips:** Use `store_memory` to save decisions and insights. \
+             Use `recall_memory` before exploring code you may have seen before. \
+             Run `detect_patterns` to spot repeated workflows. \
+             Use `session_checkpoint` mid-session to capture progress. \
+             Tag memories with project areas (e.g. `auth`, `api`) for better recall. \
+             Important findings deserve `importance >= 0.7`.\n\n"
+        );
         for sec in &sections {
             context.push_str(sec);
             context.push_str("\n\n");
@@ -299,6 +309,14 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
         if !sid.is_empty() {
             let _ = storage.start_session(sid, cwd);
         }
+    }
+
+    // Skip trivial prompts — "commit this", "clear", "continue", etc. are noise
+    let trimmed_prompt = prompt.trim();
+    if trimmed_prompt.len() < 30 || trimmed_prompt.split_whitespace().count() < 5 {
+        let output = serde_json::json!({"continue": true});
+        println!("{}", serde_json::to_string(&output)?);
+        return Ok(());
     }
 
     // Store prompt as a Context memory
@@ -541,8 +559,14 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
         summary_parts.join(". ")
     };
 
-    // Store the summary as an Insight memory
-    if !session_memories.is_empty() {
+    // Only store session summary when there's real substance:
+    // - at least one file was edited, or
+    // - at least one decision was made, or
+    // - non-trivial investigation (5+ files read)
+    // Skip summaries that are just echoed prompts — those aren't insights.
+    let has_substance =
+        !files_edited.is_empty() || !decisions.is_empty() || files_read.len() >= 5;
+    if has_substance && !session_memories.is_empty() {
         let content_hash = codemem_hooks::content_hash(&summary_text);
         let now = chrono::Utc::now();
         let summary_memory = codemem_core::MemoryNode {
@@ -602,26 +626,5 @@ fn short_path(path: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn short_path_absolute() {
-        assert_eq!(short_path("/home/user/project/src/main.rs"), "src/main.rs");
-    }
-
-    #[test]
-    fn short_path_relative() {
-        assert_eq!(short_path("src/main.rs"), "src/main.rs");
-    }
-
-    #[test]
-    fn short_path_single_component() {
-        assert_eq!(short_path("main.rs"), "main.rs");
-    }
-
-    #[test]
-    fn short_path_empty() {
-        assert_eq!(short_path(""), "");
-    }
-}
+#[path = "tests/commands_lifecycle_tests.rs"]
+mod tests;

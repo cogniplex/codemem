@@ -149,16 +149,5 @@ fn print_check(name: &str, ok: bool, detail: &str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn print_check_ok_does_not_panic() {
-        print_check("test", true, "");
-    }
-
-    #[test]
-    fn print_check_fail_with_detail_does_not_panic() {
-        print_check("test", false, "some detail");
-    }
-}
+#[path = "tests/commands_doctor_tests.rs"]
+mod tests;

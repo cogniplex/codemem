@@ -256,6 +256,23 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         std::fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
     }
 
+    // ── Step 3b: Install code-mapper agent ─────────────────────────────────
+    {
+        let agents_dir = project_dir.join(".claude").join("agents");
+        std::fs::create_dir_all(&agents_dir)?;
+        let agent_path = agents_dir.join("code-mapper.md");
+
+        if agent_path.exists() {
+            println!("[agents] code-mapper agent already installed, skipped");
+            status_lines.push("Agent: code-mapper already present".to_string());
+        } else {
+            let agent_content = include_str!("../../../.claude/agents/code-mapper.md");
+            std::fs::write(&agent_path, agent_content)?;
+            println!("[agents] Installed code-mapper agent → .claude/agents/code-mapper.md");
+            status_lines.push("Agent: code-mapper installed".to_string());
+        }
+    }
+
     // ── Step 4: Register codemem as MCP server (.mcp.json) ─────────────────
     // Write to .mcp.json in the project directory, merging non-destructively
     {
