@@ -3,6 +3,7 @@
 //! Detects language from file extension, selects the appropriate extractor,
 //! and runs symbol + reference extraction.
 
+use crate::chunker::{chunk_file, ChunkConfig, CodeChunk};
 use crate::extractor::LanguageExtractor;
 use crate::languages;
 use crate::symbol::{Reference, Symbol};
@@ -20,11 +21,14 @@ pub struct ParseResult {
     pub symbols: Vec<Symbol>,
     /// All references extracted from the file.
     pub references: Vec<Reference>,
+    /// CST-aware code chunks extracted from the file.
+    pub chunks: Vec<CodeChunk>,
 }
 
 /// Coordinates tree-sitter parsing across multiple languages.
 pub struct CodeParser {
     extractors: Vec<Box<dyn LanguageExtractor>>,
+    chunk_config: ChunkConfig,
 }
 
 impl CodeParser {
@@ -32,10 +36,19 @@ impl CodeParser {
     pub fn new() -> Self {
         Self {
             extractors: languages::all_extractors(),
+            chunk_config: ChunkConfig::default(),
         }
     }
 
-    /// Parse a single file and extract symbols and references.
+    /// Create a new CodeParser with a custom chunk configuration.
+    pub fn with_chunk_config(chunk_config: ChunkConfig) -> Self {
+        Self {
+            extractors: languages::all_extractors(),
+            chunk_config,
+        }
+    }
+
+    /// Parse a single file and extract symbols, references, and chunks.
     ///
     /// Returns `None` if the file extension is not supported or parsing fails.
     pub fn parse_file(&self, path: &str, content: &[u8]) -> Option<ParseResult> {
@@ -52,12 +65,14 @@ impl CodeParser {
 
         let symbols = extractor.extract_symbols(&tree, content, path);
         let references = extractor.extract_references(&tree, content, path);
+        let chunks = chunk_file(&tree, content, path, &symbols, &self.chunk_config);
 
         Some(ParseResult {
             file_path: path.to_string(),
             language: extractor.language_name().to_string(),
             symbols,
             references,
+            chunks,
         })
     }
 
@@ -92,41 +107,5 @@ impl Default for CodeParser {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_rust_file() {
-        let parser = CodeParser::new();
-        let source = b"pub fn hello() { println!(\"hello\"); }";
-        let result = parser.parse_file("src/main.rs", source);
-        assert!(result.is_some());
-        let result = result.unwrap();
-        assert_eq!(result.language, "rust");
-        assert!(!result.symbols.is_empty());
-    }
-
-    #[test]
-    fn unsupported_extension_returns_none() {
-        let parser = CodeParser::new();
-        let result = parser.parse_file("file.xyz", b"some content");
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn supported_extensions_includes_rs() {
-        let parser = CodeParser::new();
-        assert!(parser.supports_extension("rs"));
-        assert!(parser.supports_extension("py"));
-        assert!(parser.supports_extension("go"));
-        assert!(parser.supports_extension("java"));
-        assert!(parser.supports_extension("scala"));
-        assert!(parser.supports_extension("rb"));
-        assert!(parser.supports_extension("cs"));
-        assert!(parser.supports_extension("kt"));
-        assert!(parser.supports_extension("swift"));
-        assert!(parser.supports_extension("php"));
-        assert!(parser.supports_extension("tf"));
-        assert!(!parser.supports_extension("xyz"));
-    }
-}
+#[path = "tests/parser_tests.rs"]
+mod tests;

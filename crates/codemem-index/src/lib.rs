@@ -15,6 +15,7 @@
 //! - **incremental** — SHA-256 based file change detection
 //! - **manifest** — Manifest file parsing for cross-repo dependency detection
 
+pub mod chunker;
 pub mod extractor;
 pub mod incremental;
 pub mod indexer;
@@ -24,8 +25,9 @@ pub mod parser;
 pub mod resolver;
 pub mod symbol;
 
+pub use chunker::{ChunkConfig, CodeChunk};
 pub use extractor::LanguageExtractor;
-pub use indexer::{IndexResult, Indexer};
+pub use indexer::{IndexProgress, IndexResult, Indexer};
 pub use manifest::{Dependency, ManifestResult, Workspace};
 pub use parser::{CodeParser, ParseResult};
 pub use resolver::{ReferenceResolver, ResolvedEdge};

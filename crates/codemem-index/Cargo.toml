@@ -19,6 +19,7 @@ chrono = { workspace = true }
 tree-sitter = { workspace = true }
 walkdir = { workspace = true }
 ignore = { workspace = true }
+tokio = { workspace = true }
 
 # Manifest parsing
 toml = "1.0"
