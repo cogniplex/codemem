@@ -784,7 +784,6 @@ fn extract_name_from_using(text: &str) -> Option<String> {
     None
 }
 
-
 #[cfg(test)]
 #[path = "tests/cpp_tests.rs"]
 mod tests;

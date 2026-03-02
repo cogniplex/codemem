@@ -310,8 +310,7 @@ fn consolidate_forget_custom_threshold() {
     assert_eq!(server.storage.memory_count().unwrap(), 2);
 
     // Forget with threshold 0.5 should delete both
-    let params =
-        json!({"name": "consolidate_forget", "arguments": {"importance_threshold": 0.5}});
+    let params = json!({"name": "consolidate_forget", "arguments": {"importance_threshold": 0.5}});
     let resp = server.handle_request("tools/call", Some(&params), json!(1));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();

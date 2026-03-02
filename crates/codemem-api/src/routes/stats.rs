@@ -10,13 +10,14 @@ use std::sync::Arc;
 pub async fn get_stats(State(state): State<Arc<AppState>>) -> Json<StatsResponse> {
     let storage = state.server.storage();
     let memory_count = storage.memory_count().unwrap_or(0);
-    let embedding_count = storage
-        .list_all_embeddings()
-        .map(|e| e.len())
-        .unwrap_or(0);
+    let embedding_count = storage.list_all_embeddings().map(|e| e.len()).unwrap_or(0);
 
     let (node_count, edge_count) = {
-        let graph = state.server.graph().lock().unwrap_or_else(|e| e.into_inner());
+        let graph = state
+            .server
+            .graph()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         (graph.node_count(), graph.edge_count())
     };
 
@@ -62,7 +63,11 @@ pub async fn get_health(State(state): State<Arc<AppState>>) -> Json<HealthRespon
     let graph_health = match state.server.graph().lock() {
         Ok(g) => ComponentHealth {
             status: "ok".to_string(),
-            detail: Some(format!("{} nodes, {} edges", g.node_count(), g.edge_count())),
+            detail: Some(format!(
+                "{} nodes, {} edges",
+                g.node_count(),
+                g.edge_count()
+            )),
         },
         Err(e) => ComponentHealth {
             status: "error".to_string(),

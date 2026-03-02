@@ -507,7 +507,6 @@ fn extract_ruby_comment(node: Node, source: &[u8]) -> Option<String> {
     }
 }
 
-
 #[cfg(test)]
 #[path = "tests/ruby_tests.rs"]
 mod tests;

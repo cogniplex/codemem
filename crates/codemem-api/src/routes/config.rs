@@ -2,16 +2,10 @@
 
 use crate::types::{MessageResponse, ScoringWeightsUpdate};
 use crate::AppState;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, Json};
 use std::sync::Arc;
 
-pub async fn get_config(
-    State(_state): State<Arc<AppState>>,
-) -> Json<serde_json::Value> {
+pub async fn get_config(State(_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let config = codemem_core::CodememConfig::load_or_default();
     Json(serde_json::to_value(config).unwrap_or_default())
 }
@@ -89,7 +83,13 @@ pub async fn update_scoring_weights(
 
     let message = response
         .result
-        .and_then(|r| r.get("content")?.get(0)?.get("text")?.as_str().map(String::from))
+        .and_then(|r| {
+            r.get("content")?
+                .get(0)?
+                .get("text")?
+                .as_str()
+                .map(String::from)
+        })
         .unwrap_or_else(|| "Scoring weights updated".to_string());
 
     Ok(Json(MessageResponse { message }))

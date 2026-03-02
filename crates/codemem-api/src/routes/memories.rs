@@ -258,7 +258,10 @@ fn parse_recall_result(result: &serde_json::Value) -> Vec<SearchResultItem> {
                             .to_string(),
                         score: item
                             .get("score")
-                            .and_then(|s| s.as_f64().or_else(|| s.as_str().and_then(|t| t.parse().ok())))
+                            .and_then(|s| {
+                                s.as_f64()
+                                    .or_else(|| s.as_str().and_then(|t| t.parse().ok()))
+                            })
                             .unwrap_or(0.0),
                         score_breakdown: ScoreBreakdownResponse {
                             vector_similarity: get_f64(item, "vector_similarity"),

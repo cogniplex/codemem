@@ -156,9 +156,7 @@ impl McpServer {
             .map_err(|e| CodememError::LockPoisoned(format!("vector: {e}")))
     }
 
-    pub fn lock_graph(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, GraphEngine>, CodememError> {
+    pub fn lock_graph(&self) -> Result<std::sync::MutexGuard<'_, GraphEngine>, CodememError> {
         self.graph
             .lock()
             .map_err(|e| CodememError::LockPoisoned(format!("graph: {e}")))
@@ -364,9 +362,7 @@ impl McpServer {
     }
 
     /// Access the embedding provider (mutex-protected, optional).
-    pub fn embeddings(
-        &self,
-    ) -> Option<&Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
+    pub fn embeddings(&self) -> Option<&Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
         self.embeddings.as_ref()
     }
 
@@ -590,9 +586,9 @@ impl<'a> StdioTransport<'a> {
             }
 
             let id = request.id.unwrap();
-            let response =
-                self.server
-                    .handle_request(&request.method, request.params.as_ref(), id);
+            let response = self
+                .server
+                .handle_request(&request.method, request.params.as_ref(), id);
             write_response(&mut stdout, &response)?;
         }
 

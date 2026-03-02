@@ -546,10 +546,13 @@ pub fn check_triggers(
                         tags: vec![
                             "auto-insight".to_string(),
                             "edit-after-read".to_string(),
-                            format!("file:{}", std::path::Path::new(fp)
-                                .file_name()
-                                .and_then(|f| f.to_str())
-                                .unwrap_or("unknown")),
+                            format!(
+                                "file:{}",
+                                std::path::Path::new(fp)
+                                    .file_name()
+                                    .and_then(|f| f.to_str())
+                                    .unwrap_or("unknown")
+                            ),
                         ],
                         importance: 0.5,
                         dedup_tag,

@@ -32,6 +32,7 @@ export function SearchModal() {
     if (searchOpen) {
       setTimeout(() => inputRef.current?.focus(), 50)
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset state when modal closes
       setQuery('')
       setDebouncedQuery('')
     }

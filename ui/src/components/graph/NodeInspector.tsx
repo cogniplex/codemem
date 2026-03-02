@@ -1,24 +1,6 @@
 import { X, Expand, Network } from 'lucide-react'
 import type { GraphNode, GraphEdge } from '../../api/types'
-
-const KIND_COLORS: Record<string, string> = {
-  function: '#8b5cf6',
-  method: '#a78bfa',
-  class: '#06b6d4',
-  file: '#10b981',
-  module: '#f59e0b',
-  package: '#d97706',
-  variable: '#ef4444',
-  type: '#3b82f6',
-  interface: '#a855f7',
-  trait: '#f97316',
-  struct: '#14b8a6',
-  enum: '#d946ef',
-  memory: '#6366f1',
-  constant: '#facc15',
-  endpoint: '#f43f5e',
-  test: '#64748b',
-}
+import { KIND_COLORS } from './constants'
 
 interface Props {
   node: GraphNode

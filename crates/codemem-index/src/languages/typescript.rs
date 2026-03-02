@@ -1066,7 +1066,6 @@ fn has_arrow_function_value(node: Node) -> bool {
         .is_some_and(|v| v.kind() == "arrow_function" || v.kind() == "function_expression")
 }
 
-
 #[cfg(test)]
 #[path = "tests/typescript_tests.rs"]
 mod tests;

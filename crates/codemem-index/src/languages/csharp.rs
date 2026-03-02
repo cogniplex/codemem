@@ -713,7 +713,6 @@ fn extract_xml_doc(node: Node, source: &[u8]) -> Option<String> {
     }
 }
 
-
 #[cfg(test)]
 #[path = "tests/csharp_tests.rs"]
 mod tests;

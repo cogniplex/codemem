@@ -290,7 +290,7 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
              Run `detect_patterns` to spot repeated workflows. \
              Use `session_checkpoint` mid-session to capture progress. \
              Tag memories with project areas (e.g. `auth`, `api`) for better recall. \
-             Important findings deserve `importance >= 0.7`.\n\n"
+             Important findings deserve `importance >= 0.7`.\n\n",
         );
         for sec in &sections {
             context.push_str(sec);
@@ -609,8 +609,7 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
     // - at least one decision was made, or
     // - non-trivial investigation (5+ files read)
     // Skip summaries that are just echoed prompts — those aren't insights.
-    let has_substance =
-        !files_edited.is_empty() || !decisions.is_empty() || files_read.len() >= 5;
+    let has_substance = !files_edited.is_empty() || !decisions.is_empty() || files_read.len() >= 5;
     if has_substance && !session_memories.is_empty() {
         let content_hash = codemem_hooks::content_hash(&summary_text);
         let now = chrono::Utc::now();
@@ -666,10 +665,7 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
             memory_type: codemem_core::MemoryType::Context,
             importance: 0.4,
             confidence: 1.0,
-            tags: vec![
-                "pending-analysis".to_string(),
-                "file-changes".to_string(),
-            ],
+            tags: vec!["pending-analysis".to_string(), "file-changes".to_string()],
             metadata: {
                 let mut m = std::collections::HashMap::new();
                 m.insert("session_id".into(), serde_json::json!(session_id));

@@ -602,7 +602,6 @@ fn clean_scaladoc(raw: &str) -> String {
     result_lines.join("\n")
 }
 
-
 #[cfg(test)]
 #[path = "tests/scala_tests.rs"]
 mod tests;

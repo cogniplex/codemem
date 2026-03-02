@@ -96,7 +96,10 @@ impl Config {
     let chunks = parse_and_chunk(source, "rs", &config);
 
     // At least one chunk should have a parent symbol
-    let with_parent: Vec<_> = chunks.iter().filter(|c| c.parent_symbol.is_some()).collect();
+    let with_parent: Vec<_> = chunks
+        .iter()
+        .filter(|c| c.parent_symbol.is_some())
+        .collect();
     assert!(
         !with_parent.is_empty(),
         "At least one chunk should have a resolved parent symbol"

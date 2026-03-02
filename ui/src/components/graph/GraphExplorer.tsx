@@ -39,21 +39,26 @@ export function GraphExplorer() {
   const { data: neighborsData } = useNeighbors(expandedNodeId ?? '', 2)
 
   // Merge neighbor data into the subgraph
+  const subgraphNodes = subgraph?.nodes
+  const subgraphEdges = subgraph?.edges
+  const neighborNodes = neighborsData?.nodes
+  const neighborEdges = neighborsData?.edges
+
   const mergedNodes = useMemo(() => {
-    if (!subgraph?.nodes) return []
-    if (!neighborsData?.nodes) return subgraph.nodes
-    const ids = new Set(subgraph.nodes.map((n) => n.id))
-    const extra = neighborsData.nodes.filter((n) => !ids.has(n.id))
-    return [...subgraph.nodes, ...extra]
-  }, [subgraph?.nodes, neighborsData?.nodes])
+    if (!subgraphNodes) return []
+    if (!neighborNodes) return subgraphNodes
+    const ids = new Set(subgraphNodes.map((n) => n.id))
+    const extra = neighborNodes.filter((n) => !ids.has(n.id))
+    return [...subgraphNodes, ...extra]
+  }, [subgraphNodes, neighborNodes])
 
   const mergedEdges = useMemo(() => {
-    if (!subgraph?.edges) return []
-    if (!neighborsData?.edges) return subgraph.edges
-    const ids = new Set(subgraph.edges.map((e) => e.id))
-    const extra = neighborsData.edges.filter((e) => !ids.has(e.id))
-    return [...subgraph.edges, ...extra]
-  }, [subgraph?.edges, neighborsData?.edges])
+    if (!subgraphEdges) return []
+    if (!neighborEdges) return subgraphEdges
+    const ids = new Set(subgraphEdges.map((e) => e.id))
+    const extra = neighborEdges.filter((e) => !ids.has(e.id))
+    return [...subgraphEdges, ...extra]
+  }, [subgraphEdges, neighborEdges])
 
   const selectedNode = useMemo(
     () => mergedNodes.find((n) => n.id === selectedNodeId) ?? null,

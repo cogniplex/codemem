@@ -377,11 +377,7 @@ pub trait StorageBackend: Send + Sync {
     ) -> Result<Vec<(String, usize)>, CodememError>;
 
     /// Check whether a particular auto-insight dedup tag already exists for a session.
-    fn has_auto_insight(
-        &self,
-        session_id: &str,
-        dedup_tag: &str,
-    ) -> Result<bool, CodememError>;
+    fn has_auto_insight(&self, session_id: &str, dedup_tag: &str) -> Result<bool, CodememError>;
 
     /// Count how many Read events occurred in a directory during a session.
     fn count_directory_reads(

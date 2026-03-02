@@ -616,4 +616,3 @@ fn get_impl_target_name(node: Node, source: &[u8]) -> Option<String> {
 #[cfg(test)]
 #[path = "tests/rust_tests.rs"]
 mod tests;
-

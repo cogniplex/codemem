@@ -6,7 +6,10 @@ use crate::types::{
     SecurityInsightsResponse,
 };
 use crate::AppState;
-use axum::{extract::{Query, State}, Json};
+use axum::{
+    extract::{Query, State},
+    Json,
+};
 use codemem_core::NodeKind;
 use std::sync::Arc;
 
@@ -181,14 +184,17 @@ pub async fn get_security_insights(
     let insights: Vec<MemoryItem> = memories.iter().map(to_item).collect();
 
     // Count nodes with security flags
-    let (sensitive_count, endpoint_count, fn_count) = if let Ok(graph) = state.server.lock_graph()
-    {
+    let (sensitive_count, endpoint_count, fn_count) = if let Ok(graph) = state.server.lock_graph() {
         let all_nodes = graph.get_all_nodes();
         let mut sensitive = 0;
         let mut endpoints = 0;
         let mut sec_fns = 0;
         for node in &all_nodes {
-            if let Some(flags) = node.payload.get("security_flags").and_then(|f| f.as_array()) {
+            if let Some(flags) = node
+                .payload
+                .get("security_flags")
+                .and_then(|f| f.as_array())
+            {
                 let flag_strs: Vec<&str> = flags.iter().filter_map(|f| f.as_str()).collect();
                 if flag_strs.contains(&"sensitive") || flag_strs.contains(&"auth_related") {
                     sensitive += 1;

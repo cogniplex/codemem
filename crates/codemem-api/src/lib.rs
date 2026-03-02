@@ -105,10 +105,7 @@ impl ApiServer {
             )
             .route("/api/graph/impact/{id}", get(routes::graph::get_impact))
             // Namespaces
-            .route(
-                "/api/namespaces",
-                get(routes::namespaces::list_namespaces),
-            )
+            .route("/api/namespaces", get(routes::namespaces::list_namespaces))
             .route(
                 "/api/namespaces/{ns}/stats",
                 get(routes::namespaces::get_namespace_stats),
@@ -122,7 +119,10 @@ impl ApiServer {
                 "/api/repos/{id}",
                 get(routes::repos::get_repo).delete(routes::repos::delete_repo),
             )
-            .route("/api/repos/{id}/index", axum::routing::post(routes::repos::index_repo))
+            .route(
+                "/api/repos/{id}/index",
+                axum::routing::post(routes::repos::index_repo),
+            )
             // Sessions
             .route(
                 "/api/sessions",
@@ -134,10 +134,7 @@ impl ApiServer {
             )
             // Timeline & Distribution
             .route("/api/timeline", get(routes::timeline::get_timeline))
-            .route(
-                "/api/distribution",
-                get(routes::timeline::get_distribution),
-            )
+            .route("/api/distribution", get(routes::timeline::get_distribution))
             // Patterns & Consolidation
             .route("/api/patterns", get(routes::patterns::get_patterns))
             .route(
@@ -179,10 +176,7 @@ impl ApiServer {
                 axum::routing::put(routes::config::update_scoring_weights),
             )
             // Agent Recipes
-            .route(
-                "/api/agents/recipes",
-                get(routes::agents::list_recipes),
-            )
+            .route("/api/agents/recipes", get(routes::agents::list_recipes))
             .route(
                 "/api/agents/run",
                 axum::routing::post(routes::agents::run_recipe),
@@ -235,9 +229,7 @@ impl ApiServer {
 
 /// Serve embedded frontend files (when compiled with `ui` feature).
 #[cfg(feature = "ui")]
-async fn serve_embedded_ui(
-    uri: axum::http::Uri,
-) -> axum::response::Response {
+async fn serve_embedded_ui(uri: axum::http::Uri) -> axum::response::Response {
     use axum::http::{header, StatusCode};
     use axum::response::IntoResponse;
     use include_dir::{include_dir, Dir};

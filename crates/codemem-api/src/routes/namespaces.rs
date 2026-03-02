@@ -10,9 +10,7 @@ use axum::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub async fn list_namespaces(
-    State(state): State<Arc<AppState>>,
-) -> Json<Vec<NamespaceItem>> {
+pub async fn list_namespaces(State(state): State<Arc<AppState>>) -> Json<Vec<NamespaceItem>> {
     let storage = state.server.storage();
     let namespaces = storage.list_namespaces().unwrap_or_default();
 

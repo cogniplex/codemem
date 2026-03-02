@@ -673,7 +673,6 @@ fn clean_phpdoc(raw: &str) -> String {
     result_lines.join("\n")
 }
 
-
 #[cfg(test)]
 #[path = "tests/php_tests.rs"]
 mod tests;

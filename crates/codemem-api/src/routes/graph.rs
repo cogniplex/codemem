@@ -26,13 +26,14 @@ pub async fn get_subgraph(
             .collect()
     });
 
-    let graph = state.server.graph().lock().unwrap_or_else(|e| e.into_inner());
+    let graph = state
+        .server
+        .graph()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
-    let (nodes, edges) = graph.subgraph_top_n(
-        max_nodes,
-        query.namespace.as_deref(),
-        kinds.as_deref(),
-    );
+    let (nodes, edges) =
+        graph.subgraph_top_n(max_nodes, query.namespace.as_deref(), kinds.as_deref());
 
     let node_responses: Vec<GraphNodeResponse> = nodes
         .into_iter()
@@ -76,14 +77,16 @@ pub async fn get_neighbors(
     Query(query): Query<NeighborsQuery>,
 ) -> Result<Json<SubgraphResponse>, StatusCode> {
     let depth = query.depth.unwrap_or(1);
-    let graph = state.server.graph().lock().unwrap_or_else(|e| e.into_inner());
+    let graph = state
+        .server
+        .graph()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
     let neighbor_nodes = graph.bfs(&id, depth).map_err(|_| StatusCode::NOT_FOUND)?;
 
-    let node_ids: std::collections::HashSet<&str> = neighbor_nodes
-        .iter()
-        .map(|n| n.id.as_str())
-        .collect();
+    let node_ids: std::collections::HashSet<&str> =
+        neighbor_nodes.iter().map(|n| n.id.as_str()).collect();
 
     // Get all edges between these nodes
     let mut edges = Vec::new();
@@ -91,16 +94,17 @@ pub async fn get_neighbors(
     for node in &neighbor_nodes {
         if let Ok(node_edges) = graph.get_edges(&node.id) {
             for edge in node_edges {
-                if node_ids.contains(edge.src.as_str()) && node_ids.contains(edge.dst.as_str()) {
-                    if seen_edges.insert(edge.id.clone()) {
-                        edges.push(GraphEdgeResponse {
-                            id: edge.id,
-                            src: edge.src,
-                            dst: edge.dst,
-                            relationship: edge.relationship.to_string(),
-                            weight: edge.weight,
-                        });
-                    }
+                if node_ids.contains(edge.src.as_str())
+                    && node_ids.contains(edge.dst.as_str())
+                    && seen_edges.insert(edge.id.clone())
+                {
+                    edges.push(GraphEdgeResponse {
+                        id: edge.id,
+                        src: edge.src,
+                        dst: edge.dst,
+                        relationship: edge.relationship.to_string(),
+                        weight: edge.weight,
+                    });
                 }
             }
         }
@@ -126,7 +130,11 @@ pub async fn get_communities(
     Query(query): Query<CommunitiesQuery>,
 ) -> Json<CommunitiesResponse> {
     let resolution = query.resolution.unwrap_or(1.0);
-    let graph = state.server.graph().lock().unwrap_or_else(|e| e.into_inner());
+    let graph = state
+        .server
+        .graph()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
     let assignment = graph.louvain_with_assignment(resolution);
     let num_communities = assignment
@@ -145,28 +153,36 @@ pub async fn get_pagerank(
     Query(query): Query<PagerankQuery>,
 ) -> Json<PagerankResponse> {
     let top = query.top.unwrap_or(20);
-    let graph = state.server.graph().lock().unwrap_or_else(|e| e.into_inner());
+    let graph = state
+        .server
+        .graph()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
     let scores = graph.pagerank(0.85, 100, 1e-6);
 
     let mut entries: Vec<PagerankEntry> = scores
         .into_iter()
-        .filter_map(|(id, score)| {
+        .map(|(id, score)| {
             let label = graph
                 .get_node(&id)
                 .ok()
                 .flatten()
                 .map(|n| n.label.clone())
                 .unwrap_or_else(|| id.clone());
-            Some(PagerankEntry {
+            PagerankEntry {
                 node_id: id,
                 label,
                 score,
-            })
+            }
         })
         .collect();
 
-    entries.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    entries.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     entries.truncate(top);
 
     Json(PagerankResponse { scores: entries })
@@ -176,7 +192,11 @@ pub async fn get_shortest_path(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ShortestPathQuery>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
-    let graph = state.server.graph().lock().unwrap_or_else(|e| e.into_inner());
+    let graph = state
+        .server
+        .graph()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
     match graph.shortest_path(&query.from, &query.to) {
         Ok(path) => Ok(Json(path)),
@@ -188,7 +208,11 @@ pub async fn get_impact(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<SubgraphResponse>, StatusCode> {
-    let graph = state.server.graph().lock().unwrap_or_else(|e| e.into_inner());
+    let graph = state
+        .server
+        .graph()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
 
     let reachable = graph.bfs(&id, 3).map_err(|_| StatusCode::NOT_FOUND)?;
 

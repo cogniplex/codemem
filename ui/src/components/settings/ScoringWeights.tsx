@@ -63,6 +63,7 @@ export function ScoringWeights() {
   useEffect(() => {
     if (config && typeof config === 'object' && 'scoring' in config) {
       const scoring = config.scoring as Partial<ScoreBreakdown>
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync weights from config on load
       setWeights((prev) => ({ ...prev, ...scoring }))
     }
   }, [config])

@@ -69,7 +69,13 @@ pub async fn get_pattern_insights(
 
     let message = response
         .result
-        .and_then(|r| r.get("content")?.get(0)?.get("text")?.as_str().map(String::from))
+        .and_then(|r| {
+            r.get("content")?
+                .get(0)?
+                .get("text")?
+                .as_str()
+                .map(String::from)
+        })
         .unwrap_or_else(|| "No patterns detected".to_string());
 
     Json(MessageResponse { message })
@@ -149,7 +155,13 @@ pub async fn run_consolidation(
 
     let message = response
         .result
-        .and_then(|r| r.get("content")?.get(0)?.get("text")?.as_str().map(String::from))
+        .and_then(|r| {
+            r.get("content")?
+                .get(0)?
+                .get("text")?
+                .as_str()
+                .map(String::from)
+        })
         .unwrap_or_else(|| "Consolidation completed".to_string());
 
     Ok(Json(MessageResponse { message }))
@@ -167,36 +179,31 @@ fn parse_patterns_result(result: &serde_json::Value) -> Vec<PatternResponse> {
         if let Some(arr) = parsed.as_array() {
             return arr
                 .iter()
-                .filter_map(|item| {
-                    Some(PatternResponse {
-                        pattern_type: item
-                            .get("pattern_type")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("unknown")
-                            .to_string(),
-                        description: item
-                            .get("description")
-                            .and_then(|d| d.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        frequency: item
-                            .get("frequency")
-                            .and_then(|f| f.as_u64())
-                            .unwrap_or(0) as usize,
-                        confidence: item
-                            .get("confidence")
-                            .and_then(|c| c.as_f64())
-                            .unwrap_or(0.0),
-                        related_memories: item
-                            .get("related_memories")
-                            .and_then(|r| r.as_array())
-                            .map(|arr| {
-                                arr.iter()
-                                    .filter_map(|v| v.as_str().map(String::from))
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                    })
+                .map(|item| PatternResponse {
+                    pattern_type: item
+                        .get("pattern_type")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    description: item
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    frequency: item.get("frequency").and_then(|f| f.as_u64()).unwrap_or(0) as usize,
+                    confidence: item
+                        .get("confidence")
+                        .and_then(|c| c.as_f64())
+                        .unwrap_or(0.0),
+                    related_memories: item
+                        .get("related_memories")
+                        .and_then(|r| r.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                 })
                 .collect();
         }

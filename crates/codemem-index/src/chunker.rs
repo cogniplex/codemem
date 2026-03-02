@@ -204,11 +204,7 @@ fn merge_small_chunks(chunks: Vec<RawChunk>, source: &[u8], config: &ChunkConfig
 }
 
 /// Resolve the innermost parent symbol for a given line range.
-fn resolve_parent_symbol(
-    line_start: usize,
-    line_end: usize,
-    symbols: &[Symbol],
-) -> Option<String> {
+fn resolve_parent_symbol(line_start: usize, line_end: usize, symbols: &[Symbol]) -> Option<String> {
     let mut best: Option<&Symbol> = None;
     let mut best_span = usize::MAX;
 

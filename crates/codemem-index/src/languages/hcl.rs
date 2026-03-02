@@ -560,7 +560,6 @@ fn clean_hcl_comment(raw: &str) -> String {
     }
 }
 
-
 #[cfg(test)]
 #[path = "tests/hcl_tests.rs"]
 mod tests;

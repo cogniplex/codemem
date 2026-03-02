@@ -157,8 +157,7 @@ fn search_symbols_requires_index() {
 #[test]
 fn get_symbol_info_requires_index() {
     let server = test_server();
-    let params =
-        json!({"name": "get_symbol_info", "arguments": {"qualified_name": "foo::bar"}});
+    let params = json!({"name": "get_symbol_info", "arguments": {"qualified_name": "foo::bar"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(301));
     let result = resp.result.unwrap();
     assert_eq!(result["isError"], true);

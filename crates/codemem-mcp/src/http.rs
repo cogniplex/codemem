@@ -63,11 +63,7 @@ async fn handle_post(
         match serde_json::from_str(body) {
             Ok(batch) => batch,
             Err(e) => {
-                let resp = JsonRpcResponse::error(
-                    Value::Null,
-                    -32700,
-                    format!("Parse error: {e}"),
-                );
+                let resp = JsonRpcResponse::error(Value::Null, -32700, format!("Parse error: {e}"));
                 return json_response(StatusCode::OK, &resp);
             }
         }
@@ -75,11 +71,7 @@ async fn handle_post(
         match serde_json::from_str(body) {
             Ok(req) => vec![req],
             Err(e) => {
-                let resp = JsonRpcResponse::error(
-                    Value::Null,
-                    -32700,
-                    format!("Parse error: {e}"),
-                );
+                let resp = JsonRpcResponse::error(Value::Null, -32700, format!("Parse error: {e}"));
                 return json_response(StatusCode::OK, &resp);
             }
         }
@@ -90,21 +82,14 @@ async fn handle_post(
     }
 
     // Check for initialize request (creates session)
-    let is_initialize = requests
-        .iter()
-        .any(|r| r.method == "initialize");
+    let is_initialize = requests.iter().any(|r| r.method == "initialize");
 
     // For non-initialize requests, validate session
     if !is_initialize {
-        let session_id = headers
-            .get("mcp-session-id")
-            .and_then(|v| v.to_str().ok());
+        let session_id = headers.get("mcp-session-id").and_then(|v| v.to_str().ok());
 
         if let Some(sid) = session_id {
-            let sessions = state
-                .sessions
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
             if !sessions.contains_key(sid) {
                 return (StatusCode::NOT_FOUND, "Unknown session").into_response();
             }
@@ -118,20 +103,16 @@ async fn handle_post(
     let mut all_notifications = true;
 
     for request in requests {
-        if request.id.is_none() {
-            // Notification — no response
-            state
-                .server
-                .handle_notification(&request.method);
-        } else {
+        if let Some(id) = request.id {
             all_notifications = false;
-            let id = request.id.unwrap();
-            let response = state.server.handle_request(
-                &request.method,
-                request.params.as_ref(),
-                id,
-            );
+            let response =
+                state
+                    .server
+                    .handle_request(&request.method, request.params.as_ref(), id);
             responses.push(response);
+        } else {
+            // Notification — no response
+            state.server.handle_notification(&request.method);
         }
     }
 
@@ -156,10 +137,7 @@ async fn handle_post(
     if is_initialize {
         let session_id = uuid::Uuid::new_v4().to_string();
         {
-            let mut sessions = state
-                .sessions
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
             sessions.insert(
                 session_id.clone(),
                 SessionMeta {
@@ -178,14 +156,9 @@ async fn handle_post(
 
 /// GET /mcp — Client opens SSE listener for server-initiated messages.
 /// Currently returns an empty SSE stream (server-initiated messages not yet implemented).
-async fn handle_get(
-    State(_state): State<Arc<McpHttpState>>,
-    headers: HeaderMap,
-) -> Response {
+async fn handle_get(State(_state): State<Arc<McpHttpState>>, headers: HeaderMap) -> Response {
     // Validate session
-    let _session_id = headers
-        .get("mcp-session-id")
-        .and_then(|v| v.to_str().ok());
+    let _session_id = headers.get("mcp-session-id").and_then(|v| v.to_str().ok());
 
     // Return a minimal SSE stream that stays open
     // Server-initiated messages (like notifications) will be added in a future iteration
@@ -200,20 +173,12 @@ async fn handle_get(
 }
 
 /// DELETE /mcp — Client terminates session.
-async fn handle_delete(
-    State(state): State<Arc<McpHttpState>>,
-    headers: HeaderMap,
-) -> Response {
-    let session_id = headers
-        .get("mcp-session-id")
-        .and_then(|v| v.to_str().ok());
+async fn handle_delete(State(state): State<Arc<McpHttpState>>, headers: HeaderMap) -> Response {
+    let session_id = headers.get("mcp-session-id").and_then(|v| v.to_str().ok());
 
     match session_id {
         Some(sid) => {
-            let mut sessions = state
-                .sessions
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
             if sessions.remove(sid).is_some() {
                 StatusCode::OK.into_response()
             } else {

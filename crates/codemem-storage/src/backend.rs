@@ -793,11 +793,7 @@ impl StorageBackend for Storage {
         Storage::get_session_hot_directories(self, session_id, limit)
     }
 
-    fn has_auto_insight(
-        &self,
-        session_id: &str,
-        dedup_tag: &str,
-    ) -> Result<bool, CodememError> {
+    fn has_auto_insight(&self, session_id: &str, dedup_tag: &str) -> Result<bool, CodememError> {
         Storage::has_auto_insight(self, session_id, dedup_tag)
     }
 

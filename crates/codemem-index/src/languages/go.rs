@@ -504,7 +504,6 @@ fn get_receiver_type(node: Node, source: &[u8]) -> Option<String> {
     None
 }
 
-
 #[cfg(test)]
 #[path = "tests/go_tests.rs"]
 mod tests;

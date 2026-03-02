@@ -681,7 +681,6 @@ fn clean_block_doc_comment(raw: &str) -> String {
     result_lines.join("\n")
 }
 
-
 #[cfg(test)]
 #[path = "tests/swift_tests.rs"]
 mod tests;

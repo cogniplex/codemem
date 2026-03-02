@@ -557,9 +557,7 @@ fn subgraph_top_n_edges_only_between_top() {
 fn louvain_with_assignment_two_cliques() {
     let mut graph = GraphEngine::new();
     for id in &["a", "b", "c", "d", "e", "f"] {
-        graph
-            .add_node(file_node(id, &format!("{id}.rs")))
-            .unwrap();
+        graph.add_node(file_node(id, &format!("{id}.rs"))).unwrap();
     }
     // Clique 1: a <-> b <-> c <-> a
     graph.add_edge(test_edge("a", "b")).unwrap();
@@ -611,9 +609,7 @@ fn louvain_with_assignment_single_node() {
 fn louvain_with_assignment_all_nodes_present() {
     let mut graph = GraphEngine::new();
     for id in &["a", "b", "c"] {
-        graph
-            .add_node(file_node(id, &format!("{id}.rs")))
-            .unwrap();
+        graph.add_node(file_node(id, &format!("{id}.rs"))).unwrap();
     }
     graph.add_edge(test_edge("a", "b")).unwrap();
     graph.add_edge(test_edge("b", "c")).unwrap();

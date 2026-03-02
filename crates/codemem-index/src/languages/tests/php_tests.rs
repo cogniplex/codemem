@@ -150,8 +150,7 @@ class UserController extends Controller implements JsonSerializable, Countable {
 "#;
     let tree = parse_php(source);
     let extractor = PhpExtractor::new();
-    let references =
-        extractor.extract_references(&tree, source.as_bytes(), "UserController.php");
+    let references = extractor.extract_references(&tree, source.as_bytes(), "UserController.php");
 
     let inherits: Vec<_> = references
         .iter()

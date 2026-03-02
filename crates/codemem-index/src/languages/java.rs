@@ -707,7 +707,6 @@ fn has_test_annotation(node: Node, source: &[u8]) -> bool {
     false
 }
 
-
 #[cfg(test)]
 #[path = "tests/java_tests.rs"]
 mod tests;

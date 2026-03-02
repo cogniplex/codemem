@@ -1192,18 +1192,9 @@ impl McpServer {
                 let now = chrono::Utc::now();
                 let hash = codemem_storage::Storage::content_hash(&pattern.description);
                 let mut metadata = HashMap::new();
-                metadata.insert(
-                    "session_id".to_string(),
-                    json!(session_id),
-                );
-                metadata.insert(
-                    "auto_insight_tag".to_string(),
-                    json!(dedup_tag),
-                );
-                metadata.insert(
-                    "source".to_string(),
-                    json!("session_checkpoint"),
-                );
+                metadata.insert("session_id".to_string(), json!(session_id));
+                metadata.insert("auto_insight_tag".to_string(), json!(dedup_tag));
+                metadata.insert("source".to_string(), json!("session_checkpoint"));
                 metadata.insert(
                     "pattern_type".to_string(),
                     json!(pattern.pattern_type.to_string()),
@@ -1250,10 +1241,7 @@ impl McpServer {
              | Files edited | {} |\n\
              | Searches | {} |\n\
              | Total actions | {} |\n\n",
-            activity.files_read,
-            activity.files_edited,
-            activity.searches,
-            activity.total_actions,
+            activity.files_read, activity.files_edited, activity.searches, activity.total_actions,
         ));
 
         // Focus areas

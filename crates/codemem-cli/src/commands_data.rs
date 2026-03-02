@@ -90,9 +90,10 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
-                api_server.serve(port, false).await.map_err(|e| {
-                    anyhow::anyhow!("API server error: {e}")
-                })
+                api_server
+                    .serve(port, false)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("API server error: {e}"))
             })?;
         }
         // HTTP MCP + REST API + embedded frontend (no stdio)
@@ -102,9 +103,10 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
-                api_server.serve(port, true).await.map_err(|e| {
-                    anyhow::anyhow!("API server error: {e}")
-                })
+                api_server
+                    .serve(port, true)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("API server error: {e}"))
             })?;
         }
         // HTTP MCP only (for remote MCP clients) — use the API server with MCP mounted
@@ -115,9 +117,10 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
             tracing::info!("Codemem MCP HTTP transport on http://localhost:{port}/mcp");
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
-                api_server.serve(port, true).await.map_err(|e| {
-                    anyhow::anyhow!("API server error: {e}")
-                })
+                api_server
+                    .serve(port, true)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("API server error: {e}"))
             })?;
         }
     }
@@ -195,7 +198,10 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
             .unwrap_or("unknown")
             .to_string();
         let file_path = extracted.metadata.get("file_path").and_then(|v| v.as_str());
-        let search_pattern = extracted.metadata.get("pattern").and_then(|v| v.as_str())
+        let search_pattern = extracted
+            .metadata
+            .get("pattern")
+            .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         let file_path_owned = file_path.map(|s| s.to_string());
         let (content, compressed) =
@@ -299,10 +305,7 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
                             };
                             match storage.insert_memory(&insight_memory) {
                                 Ok(()) => {
-                                    tracing::info!(
-                                        "Auto-insight stored: {}",
-                                        insight.dedup_tag
-                                    );
+                                    tracing::info!("Auto-insight stored: {}", insight.dedup_tag);
                                 }
                                 Err(codemem_core::CodememError::Duplicate(_)) => {}
                                 Err(e) => {
@@ -491,7 +494,14 @@ pub(crate) fn run_watcher_loop(
 
             // If batch is getting large, flush early
             if batch.len() >= 50 {
-                changes_since_save += flush_batch(&batch, watch_dir, &storage, &emb_service, &mut vector, quiet);
+                changes_since_save += flush_batch(
+                    &batch,
+                    watch_dir,
+                    &storage,
+                    &emb_service,
+                    &mut vector,
+                    quiet,
+                );
                 batch.clear();
             }
 
@@ -500,7 +510,14 @@ pub(crate) fn run_watcher_loop(
 
         // Timeout reached — flush the batch
         if !batch.is_empty() {
-            changes_since_save += flush_batch(&batch, watch_dir, &storage, &emb_service, &mut vector, quiet);
+            changes_since_save += flush_batch(
+                &batch,
+                watch_dir,
+                &storage,
+                &emb_service,
+                &mut vector,
+                quiet,
+            );
             batch.clear();
         }
 
@@ -513,7 +530,14 @@ pub(crate) fn run_watcher_loop(
 
     // Flush remaining batch
     if !batch.is_empty() {
-        flush_batch(&batch, watch_dir, &storage, &emb_service, &mut vector, quiet);
+        flush_batch(
+            &batch,
+            watch_dir,
+            &storage,
+            &emb_service,
+            &mut vector,
+            quiet,
+        );
     }
 
     // Final save
@@ -543,7 +567,10 @@ fn flush_batch(
     let deleted = batch.iter().filter(|f| f.event_type == "deleted").count();
     if batch.len() <= 2 && created == 0 && deleted == 0 {
         if !quiet {
-            tracing::debug!("[batch] Skipping trivial change ({} modified files)", batch.len());
+            tracing::debug!(
+                "[batch] Skipping trivial change ({} modified files)",
+                batch.len()
+            );
         }
         return 0;
     }
@@ -555,7 +582,8 @@ fn flush_batch(
     let modified = batch.iter().filter(|f| f.event_type == "modified").count();
 
     // Group by language
-    let mut lang_counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    let mut lang_counts: std::collections::BTreeMap<&str, usize> =
+        std::collections::BTreeMap::new();
     for f in batch {
         *lang_counts.entry(&f.language).or_insert(0) += 1;
     }
@@ -575,9 +603,15 @@ fn flush_batch(
 
     // Header
     let mut changes_desc = Vec::new();
-    if created > 0 { changes_desc.push(format!("{created} created")); }
-    if modified > 0 { changes_desc.push(format!("{modified} modified")); }
-    if deleted > 0 { changes_desc.push(format!("{deleted} deleted")); }
+    if created > 0 {
+        changes_desc.push(format!("{created} created"));
+    }
+    if modified > 0 {
+        changes_desc.push(format!("{modified} modified"));
+    }
+    if deleted > 0 {
+        changes_desc.push(format!("{deleted} deleted"));
+    }
     summary_parts.push(format!(
         "File changes: {} files ({})",
         batch.len(),
@@ -585,28 +619,52 @@ fn flush_batch(
     ));
 
     // Languages
-    let lang_list: Vec<String> = lang_counts.iter().map(|(l, c)| format!("{l}: {c}")).collect();
+    let lang_list: Vec<String> = lang_counts
+        .iter()
+        .map(|(l, c)| format!("{l}: {c}"))
+        .collect();
     summary_parts.push(format!("Languages: {}", lang_list.join(", ")));
 
     // Directories (top 5)
     let mut dir_sorted: Vec<_> = dir_counts.iter().collect();
     dir_sorted.sort_by(|a, b| b.1.cmp(a.1));
-    let dir_list: Vec<String> = dir_sorted.iter().take(5).map(|(d, c)| format!("{d}/ ({c})")).collect();
+    let dir_list: Vec<String> = dir_sorted
+        .iter()
+        .take(5)
+        .map(|(d, c)| format!("{d}/ ({c})"))
+        .collect();
     summary_parts.push(format!("Directories: {}", dir_list.join(", ")));
 
     // File list
-    let file_list: Vec<String> = batch.iter().take(20).map(|f| {
-        let info = match f.event_type {
-            "deleted" => "deleted".to_string(),
-            _ => {
-                let lines = f.line_count.map(|l| format!("{l} lines")).unwrap_or_default();
-                let size = f.byte_size.map(|b| format!("{b}B")).unwrap_or_default();
-                [lines, size].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", ")
-            }
-        };
-        format!("  {} [{}] {}", f.event_type, f.language, f.relative_path) +
-            if info.is_empty() { String::new() } else { format!(" ({info})") }.as_str()
-    }).collect();
+    let file_list: Vec<String> = batch
+        .iter()
+        .take(20)
+        .map(|f| {
+            let info = match f.event_type {
+                "deleted" => "deleted".to_string(),
+                _ => {
+                    let lines = f
+                        .line_count
+                        .map(|l| format!("{l} lines"))
+                        .unwrap_or_default();
+                    let size = f.byte_size.map(|b| format!("{b}B")).unwrap_or_default();
+                    [lines, size]
+                        .iter()
+                        .filter(|s| !s.is_empty())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            };
+            format!("  {} [{}] {}", f.event_type, f.language, f.relative_path)
+                + if info.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({info})")
+                }
+                .as_str()
+        })
+        .collect();
     summary_parts.push(format!("Files:\n{}", file_list.join("\n")));
     if batch.len() > 20 {
         summary_parts.push(format!("  ... and {} more", batch.len() - 20));
@@ -616,7 +674,11 @@ fn flush_batch(
 
     // Try LLM summarization for a more meaningful description
     let compressor = crate::compress::CompressProvider::from_env();
-    let file_list_brief: Vec<&str> = batch.iter().take(10).map(|f| f.relative_path.as_str()).collect();
+    let file_list_brief: Vec<&str> = batch
+        .iter()
+        .take(10)
+        .map(|f| f.relative_path.as_str())
+        .collect();
     let content = if let Some(summary) = compressor.summarize_batch(&raw_summary) {
         format!("{summary}\n\n---\nFiles: {}", file_list_brief.join(", "))
     } else {
@@ -632,15 +694,27 @@ fn flush_batch(
     metadata.insert("deleted_count".to_string(), serde_json::json!(deleted));
     metadata.insert("total_lines".to_string(), serde_json::json!(total_lines));
     metadata.insert("total_bytes".to_string(), serde_json::json!(total_bytes));
-    metadata.insert("languages".to_string(), serde_json::json!(
-        lang_counts.iter().map(|(k, v)| (k.to_string(), *v)).collect::<std::collections::HashMap<String, usize>>()
-    ));
-    metadata.insert("directories".to_string(), serde_json::json!(
-        dir_counts.iter().map(|(k, v)| (k.to_string(), *v)).collect::<std::collections::HashMap<String, usize>>()
-    ));
-    metadata.insert("files".to_string(), serde_json::json!(
-        batch.iter().map(|f| f.relative_path.clone()).collect::<Vec<_>>()
-    ));
+    metadata.insert(
+        "languages".to_string(),
+        serde_json::json!(lang_counts
+            .iter()
+            .map(|(k, v)| (k.to_string(), *v))
+            .collect::<std::collections::HashMap<String, usize>>()),
+    );
+    metadata.insert(
+        "directories".to_string(),
+        serde_json::json!(dir_counts
+            .iter()
+            .map(|(k, v)| (k.to_string(), *v))
+            .collect::<std::collections::HashMap<String, usize>>()),
+    );
+    metadata.insert(
+        "files".to_string(),
+        serde_json::json!(batch
+            .iter()
+            .map(|f| f.relative_path.clone())
+            .collect::<Vec<_>>()),
+    );
 
     // Collect tags from all languages + directories
     let mut tags: Vec<String> = vec!["file_watch".to_string()];
@@ -689,9 +763,17 @@ fn flush_batch(
                 }
             }
             if quiet {
-                tracing::info!("[batch] {} files consolidated into memory {}", batch.len(), id);
+                tracing::info!(
+                    "[batch] {} files consolidated into memory {}",
+                    batch.len(),
+                    id
+                );
             } else {
-                println!("  [batch] {} files consolidated into memory {}", batch.len(), id);
+                println!(
+                    "  [batch] {} files consolidated into memory {}",
+                    batch.len(),
+                    id
+                );
             }
         }
         Err(codemem_core::CodememError::Duplicate(_)) => {}

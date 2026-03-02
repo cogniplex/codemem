@@ -87,8 +87,7 @@ fn openai_embed_text_embedding_3_includes_dimensions() {
         .create();
 
     let server_url = server.url();
-    let provider =
-        OpenAIProvider::new("test-key", "text-embedding-3-small", 3, Some(&server_url));
+    let provider = OpenAIProvider::new("test-key", "text-embedding-3-small", 3, Some(&server_url));
     let result = provider.embed("test");
     mock.assert();
 

@@ -74,9 +74,7 @@ pub async fn get_distribution(
     let mut importance_histogram = vec![0usize; 10];
 
     for m in &memories {
-        *type_counts
-            .entry(m.memory_type.to_string())
-            .or_insert(0) += 1;
+        *type_counts.entry(m.memory_type.to_string()).or_insert(0) += 1;
 
         let bucket = ((m.importance * 10.0).floor() as usize).min(9);
         importance_histogram[bucket] += 1;

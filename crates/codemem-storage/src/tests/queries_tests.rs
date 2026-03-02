@@ -47,8 +47,7 @@ fn get_repeated_searches_groups_by_pattern() {
             "pattern".to_string(),
             serde_json::Value::String("error".to_string()),
         );
-        let mem =
-            test_memory_with_metadata(&format!("grep search {i} for error"), "Grep", extra);
+        let mem = test_memory_with_metadata(&format!("grep search {i} for error"), "Grep", extra);
         storage.insert_memory(&mem).unwrap();
     }
 
@@ -80,8 +79,7 @@ fn get_file_hotspots_groups_by_file_path() {
             "file_path".to_string(),
             serde_json::Value::String("src/main.rs".to_string()),
         );
-        let mem =
-            test_memory_with_metadata(&format!("read main.rs attempt {i}"), "Read", extra);
+        let mem = test_memory_with_metadata(&format!("read main.rs attempt {i}"), "Read", extra);
         storage.insert_memory(&mem).unwrap();
     }
 
@@ -108,8 +106,7 @@ fn get_tool_usage_stats_counts_by_tool() {
         storage.insert_memory(&mem).unwrap();
     }
     for i in 0..3 {
-        let mem =
-            test_memory_with_metadata(&format!("grep search {i}"), "Grep", HashMap::new());
+        let mem = test_memory_with_metadata(&format!("grep search {i}"), "Grep", HashMap::new());
         storage.insert_memory(&mem).unwrap();
     }
     let mem = test_memory_with_metadata("edit file", "Edit", HashMap::new());

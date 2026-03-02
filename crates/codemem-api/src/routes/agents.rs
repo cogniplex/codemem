@@ -90,8 +90,7 @@ fn get_recipes() -> Vec<RecipeListResponse> {
         RecipeListResponse {
             id: "consolidate-all".into(),
             name: "Full Consolidation".into(),
-            description: "Run all consolidation cycles: decay, creative, cluster, summarize"
-                .into(),
+            description: "Run all consolidation cycles: decay, creative, cluster, summarize".into(),
             steps: vec![
                 RecipeStep {
                     tool: "consolidate_decay".into(),
@@ -165,7 +164,7 @@ pub async fn run_recipe(
             );
 
             // Build tool params based on the tool name
-            let params = build_tool_params(&step.tool, req.repo_id.as_deref(), req.namespace.as_deref(), &*state);
+            let params = build_tool_params(&step.tool, req.repo_id.as_deref(), req.namespace.as_deref(), &state);
 
             // Execute via MCP server handle_request on a blocking thread.
             // handle_request is synchronous and can take minutes for heavy tools
@@ -231,17 +230,26 @@ fn build_tool_params(
             let mut params = json!({});
             // index_codebase requires `path`, not namespace/repo_id
             let raw_path = if let Some(rid) = repo_id {
-                state.storage_direct().get_repo(rid).ok().flatten().map(|r| r.path)
+                state
+                    .storage_direct()
+                    .get_repo(rid)
+                    .ok()
+                    .flatten()
+                    .map(|r| r.path)
             } else {
                 namespace.map(|ns| ns.to_string())
             };
             if let Some(p) = raw_path {
                 // Expand ~ to actual home directory
                 let expanded = if p.starts_with("~/") {
-                    if let Some(home) = std::env::var("HOME").ok() {
+                    if let Ok(home) = std::env::var("HOME") {
                         format!("{}{}", home, &p[1..])
-                    } else { p }
-                } else { p };
+                    } else {
+                        p
+                    }
+                } else {
+                    p
+                };
                 params["path"] = json!(expanded);
             }
             params
@@ -249,16 +257,25 @@ fn build_tool_params(
         "enrich_git_history" => {
             let mut params = json!({});
             let raw_path = if let Some(rid) = repo_id {
-                state.storage_direct().get_repo(rid).ok().flatten().map(|r| r.path)
+                state
+                    .storage_direct()
+                    .get_repo(rid)
+                    .ok()
+                    .flatten()
+                    .map(|r| r.path)
             } else {
                 namespace.map(|ns| ns.to_string())
             };
             if let Some(p) = raw_path {
                 let expanded = if p.starts_with("~/") {
-                    if let Some(home) = std::env::var("HOME").ok() {
+                    if let Ok(home) = std::env::var("HOME") {
                         format!("{}{}", home, &p[1..])
-                    } else { p }
-                } else { p };
+                    } else {
+                        p
+                    }
+                } else {
+                    p
+                };
                 params["path"] = json!(expanded);
             }
             if let Some(ns) = namespace {
@@ -289,7 +306,9 @@ fn build_tool_params(
             json!({ "top_k": 20 })
         }
         "codemem_stats" => json!({}),
-        "consolidate_decay" | "consolidate_creative" | "consolidate_cluster"
+        "consolidate_decay"
+        | "consolidate_creative"
+        | "consolidate_cluster"
         | "consolidate_summarize" => json!({}),
         _ => json!({}),
     }
@@ -320,7 +339,10 @@ fn extract_result(response: &codemem_mcp::types::JsonRpcResponse) -> (bool, Stri
                 }
             }
         }
-        return (true, serde_json::to_string_pretty(result).unwrap_or_default());
+        return (
+            true,
+            serde_json::to_string_pretty(result).unwrap_or_default(),
+        );
     }
 
     (false, "No result".to_string())

@@ -220,7 +220,9 @@ impl Storage {
                     namespace: row.get(3)?,
                     created_at: row.get(4)?,
                     last_indexed_at: row.get(5)?,
-                    status: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "idle".to_string()),
+                    status: row
+                        .get::<_, Option<String>>(6)?
+                        .unwrap_or_else(|| "idle".to_string()),
                 })
             })
             .map_err(|e| CodememError::Storage(e.to_string()))?

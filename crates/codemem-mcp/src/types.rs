@@ -105,6 +105,7 @@ impl ToolResult {
 /// Cached code-index results for structural queries.
 pub(crate) struct IndexCache {
     pub(crate) symbols: Vec<codemem_index::Symbol>,
+    #[allow(dead_code)]
     pub(crate) chunks: Vec<codemem_index::CodeChunk>,
     pub(crate) root_path: String,
 }

@@ -590,7 +590,9 @@ impl GraphEngine {
         let edges_vec: Vec<Edge> = self
             .edges
             .values()
-            .filter(|edge| top_ids.contains(edge.src.as_str()) && top_ids.contains(edge.dst.as_str()))
+            .filter(|edge| {
+                top_ids.contains(edge.src.as_str()) && top_ids.contains(edge.dst.as_str())
+            })
             .cloned()
             .collect();
 

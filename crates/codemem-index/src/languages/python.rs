@@ -514,7 +514,6 @@ fn has_test_decorator(node: Node, source: &[u8]) -> bool {
     false
 }
 
-
 #[cfg(test)]
 #[path = "tests/python_tests.rs"]
 mod tests;

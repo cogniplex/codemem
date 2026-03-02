@@ -292,7 +292,10 @@ impl McpServer {
                     "file_path".to_string(),
                     serde_json::Value::String(chunk.file_path.clone()),
                 );
-                payload.insert("line_start".to_string(), serde_json::json!(chunk.line_start));
+                payload.insert(
+                    "line_start".to_string(),
+                    serde_json::json!(chunk.line_start),
+                );
                 payload.insert("line_end".to_string(), serde_json::json!(chunk.line_end));
                 payload.insert(
                     "node_kind".to_string(),

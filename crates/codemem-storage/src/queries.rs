@@ -379,30 +379,30 @@ impl Storage {
             .collect();
         let where_likes = like_clauses.join(" OR ");
 
-        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ns) =
-            namespace
-        {
-            let sql = format!(
-                "SELECT COUNT(*) FROM memories WHERE ({}) AND namespace = ?{}",
-                where_likes,
-                keywords.len() + 1,
-            );
-            let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = keywords
-                .iter()
-                .map(|k| Box::new(format!("%{k}%")) as Box<dyn rusqlite::types::ToSql>)
-                .collect();
-            p.push(Box::new(ns.to_string()));
-            (sql, p)
-        } else {
-            let sql = format!("SELECT COUNT(*) FROM memories WHERE ({})", where_likes);
-            let p: Vec<Box<dyn rusqlite::types::ToSql>> = keywords
-                .iter()
-                .map(|k| Box::new(format!("%{k}%")) as Box<dyn rusqlite::types::ToSql>)
-                .collect();
-            (sql, p)
-        };
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(ns) = namespace {
+                let sql = format!(
+                    "SELECT COUNT(*) FROM memories WHERE ({}) AND namespace = ?{}",
+                    where_likes,
+                    keywords.len() + 1,
+                );
+                let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = keywords
+                    .iter()
+                    .map(|k| Box::new(format!("%{k}%")) as Box<dyn rusqlite::types::ToSql>)
+                    .collect();
+                p.push(Box::new(ns.to_string()));
+                (sql, p)
+            } else {
+                let sql = format!("SELECT COUNT(*) FROM memories WHERE ({})", where_likes);
+                let p: Vec<Box<dyn rusqlite::types::ToSql>> = keywords
+                    .iter()
+                    .map(|k| Box::new(format!("%{k}%")) as Box<dyn rusqlite::types::ToSql>)
+                    .collect();
+                (sql, p)
+            };
 
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|b| &**b).collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|b| &**b).collect();
 
         let count: i64 = conn
             .query_row(&sql, params_refs.as_slice(), |row| row.get(0))
@@ -420,9 +420,10 @@ impl Storage {
         let conn = self.conn();
         let like_pattern = format!("%\"{tag}\"%");
 
-        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-            if let Some(ns) = namespace {
-                (
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ns) =
+            namespace
+        {
+            (
                     "SELECT id, content, memory_type, importance, confidence, access_count, \
                      content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at \
                      FROM memories WHERE tags LIKE ?1 AND namespace = ?2 \
@@ -434,8 +435,8 @@ impl Storage {
                         Box::new(limit as i64),
                     ],
                 )
-            } else {
-                (
+        } else {
+            (
                     "SELECT id, content, memory_type, importance, confidence, access_count, \
                      content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at \
                      FROM memories WHERE tags LIKE ?1 \
@@ -446,9 +447,10 @@ impl Storage {
                         Box::new(limit as i64),
                     ],
                 )
-            };
+        };
 
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|b| &**b).collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|b| &**b).collect();
 
         let mut stmt = conn
             .prepare(&sql)

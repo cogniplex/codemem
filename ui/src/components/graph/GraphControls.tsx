@@ -1,29 +1,11 @@
 import { Search, SlidersHorizontal } from 'lucide-react'
+import { KIND_COLORS } from './constants'
 
 const NODE_KINDS = [
   'function', 'method', 'class', 'file', 'module', 'package',
   'variable', 'type', 'interface', 'trait', 'struct', 'enum',
   'memory', 'constant', 'endpoint', 'test',
 ]
-
-const KIND_COLORS: Record<string, string> = {
-  function: '#8b5cf6',
-  method: '#a78bfa',
-  class: '#06b6d4',
-  file: '#10b981',
-  module: '#f59e0b',
-  package: '#d97706',
-  variable: '#ef4444',
-  type: '#3b82f6',
-  interface: '#a855f7',
-  trait: '#f97316',
-  struct: '#14b8a6',
-  enum: '#d946ef',
-  memory: '#6366f1',
-  constant: '#facc15',
-  endpoint: '#f43f5e',
-  test: '#64748b',
-}
 
 interface Props {
   kinds: Set<string>
