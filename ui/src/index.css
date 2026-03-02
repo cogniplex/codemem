@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@theme {
+  --color-zinc-850: #1f1f23;
+  --color-zinc-950: #0c0c0e;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
