@@ -167,20 +167,30 @@ pub async fn run_recipe(
             // Build tool params based on the tool name
             let params = build_tool_params(&step.tool, req.repo_id.as_deref(), req.namespace.as_deref(), &*state);
 
-            // Execute via MCP server handle_request
-            let request_params = json!({
-                "name": step.tool,
-                "arguments": params,
-            });
-            let id = serde_json::Value::Number(serde_json::Number::from(i as u64 + 1));
-            let response = state.server.handle_request(
-                "tools/call",
-                Some(&request_params),
-                id,
-            );
-
-            // Extract result from JSON-RPC response
-            let (success, result_text) = extract_result(&response);
+            // Execute via MCP server handle_request on a blocking thread.
+            // handle_request is synchronous and can take minutes for heavy tools
+            // like index_codebase — running it on the async executor would block
+            // SSE event flushing, causing the client to hang.
+            let server = Arc::clone(&state.server);
+            let tool_name = step.tool.clone();
+            let (success, result_text) = match tokio::task::spawn_blocking(move || {
+                let request_params = json!({
+                    "name": tool_name,
+                    "arguments": params,
+                });
+                let id = serde_json::Value::Number(serde_json::Number::from(i as u64 + 1));
+                let response = server.handle_request(
+                    "tools/call",
+                    Some(&request_params),
+                    id,
+                );
+                extract_result(&response)
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(e) => (false, format!("Task panicked: {e}")),
+            };
 
             yield Ok::<_, Infallible>(
                 Event::default()

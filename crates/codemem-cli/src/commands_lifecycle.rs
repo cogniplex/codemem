@@ -225,6 +225,45 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
         sections.push(sec);
     }
 
+    // 4b. Pending analysis from file changes
+    let pending_ids = if let Some(ns) = namespace {
+        storage
+            .list_memory_ids_for_namespace(ns)
+            .unwrap_or_default()
+    } else {
+        storage.list_memory_ids().unwrap_or_default()
+    };
+    let mut pending_files: Vec<String> = Vec::new();
+    for id in pending_ids.iter().rev().take(100) {
+        if let Ok(Some(m)) = storage.get_memory(id) {
+            if m.tags.contains(&"pending-analysis".to_string()) {
+                if let Some(files) = m.metadata.get("files").and_then(|v| v.as_array()) {
+                    for f in files {
+                        if let Some(fp) = f.as_str() {
+                            if !pending_files.contains(&fp.to_string()) {
+                                pending_files.push(fp.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !pending_files.is_empty() {
+        let mut sec = format!(
+            "### Pending Analysis\n\n{} file(s) modified since last analysis:\n",
+            pending_files.len()
+        );
+        for f in pending_files.iter().take(10) {
+            sec.push_str(&format!("- `{}`\n", short_path(f)));
+        }
+        if pending_files.len() > 10 {
+            sec.push_str(&format!("- ...and {} more\n", pending_files.len() - 10));
+        }
+        sec.push_str("\n*Consider running the code-mapper agent to analyze these changes.*");
+        sections.push(sec);
+    }
+
     // 5. Stats overview
     if let Ok(stats) = storage.stats() {
         if stats.memory_count > 0 {
@@ -610,6 +649,45 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
             access_count: 0,
         };
         let _ = storage.insert_memory(&summary_memory);
+    }
+
+    // Store a change-tracking memory for the code-mapper to pick up
+    if !files_edited.is_empty() {
+        let change_content = format!(
+            "Files modified in session {}: {}",
+            session_id,
+            files_edited.join(", ")
+        );
+        let change_hash = codemem_hooks::content_hash(&change_content);
+        let now = chrono::Utc::now();
+        let change_memory = codemem_core::MemoryNode {
+            id: uuid::Uuid::new_v4().to_string(),
+            content: change_content,
+            memory_type: codemem_core::MemoryType::Context,
+            importance: 0.4,
+            confidence: 1.0,
+            tags: vec![
+                "pending-analysis".to_string(),
+                "file-changes".to_string(),
+            ],
+            metadata: {
+                let mut m = std::collections::HashMap::new();
+                m.insert("session_id".into(), serde_json::json!(session_id));
+                m.insert("files".into(), serde_json::json!(files_edited));
+                m.insert(
+                    "timestamp".into(),
+                    serde_json::json!(chrono::Utc::now().to_rfc3339()),
+                );
+                m
+            },
+            namespace: namespace.map(|s| s.to_string()),
+            content_hash: change_hash,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+            access_count: 0,
+        };
+        let _ = storage.insert_memory(&change_memory);
     }
 
     // End the session with summary

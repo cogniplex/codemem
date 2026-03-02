@@ -141,14 +141,16 @@ impl McpServer {
             Err(e) => return ToolResult::tool_error(format!("Indexing failed: {e}")),
         };
 
-        // Collect all symbols, references, and chunks
+        // Collect all symbols, references, chunks, and unique file paths
         let mut all_symbols = Vec::new();
         let mut all_references = Vec::new();
         let mut all_chunks = Vec::new();
+        let mut seen_files = std::collections::HashSet::new();
         for pr in &result.parse_results {
             all_symbols.extend(pr.symbols.clone());
             all_references.extend(pr.references.clone());
             all_chunks.extend(pr.chunks.clone());
+            seen_files.insert(pr.file_path.clone());
         }
 
         // Resolve references
@@ -156,11 +158,35 @@ impl McpServer {
         resolver.add_symbols(&all_symbols);
         let edges = resolver.resolve_all(&all_references);
 
-        // Persist symbols as graph nodes
+        let now = chrono::Utc::now();
+
+        // Persist file nodes, then symbols as graph nodes
         let mut graph = match self.lock_graph() {
             Ok(g) => g,
             Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
         };
+
+        // Create file:* nodes for each unique file path
+        for file_path in &seen_files {
+            let node_id = format!("file:{file_path}");
+            let mut payload = HashMap::new();
+            payload.insert(
+                "file_path".to_string(),
+                serde_json::Value::String(file_path.clone()),
+            );
+            let node = GraphNode {
+                id: node_id,
+                kind: NodeKind::File,
+                label: file_path.clone(),
+                payload,
+                centrality: 0.0,
+                memory_id: None,
+                namespace: Some(path.to_string()),
+            };
+            let _ = self.storage.insert_graph_node(&node);
+            let _ = graph.add_node(node);
+        }
+
         for sym in &all_symbols {
             let kind = match sym.kind {
                 codemem_index::SymbolKind::Function => NodeKind::Function,
@@ -207,12 +233,28 @@ impl McpServer {
                 namespace: Some(path.to_string()),
             };
 
+            let sym_node_id = node.id.clone();
             let _ = self.storage.insert_graph_node(&node);
             let _ = graph.add_node(node);
+
+            // Add CONTAINS edge: file:{path} → sym:{qualified_name}
+            let file_node_id = format!("file:{}", sym.file_path);
+            let contains_edge = Edge {
+                id: format!("contains:{file_node_id}->{sym_node_id}"),
+                src: file_node_id,
+                dst: sym_node_id,
+                relationship: codemem_core::RelationshipType::Contains,
+                weight: 1.0,
+                valid_from: None,
+                valid_to: None,
+                properties: HashMap::new(),
+                created_at: now,
+            };
+            let _ = self.storage.insert_graph_edge(&contains_edge);
+            let _ = graph.add_edge(contains_edge);
         }
 
         // Persist edges
-        let now = chrono::Utc::now();
         let edges_resolved = edges.len();
         for edge in &edges {
             let e = Edge {
@@ -236,11 +278,6 @@ impl McpServer {
         // Cleanup stale chunk nodes for files being re-indexed, then persist new chunks
         let mut chunk_count = 0usize;
         {
-            // Collect unique file paths from parsed results for cleanup
-            let mut seen_files = std::collections::HashSet::new();
-            for pr in &result.parse_results {
-                seen_files.insert(pr.file_path.clone());
-            }
             for file_path in &seen_files {
                 let prefix = format!("chunk:{file_path}:");
                 let _ = self.storage.delete_graph_nodes_by_prefix(&prefix);
@@ -287,6 +324,22 @@ impl McpServer {
 
                 let _ = self.storage.insert_graph_node(&node);
                 let _ = graph.add_node(node);
+
+                // Add CONTAINS edge from file to chunk
+                let file_node_id = format!("file:{}", chunk.file_path);
+                let file_chunk_edge = Edge {
+                    id: format!("contains:{file_node_id}->{chunk_id}"),
+                    src: file_node_id,
+                    dst: chunk_id.clone(),
+                    relationship: codemem_core::RelationshipType::Contains,
+                    weight: 1.0,
+                    valid_from: None,
+                    valid_to: None,
+                    properties: HashMap::new(),
+                    created_at: now,
+                };
+                let _ = self.storage.insert_graph_edge(&file_chunk_edge);
+                let _ = graph.add_edge(file_chunk_edge);
 
                 // Add CONTAINS edge from parent symbol to chunk
                 if let Some(ref parent_sym) = chunk.parent_symbol {
@@ -364,6 +417,7 @@ impl McpServer {
                 "files_scanned": result.files_scanned,
                 "files_parsed": result.files_parsed,
                 "files_skipped": result.files_skipped,
+                "files_created": seen_files.len(),
                 "symbols": result.total_symbols,
                 "references": result.total_references,
                 "edges_resolved": edges_resolved,

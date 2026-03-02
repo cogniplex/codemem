@@ -3,54 +3,124 @@
 //! Each tool annotates existing graph nodes with additional metadata and stores
 //! Insight-type memories tagged with `track:*` tags for the Insights UI.
 
+use crate::scoring::truncate_str;
 use crate::types::ToolResult;
 use crate::McpServer;
-use codemem_core::{Edge, GraphBackend, MemoryNode, MemoryType, NodeKind, RelationshipType};
+use codemem_core::{Edge, GraphBackend, GraphNode, MemoryNode, MemoryType, NodeKind, RelationshipType, VectorBackend};
 use codemem_storage::Storage;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-// ── Shared Helper ───────────────────────────────────────────────────────────
-
-/// Store an Insight memory with content-hash dedup. Silently skips duplicates.
-fn store_insight(
-    storage: &dyn codemem_core::StorageBackend,
-    content: &str,
-    track: &str,
-    tags: &[&str],
-    importance: f64,
-    namespace: Option<&str>,
-) {
-    let hash = Storage::content_hash(content);
-    let now = chrono::Utc::now();
-    let mut all_tags: Vec<String> = vec![format!("track:{track}")];
-    all_tags.extend(tags.iter().map(|t| t.to_string()));
-
-    let memory = MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Insight,
-        importance: importance.clamp(0.0, 1.0),
-        confidence: 0.8,
-        access_count: 0,
-        content_hash: hash,
-        tags: all_tags,
-        metadata: HashMap::from([
-            ("track".into(), json!(track)),
-            ("generated_by".into(), json!("enrichment_pipeline")),
-        ]),
-        namespace: namespace.map(String::from),
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
-    // Err(Duplicate) silently skips — running enrichment twice won't create duplicates
-    let _ = storage.insert_memory(&memory);
-}
-
-// ── Tool 1: enrich_git_history ──────────────────────────────────────────────
+// ── Tool implementations ────────────────────────────────────────────────────
 
 impl McpServer {
+    /// Store an Insight memory through the full pipeline: storage, BM25, graph
+    /// node, RELATES_TO edges to linked nodes, and vector embedding.
+    /// Returns the memory ID if inserted, or None if it was a duplicate.
+    /// Does NOT call `save_index()` — callers should batch that at the end.
+    fn store_insight(
+        &self,
+        content: &str,
+        track: &str,
+        tags: &[&str],
+        importance: f64,
+        namespace: Option<&str>,
+        links: &[String],
+    ) -> Option<String> {
+        let hash = Storage::content_hash(content);
+        let now = chrono::Utc::now();
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut all_tags: Vec<String> = vec![format!("track:{track}"), "static-analysis".to_string()];
+        all_tags.extend(tags.iter().map(|t| t.to_string()));
+
+        let memory = MemoryNode {
+            id: id.clone(),
+            content: content.to_string(),
+            memory_type: MemoryType::Insight,
+            importance: importance.clamp(0.0, 1.0),
+            confidence: 0.8,
+            access_count: 0,
+            content_hash: hash,
+            tags: all_tags.clone(),
+            metadata: HashMap::from([
+                ("track".into(), json!(track)),
+                ("generated_by".into(), json!("enrichment_pipeline")),
+            ]),
+            namespace: namespace.map(String::from),
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+        };
+
+        // 1. Insert into storage (dedup by content hash)
+        if self.storage.insert_memory(&memory).is_err() {
+            return None; // duplicate or error — skip silently
+        }
+
+        // 2. BM25 index
+        if let Ok(mut bm25) = self.lock_bm25() {
+            bm25.add_document(&id, content);
+        }
+
+        // 3. Graph node
+        let graph_node = GraphNode {
+            id: id.clone(),
+            kind: NodeKind::Memory,
+            label: truncate_str(content, 80),
+            payload: HashMap::new(),
+            centrality: 0.0,
+            memory_id: Some(id.clone()),
+            namespace: None,
+        };
+        let _ = self.storage.insert_graph_node(&graph_node);
+        if let Ok(mut graph) = self.lock_graph() {
+            let _ = graph.add_node(graph_node);
+        }
+
+        // 4. RELATES_TO edges to linked nodes
+        if !links.is_empty() {
+            if let Ok(mut graph) = self.lock_graph() {
+                for link_id in links {
+                    let edge = Edge {
+                        id: format!("{id}-RELATES_TO-{link_id}"),
+                        src: id.clone(),
+                        dst: link_id.clone(),
+                        relationship: RelationshipType::RelatesTo,
+                        weight: 1.0,
+                        properties: HashMap::new(),
+                        created_at: now,
+                        valid_from: None,
+                        valid_to: None,
+                    };
+                    let _ = self.storage.insert_graph_edge(&edge);
+                    let _ = graph.add_edge(edge);
+                }
+            }
+        }
+
+        // 5. Vector embedding
+        if let Ok(Some(emb_guard)) = self.lock_embeddings() {
+            let enriched = self.enrich_memory_text(
+                content,
+                MemoryType::Insight,
+                &all_tags,
+                namespace,
+                Some(&id),
+            );
+            if let Ok(embedding) = emb_guard.embed(&enriched) {
+                drop(emb_guard);
+                let _ = self.storage.store_embedding(&id, &embedding);
+                if let Ok(mut vec) = self.lock_vector() {
+                    let _ = vec.insert(&id, &embedding);
+                }
+            }
+        }
+
+        Some(id)
+    }
+
+    // ── Tool 1: enrich_git_history ──────────────────────────────────────────
+
     pub(crate) fn tool_enrich_git_history(&self, args: &Value) -> ToolResult {
         let path = match args.get("path").and_then(|v| v.as_str()) {
             Some(p) if !p.is_empty() => p,
@@ -86,7 +156,7 @@ impl McpServer {
         // Parse commits
         struct Commit {
             author: String,
-            _date: String,
+            date: chrono::DateTime<chrono::Utc>,
             files: Vec<String>,
         }
 
@@ -98,7 +168,9 @@ impl McpServer {
                 let parts: Vec<&str> = header.splitn(3, '|').collect();
                 if parts.len() >= 3 {
                     let author = parts[1].to_string();
-                    let date = parts[2].to_string();
+                    let date = chrono::DateTime::parse_from_rfc3339(parts[2])
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now());
                     let files: Vec<String> = lines
                         .filter(|l| !l.trim().is_empty())
                         .map(|l| l.trim().to_string())
@@ -106,7 +178,7 @@ impl McpServer {
                     if !files.is_empty() {
                         commits.push(Commit {
                             author,
-                            _date: date,
+                            date,
                             files,
                         });
                     }
@@ -126,8 +198,13 @@ impl McpServer {
         let mut author_file_count: HashMap<String, usize> = HashMap::new();
         let mut author_commit_count: HashMap<String, usize> = HashMap::new();
 
-        // Co-change tracking: count how many commits each file pair appears in together
-        let mut co_change_count: HashMap<(String, String), usize> = HashMap::new();
+        // Co-change tracking with temporal info
+        struct CoChangeInfo {
+            count: usize,
+            earliest: chrono::DateTime<chrono::Utc>,
+            latest: chrono::DateTime<chrono::Utc>,
+        }
+        let mut co_change_info: HashMap<(String, String), CoChangeInfo> = HashMap::new();
 
         for commit in &commits {
             *author_commit_count.entry(commit.author.clone()).or_default() += 1;
@@ -150,7 +227,18 @@ impl McpServer {
             for i in 0..sorted_files.len() {
                 for j in (i + 1)..sorted_files.len() {
                     let key = (sorted_files[i].clone(), sorted_files[j].clone());
-                    *co_change_count.entry(key).or_default() += 1;
+                    let entry = co_change_info.entry(key).or_insert(CoChangeInfo {
+                        count: 0,
+                        earliest: commit.date,
+                        latest: commit.date,
+                    });
+                    entry.count += 1;
+                    if commit.date < entry.earliest {
+                        entry.earliest = commit.date;
+                    }
+                    if commit.date > entry.latest {
+                        entry.latest = commit.date;
+                    }
                 }
             }
         }
@@ -184,7 +272,7 @@ impl McpServer {
             }
         }
 
-        // Create co-change edges (threshold: 2+ co-occurrences)
+        // Create co-change edges (threshold: 2+ co-occurrences) with temporal data
         let co_change_threshold = 2;
         let mut co_change_edges_created = 0;
         {
@@ -193,8 +281,8 @@ impl McpServer {
                 Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
             };
 
-            for ((file_a, file_b), count) in &co_change_count {
-                if *count < co_change_threshold {
+            for ((file_a, file_b), info) in &co_change_info {
+                if info.count < co_change_threshold {
                     continue;
                 }
                 let src_id = format!("file:{file_a}");
@@ -208,7 +296,7 @@ impl McpServer {
                 }
 
                 let weight = if total_commits > 0 {
-                    *count as f64 / total_commits as f64
+                    info.count as f64 / total_commits as f64
                 } else {
                     0.0
                 };
@@ -219,11 +307,12 @@ impl McpServer {
                     dst: dst_id,
                     relationship: RelationshipType::CoChanged,
                     weight,
-                    properties: HashMap::from([("commit_count".into(), json!(count))]),
+                    properties: HashMap::from([("commit_count".into(), json!(info.count))]),
                     created_at: chrono::Utc::now(),
-                    valid_from: None,
-                    valid_to: None,
+                    valid_from: Some(info.earliest),
+                    valid_to: Some(info.latest),
                 };
+                let _ = self.storage.insert_graph_edge(&edge);
                 if graph.add_edge(edge).is_ok() {
                     co_change_edges_created += 1;
                 }
@@ -242,34 +331,36 @@ impl McpServer {
                     file_path, stats.commit_count, days, authors_str
                 );
                 let importance = (stats.commit_count as f64 / 50.0).min(1.0).max(0.4);
-                store_insight(
-                    &*self.storage,
+                if self.store_insight(
                     &content,
                     "activity",
                     &["git-history"],
                     importance,
                     namespace,
-                );
-                insights_stored += 1;
+                    &[format!("file:{file_path}")],
+                ).is_some() {
+                    insights_stored += 1;
+                }
             }
         }
 
         // Co-change patterns
-        for ((file_a, file_b), count) in &co_change_count {
-            if *count >= 3 {
+        for ((file_a, file_b), info) in &co_change_info {
+            if info.count >= 3 {
                 let content = format!(
                     "Co-change pattern: {} and {} change together in {} commits — likely coupled",
-                    file_a, file_b, count
+                    file_a, file_b, info.count
                 );
-                store_insight(
-                    &*self.storage,
+                if self.store_insight(
                     &content,
                     "activity",
                     &["git-history", "coupling"],
                     0.6,
                     namespace,
-                );
-                insights_stored += 1;
+                    &[format!("file:{file_a}"), format!("file:{file_b}")],
+                ).is_some() {
+                    insights_stored += 1;
+                }
             }
         }
 
@@ -282,16 +373,19 @@ impl McpServer {
                 "Most active contributor: {} with {} commits across {} files",
                 author, commit_count, file_count
             );
-            store_insight(
-                &*self.storage,
+            if self.store_insight(
                 &content,
                 "activity",
                 &["git-history", "contributor"],
                 0.5,
                 namespace,
-            );
-            insights_stored += 1;
+                &[],
+            ).is_some() {
+                insights_stored += 1;
+            }
         }
+
+        self.save_index();
 
         ToolResult::text(
             serde_json::to_string_pretty(&json!({
@@ -328,7 +422,7 @@ impl McpServer {
 
         let mut sensitive_files: Vec<String> = Vec::new();
         let mut endpoints: Vec<String> = Vec::new();
-        let mut security_functions: Vec<(String, String)> = Vec::new(); // (name, file)
+        let mut security_functions: Vec<(String, String, String)> = Vec::new(); // (name, file, node_id)
         let mut nodes_to_annotate: Vec<(String, Vec<String>)> = Vec::new();
 
         for node in &all_nodes {
@@ -357,7 +451,7 @@ impl McpServer {
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown")
                             .to_string();
-                        security_functions.push((node.label.clone(), file));
+                        security_functions.push((node.label.clone(), file, node.id.clone()));
                         nodes_to_annotate.push((
                             node.id.clone(),
                             vec!["security_function".into()],
@@ -383,22 +477,6 @@ impl McpServer {
             }
         }
 
-        // Count security-relevant memories by scanning filtered content
-        let security_memory_count = {
-            let keywords = ["auth", "security", "token", "credential", "password"];
-            let memories = self
-                .storage
-                .list_memories_filtered(namespace, None)
-                .unwrap_or_default();
-            memories
-                .iter()
-                .filter(|m| {
-                    let lower = m.content.to_lowercase();
-                    keywords.iter().any(|kw| lower.contains(kw))
-                })
-                .count()
-        };
-
         // Store insights
         let mut insights_stored = 0;
 
@@ -407,15 +485,16 @@ impl McpServer {
                 "Sensitive file: {} — contains security-critical code (auth/credentials)",
                 file_path
             );
-            store_insight(
-                &*self.storage,
+            if self.store_insight(
                 &content,
                 "security",
                 &["severity:high"],
                 0.8,
                 namespace,
-            );
-            insights_stored += 1;
+                &[format!("file:{file_path}")],
+            ).is_some() {
+                insights_stored += 1;
+            }
         }
 
         if !endpoints.is_empty() {
@@ -423,55 +502,42 @@ impl McpServer {
                 "{} exposed API endpoints detected — review access controls",
                 endpoints.len()
             );
-            store_insight(
-                &*self.storage,
+            if self.store_insight(
                 &content,
                 "security",
                 &["severity:medium", "endpoints"],
                 0.7,
                 namespace,
-            );
-            insights_stored += 1;
+                &[],
+            ).is_some() {
+                insights_stored += 1;
+            }
         }
 
-        for (name, file) in &security_functions {
+        for (name, file, node_id) in &security_functions {
             let content = format!(
                 "Security-critical function: {} in {} — ensure proper testing",
                 name, file
             );
-            store_insight(
-                &*self.storage,
+            if self.store_insight(
                 &content,
                 "security",
                 &["severity:medium"],
                 0.6,
                 namespace,
-            );
-            insights_stored += 1;
+                &[node_id.clone()],
+            ).is_some() {
+                insights_stored += 1;
+            }
         }
 
-        if security_memory_count > 0 {
-            let content = format!(
-                "{} security-related memories found — security context is being tracked",
-                security_memory_count
-            );
-            store_insight(
-                &*self.storage,
-                &content,
-                "security",
-                &["severity:info"],
-                0.4,
-                namespace,
-            );
-            insights_stored += 1;
-        }
+        self.save_index();
 
         ToolResult::text(
             serde_json::to_string_pretty(&json!({
                 "sensitive_file_count": sensitive_files.len(),
                 "endpoint_count": endpoints.len(),
                 "security_function_count": security_functions.len(),
-                "security_memory_count": security_memory_count,
                 "insights_stored": insights_stored,
             }))
             .unwrap_or_default(),
@@ -576,21 +642,22 @@ impl McpServer {
 
         // High-coupling nodes
         coupling_data.sort_by(|a, b| b.2.cmp(&a.2));
-        for (_, label, degree) in coupling_data.iter().take(top) {
+        for (node_id, label, degree) in coupling_data.iter().take(top) {
             if *degree > 15 {
                 let content = format!(
                     "High coupling: {} has {} dependencies — refactoring risk",
                     label, degree
                 );
-                store_insight(
-                    &*self.storage,
+                if self.store_insight(
                     &content,
                     "performance",
                     &["coupling"],
                     0.7,
                     namespace,
-                );
-                insights_stored += 1;
+                    &[node_id.clone()],
+                ).is_some() {
+                    insights_stored += 1;
+                }
             }
         }
 
@@ -600,32 +667,34 @@ impl McpServer {
                 "Deep dependency chain: {} layers — impacts build and test times",
                 max_depth
             );
-            store_insight(
-                &*self.storage,
+            if self.store_insight(
                 &content,
                 "performance",
                 &["dependency-depth"],
                 0.6,
                 namespace,
-            );
-            insights_stored += 1;
+                &[],
+            ).is_some() {
+                insights_stored += 1;
+            }
         }
 
         // Critical bottleneck (top PageRank file)
-        if let Some((_, label, _)) = file_pagerank.first() {
+        if let Some((node_id, label, _)) = file_pagerank.first() {
             let content = format!(
                 "Critical bottleneck: {} — highest centrality file, changes cascade widely",
                 label
             );
-            store_insight(
-                &*self.storage,
+            if self.store_insight(
                 &content,
                 "performance",
                 &["critical-path"],
                 0.8,
                 namespace,
-            );
-            insights_stored += 1;
+                &[node_id.clone()],
+            ).is_some() {
+                insights_stored += 1;
+            }
         }
 
         // Complex files (high symbol count)
@@ -637,17 +706,20 @@ impl McpServer {
                     "Complex file: {} — {} symbols",
                     file_path, sym_count
                 );
-                store_insight(
-                    &*self.storage,
+                if self.store_insight(
                     &content,
                     "performance",
                     &["complexity"],
                     0.5,
                     namespace,
-                );
-                insights_stored += 1;
+                    &[format!("file:{file_path}")],
+                ).is_some() {
+                    insights_stored += 1;
+                }
             }
         }
+
+        self.save_index();
 
         let critical_files: Vec<_> = file_pagerank
             .iter()
@@ -665,5 +737,4 @@ impl McpServer {
             .unwrap_or_default(),
         )
     }
-
 }
