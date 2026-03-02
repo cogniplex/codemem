@@ -456,204 +456,143 @@ fn truncate(s: &str, max_len: usize) -> &str {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// ── Trigger-Based Auto-Insights ─────────────────────────────────────────
 
-    #[test]
-    fn parse_read_payload() {
-        let json = r#"{
-            "tool_name": "Read",
-            "tool_input": {"file_path": "src/main.rs"},
-            "tool_response": "fn main() { println!(\"hello\"); }"
-        }"#;
-
-        let payload = parse_payload(json).unwrap();
-        assert_eq!(payload.tool_name, "Read");
-
-        let extracted = extract(&payload).unwrap().unwrap();
-        assert_eq!(extracted.memory_type, MemoryType::Context);
-        assert!(extracted.tags.contains(&"ext:rs".to_string()));
-    }
-
-    #[test]
-    fn parse_edit_payload() {
-        let json = r#"{
-            "tool_name": "Edit",
-            "tool_input": {"file_path": "src/lib.rs", "old_string": "foo", "new_string": "bar"},
-            "tool_response": "OK"
-        }"#;
-
-        let payload = parse_payload(json).unwrap();
-        let extracted = extract(&payload).unwrap().unwrap();
-        assert_eq!(extracted.memory_type, MemoryType::Decision);
-    }
-
-    #[test]
-    fn skip_large_response() {
-        let large_response = "x".repeat(MAX_CONTENT_SIZE + 1);
-        let json = format!(
-            r#"{{"tool_name": "Read", "tool_input": {{"file_path": "big.txt"}}, "tool_response": "{large_response}"}}"#
-        );
-
-        let payload = parse_payload(&json).unwrap();
-        assert!(extract(&payload).unwrap().is_none());
-    }
-
-    #[test]
-    fn content_hash_deterministic() {
-        let h1 = content_hash("hello");
-        let h2 = content_hash("hello");
-        assert_eq!(h1, h2);
-    }
-
-    #[test]
-    fn resolve_edges_edit_after_read_creates_evolved_into() {
-        // Simulate: file was previously Read (node exists), now being Edited
-        let json = r#"{
-            "tool_name": "Edit",
-            "tool_input": {"file_path": "src/lib.rs", "old_string": "foo", "new_string": "bar"},
-            "tool_response": "OK"
-        }"#;
-
-        let payload = parse_payload(json).unwrap();
-        let mut extracted = extract(&payload).unwrap().unwrap();
-        assert!(extracted.graph_edges.is_empty());
-
-        // The file node "file:src/lib.rs" already exists from a prior Read
-        let mut existing = std::collections::HashSet::new();
-        existing.insert("file:src/lib.rs".to_string());
-
-        resolve_edges(&mut extracted, &existing);
-
-        assert_eq!(extracted.graph_edges.len(), 1);
-        assert_eq!(extracted.graph_edges[0].src_id, "file:src/lib.rs");
-        assert_eq!(
-            extracted.graph_edges[0].relationship,
-            RelationshipType::EvolvedInto
-        );
-    }
-
-    #[test]
-    fn resolve_edges_write_after_read_creates_evolved_into() {
-        let json = r#"{
-            "tool_name": "Write",
-            "tool_input": {"file_path": "src/new.rs"},
-            "tool_response": "File written"
-        }"#;
-
-        let payload = parse_payload(json).unwrap();
-        let mut extracted = extract(&payload).unwrap().unwrap();
-
-        // The file node exists from a prior Read
-        let mut existing = std::collections::HashSet::new();
-        existing.insert("file:src/new.rs".to_string());
-
-        resolve_edges(&mut extracted, &existing);
-
-        assert_eq!(extracted.graph_edges.len(), 1);
-        assert_eq!(
-            extracted.graph_edges[0].relationship,
-            RelationshipType::EvolvedInto
-        );
-    }
-
-    #[test]
-    fn resolve_edges_edit_no_prior_read_no_edges() {
-        let json = r#"{
-            "tool_name": "Edit",
-            "tool_input": {"file_path": "src/lib.rs", "old_string": "foo", "new_string": "bar"},
-            "tool_response": "OK"
-        }"#;
-
-        let payload = parse_payload(json).unwrap();
-        let mut extracted = extract(&payload).unwrap().unwrap();
-
-        // No prior file nodes exist
-        let existing = std::collections::HashSet::new();
-        resolve_edges(&mut extracted, &existing);
-
-        assert!(extracted.graph_edges.is_empty());
-    }
-
-    #[test]
-    fn resolve_edges_read_never_creates_edges() {
-        let json = r#"{
-            "tool_name": "Read",
-            "tool_input": {"file_path": "src/main.rs"},
-            "tool_response": "fn main() {}"
-        }"#;
-
-        let payload = parse_payload(json).unwrap();
-        let mut extracted = extract(&payload).unwrap().unwrap();
-
-        let mut existing = std::collections::HashSet::new();
-        existing.insert("file:src/main.rs".to_string());
-
-        resolve_edges(&mut extracted, &existing);
-
-        // Read events should not create edges
-        assert!(extracted.graph_edges.is_empty());
-    }
-
-    #[test]
-    fn resolve_edges_glob_no_graph_node_no_edges() {
-        let json = r#"{
-            "tool_name": "Glob",
-            "tool_input": {"pattern": "**/*.rs"},
-            "tool_response": "src/main.rs\nsrc/lib.rs"
-        }"#;
-
-        let payload = parse_payload(json).unwrap();
-        let mut extracted = extract(&payload).unwrap().unwrap();
-
-        let existing = std::collections::HashSet::new();
-        resolve_edges(&mut extracted, &existing);
-
-        // Glob has no graph_node, so no edges
-        assert!(extracted.graph_edges.is_empty());
-    }
-
-    #[test]
-    fn materialize_edges_self_reference() {
-        let pending = vec![PendingEdge {
-            src_id: "file:src/lib.rs".to_string(),
-            dst_id: String::new(),
-            relationship: RelationshipType::EvolvedInto,
-        }];
-
-        let edges = materialize_edges(&pending, "memory-123");
-
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].src, "file:src/lib.rs");
-        assert_eq!(edges[0].dst, "file:src/lib.rs");
-        assert_eq!(edges[0].relationship, RelationshipType::EvolvedInto);
-        assert!(edges[0].properties.contains_key("triggered_by"));
-        assert_eq!(
-            edges[0].properties["triggered_by"],
-            serde_json::Value::String("memory-123".to_string())
-        );
-    }
-
-    #[test]
-    fn materialize_edges_explicit_src_dst() {
-        let pending = vec![PendingEdge {
-            src_id: "file:src/a.rs".to_string(),
-            dst_id: "file:src/b.rs".to_string(),
-            relationship: RelationshipType::RelatesTo,
-        }];
-
-        let edges = materialize_edges(&pending, "memory-456");
-
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].src, "file:src/a.rs");
-        assert_eq!(edges[0].dst, "file:src/b.rs");
-        assert_eq!(edges[0].relationship, RelationshipType::RelatesTo);
-    }
-
-    #[test]
-    fn materialize_edges_empty_pending() {
-        let edges = materialize_edges(&[], "memory-789");
-        assert!(edges.is_empty());
-    }
+/// An auto-insight generated by trigger-based analysis during PostToolUse.
+#[derive(Debug, Clone)]
+pub struct AutoInsight {
+    /// The insight content to store as a memory.
+    pub content: String,
+    /// Tags to attach to the insight memory.
+    pub tags: Vec<String>,
+    /// Importance score for the insight.
+    pub importance: f64,
+    /// Unique tag used for deduplication within a session.
+    pub dedup_tag: String,
 }
+
+/// Check trigger conditions against session activity and return any auto-insights.
+///
+/// Three triggers are evaluated:
+/// 1. **Directory focus**: 3+ files read from the same directory suggests deep exploration.
+/// 2. **Edit after read**: Editing a file that was previously read indicates an informed change.
+/// 3. **Repeated search**: Same search pattern used 2+ times suggests a recurring need.
+///
+/// Each trigger checks `has_auto_insight()` to avoid duplicate insights within the same session.
+pub fn check_triggers(
+    storage: &dyn codemem_core::StorageBackend,
+    session_id: &str,
+    tool_name: &str,
+    file_path: Option<&str>,
+    pattern: Option<&str>,
+) -> Vec<AutoInsight> {
+    let mut insights = Vec::new();
+
+    // Trigger 1: 3+ files read from the same directory
+    if tool_name == "Read" {
+        if let Some(fp) = file_path {
+            let directory = std::path::Path::new(fp)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !directory.is_empty() {
+                let dedup_tag = format!("dir_focus:{}", directory);
+                let already_exists = storage
+                    .has_auto_insight(session_id, &dedup_tag)
+                    .unwrap_or(true);
+                if !already_exists {
+                    let count = storage
+                        .count_directory_reads(session_id, &directory)
+                        .unwrap_or(0);
+                    if count >= 3 {
+                        insights.push(AutoInsight {
+                            content: format!(
+                                "Deep exploration of directory '{}': {} files read in this session. \
+                                 This area may be a focus of the current task.",
+                                directory, count
+                            ),
+                            tags: vec![
+                                "auto-insight".to_string(),
+                                "directory-focus".to_string(),
+                                format!("dir:{}", directory),
+                            ],
+                            importance: 0.6,
+                            dedup_tag,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Trigger 2: Edit after read — an informed change
+    if matches!(tool_name, "Edit" | "Write") {
+        if let Some(fp) = file_path {
+            let dedup_tag = format!("edit_after_read:{}", fp);
+            let already_exists = storage
+                .has_auto_insight(session_id, &dedup_tag)
+                .unwrap_or(true);
+            if !already_exists {
+                let was_read = storage
+                    .was_file_read_in_session(session_id, fp)
+                    .unwrap_or(false);
+                if was_read {
+                    insights.push(AutoInsight {
+                        content: format!(
+                            "File '{}' was read and then modified in this session, \
+                             indicating an informed change based on code review.",
+                            fp
+                        ),
+                        tags: vec![
+                            "auto-insight".to_string(),
+                            "edit-after-read".to_string(),
+                            format!("file:{}", std::path::Path::new(fp)
+                                .file_name()
+                                .and_then(|f| f.to_str())
+                                .unwrap_or("unknown")),
+                        ],
+                        importance: 0.5,
+                        dedup_tag,
+                    });
+                }
+            }
+        }
+    }
+
+    // Trigger 3: Same search pattern used 2+ times
+    if matches!(tool_name, "Grep" | "Glob") {
+        if let Some(pat) = pattern {
+            let dedup_tag = format!("repeated_search:{}", pat);
+            let already_exists = storage
+                .has_auto_insight(session_id, &dedup_tag)
+                .unwrap_or(true);
+            if !already_exists {
+                let count = storage
+                    .count_search_pattern_in_session(session_id, pat)
+                    .unwrap_or(0);
+                if count >= 2 {
+                    insights.push(AutoInsight {
+                        content: format!(
+                            "Search pattern '{}' used {} times in this session. \
+                             Consider storing a permanent memory for this recurring lookup.",
+                            pat, count
+                        ),
+                        tags: vec![
+                            "auto-insight".to_string(),
+                            "repeated-search".to_string(),
+                            format!("pattern:{}", pat),
+                        ],
+                        importance: 0.5,
+                        dedup_tag,
+                    });
+                }
+            }
+        }
+    }
+
+    insights
+}
+
+#[cfg(test)]
+#[path = "tests/lib_tests.rs"]
+mod tests;
