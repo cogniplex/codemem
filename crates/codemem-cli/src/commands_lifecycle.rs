@@ -72,10 +72,14 @@ pub(crate) fn cmd_sessions_end(id: &str, summary: Option<&str>) -> anyhow::Resul
 /// Reads JSON `{session_id, cwd}` from stdin.
 /// Outputs JSON `{hookSpecificOutput: {additionalContext: "..."}}` to stdout.
 pub(crate) fn cmd_context() -> anyhow::Result<()> {
-    use std::io::Read;
+    use std::io::BufRead;
 
+    // Read a single line — hook payloads are one JSON object per line.
+    // Using read_line instead of read_to_string avoids hanging when the
+    // hook runner doesn't close stdin after writing the payload.
     let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)?;
+    let stdin = std::io::stdin();
+    let _ = stdin.lock().read_line(&mut input);
 
     let payload: serde_json::Value = if input.trim().is_empty() {
         serde_json::json!({})
@@ -271,10 +275,11 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
 /// Reads JSON `{session_id, cwd, prompt}` from stdin.
 /// Outputs JSON `{continue: true}` to stdout.
 pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
-    use std::io::Read;
+    use std::io::BufRead;
 
     let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)?;
+    let stdin = std::io::stdin();
+    let _ = stdin.lock().read_line(&mut input);
 
     if input.trim().is_empty() {
         println!("{{}}");
@@ -366,10 +371,11 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
 /// Reads JSON `{session_id, cwd}` from stdin.
 /// Outputs JSON `{continue: true}` to stdout.
 pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
-    use std::io::Read;
+    use std::io::BufRead;
 
     let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)?;
+    let stdin = std::io::stdin();
+    let _ = stdin.lock().read_line(&mut input);
 
     if input.trim().is_empty() {
         println!("{{}}");

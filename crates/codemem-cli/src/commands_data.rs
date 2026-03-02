@@ -152,10 +152,11 @@ fn open_browser(url: &str) -> std::io::Result<()> {
 }
 
 pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
-    use std::io::Read;
+    use std::io::BufRead;
 
     let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)?;
+    let stdin = std::io::stdin();
+    let _ = stdin.lock().read_line(&mut input);
 
     if input.trim().is_empty() {
         return Ok(());
