@@ -104,7 +104,7 @@ jobs:
         run: rm -rf crates/codemem-api/ui-dist && cp -r ui/dist crates/codemem-api/ui-dist
 
       - name: Build codemem release binary (with embedded UI)
-        run: cargo build --release
+        run: cargo build --release --features ui
 
       - name: Install Playwright browsers
         working-directory: ui

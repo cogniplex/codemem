@@ -12,6 +12,7 @@ publish = true
 
 [features]
 default = []
+ui = ["codemem-api/ui"]
 metal = ["codemem-embeddings/metal"]
 cuda = ["codemem-embeddings/cuda"]
 accelerate = ["codemem-embeddings/accelerate"]

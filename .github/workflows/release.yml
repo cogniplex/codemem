@@ -59,7 +59,7 @@ jobs:
         run: rm -rf crates/codemem-api/ui-dist && cp -r ui/dist crates/codemem-api/ui-dist
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --features ui --target ${{ matrix.target }}
 
       - name: Package
         shell: bash

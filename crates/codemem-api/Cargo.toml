@@ -11,7 +11,7 @@ description = "REST API and web server for the Codemem control plane"
 include = ["src/**", "Cargo.toml", "ui-dist/**"]
 
 [features]
-default = ["ui"]
+default = []
 ui = ["include_dir", "mime_guess"]
 
 [dependencies]
