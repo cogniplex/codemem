@@ -49,6 +49,15 @@ jobs:
           echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
           echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
 
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build UI
+        working-directory: ui
+        run: bun install && bun run build
+
+      - name: Embed UI assets into API crate
+        run: rm -rf crates/codemem-api/ui-dist && cp -r ui/dist crates/codemem-api/ui-dist
+
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 

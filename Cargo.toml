@@ -9,9 +9,9 @@ members = [
     "crates/codemem-hooks",
     "crates/codemem-cli",
     "crates/codemem-bench",
-    "crates/codemem-viz",
     "crates/codemem-index",
     "crates/codemem-watch",
+    "crates/codemem-api",
 ]
 resolver = "2"
 
@@ -37,9 +37,9 @@ codemem-embeddings = { path = "crates/codemem-embeddings", version = "0.6.3" }
 codemem-mcp = { path = "crates/codemem-mcp", version = "0.6.3" }
 codemem-hooks = { path = "crates/codemem-hooks", version = "0.6.3" }
 codemem-cli = { path = "crates/codemem-cli", version = "0.6.3" }
-codemem-viz = { path = "crates/codemem-viz", version = "0.6.3" }
 codemem-index = { path = "crates/codemem-index", version = "0.6.3" }
 codemem-watch = { path = "crates/codemem-watch", version = "0.6.3" }
+codemem-api = { path = "crates/codemem-api", version = "0.6.3" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

@@ -43,7 +43,7 @@ Downloads the local embedding model (~440MB, one-time), registers lifecycle hook
 
 ### That's it
 
-Codemem now automatically captures context, injects prior knowledge at session start, and provides 38 MCP tools to your assistant.
+Codemem now automatically captures context, injects prior knowledge at session start, and provides 42 MCP tools to your assistant.
 
 ### Map your codebase (optional)
 
@@ -68,7 +68,7 @@ See [`examples/agents/code-mapper.md`](examples/agents/code-mapper.md) for the f
 ## Key Features
 
 - **Graph-vector hybrid architecture** -- HNSW vector search (768-dim) + petgraph knowledge graph with 25 algorithms (PageRank, Louvain, betweenness centrality, BFS/DFS, and more)
-- **38 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, consolidation, impact analysis, metrics, and pattern detection over JSON-RPC
+- **42 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (git history, security, performance), consolidation, impact analysis, metrics, and pattern detection over JSON-RPC
 - **4 lifecycle hooks** -- Automatic context injection (SessionStart), prompt capture (UserPromptSubmit), observation capture (PostToolUse), and session summaries (Stop)
 - **9-component hybrid scoring** -- Vector similarity, graph strength, BM25 token overlap, temporal alignment, tag matching, importance, confidence, and recency
 - **Code-aware indexing** -- tree-sitter structural extraction for 13 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform)
@@ -146,7 +146,7 @@ Scoring weights, vector/graph tuning, and storage settings persist in `~/.codeme
 
 ## MCP Tools
 
-38 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
+42 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
 
 | Category | Tools |
 |----------|-------|
@@ -157,7 +157,8 @@ Scoring weights, vector/graph tuning, and storage settings persist in `~/.codeme
 | Recall & Namespace (4) | `recall_with_expansion`, `list_namespaces`, `namespace_stats`, `delete_namespace` |
 | Consolidation (6) | `consolidate_decay`, `consolidate_creative`, `consolidate_cluster`, `consolidate_forget`, `consolidate_summarize`, `consolidation_status` |
 | Impact & Patterns (4) | `recall_with_impact`, `get_decision_chain`, `detect_patterns`, `pattern_insights` |
-| Observability (1) | `codemem_metrics` |
+| Enrichment (3) | `enrich_git_history`, `enrich_security`, `enrich_performance` |
+| Observability (2) | `codemem_metrics`, `session_checkpoint` |
 
 ## CLI
 
@@ -192,7 +193,7 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 ## Documentation
 
 - [Architecture](docs/architecture.md) -- System design, data flow diagrams, storage schema
-- [MCP Tools Reference](docs/mcp-tools.md) -- All 38 tools with parameters and examples
+- [MCP Tools Reference](docs/mcp-tools.md) -- All 42 tools with parameters and examples
 - [CLI Reference](docs/cli-reference.md) -- All 18 commands
 - [Comparison](docs/comparison.md) -- vs Mem0, Zep/Graphiti, Letta, claude-mem, and more
 

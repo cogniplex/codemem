@@ -1,6 +1,6 @@
 # Codemem MCP Tools API Reference
 
-Codemem exposes 38 tools over JSON-RPC 2.0 (stdio transport). All requests use the
+Codemem exposes 42 tools over JSON-RPC 2.0 (stdio transport). All requests use the
 `tools/call` method with `{"name": "<tool>", "arguments": {...}}` as params.
 
 ---
@@ -187,7 +187,7 @@ Create a typed relationship between two memories in the knowledge graph.
 |-----------|------|----------|---------|-------------|
 | `source_id` | string | yes | -- | Source memory/node ID |
 | `target_id` | string | yes | -- | Target memory/node ID |
-| `relationship` | string | yes | -- | One of: `RELATES_TO`, `LEADS_TO`, `PART_OF`, `REINFORCES`, `CONTRADICTS`, `EVOLVED_INTO`, `DERIVED_FROM`, `INVALIDATED_BY`, `DEPENDS_ON`, `IMPORTS`, `EXTENDS`, `CALLS`, `CONTAINS`, `SUPERSEDES`, `BLOCKS`, `IMPLEMENTS`, `INHERITS`, `SIMILAR_TO`, `PRECEDED_BY`, `EXEMPLIFIES`, `EXPLAINS`, `SHARES_THEME`, `SUMMARIZES` |
+| `relationship` | string | yes | -- | One of: `RELATES_TO`, `LEADS_TO`, `PART_OF`, `REINFORCES`, `CONTRADICTS`, `EVOLVED_INTO`, `DERIVED_FROM`, `INVALIDATED_BY`, `DEPENDS_ON`, `IMPORTS`, `EXTENDS`, `CALLS`, `CONTAINS`, `SUPERSEDES`, `BLOCKS`, `IMPLEMENTS`, `INHERITS`, `SIMILAR_TO`, `PRECEDED_BY`, `EXEMPLIFIES`, `EXPLAINS`, `SHARES_THEME`, `SUMMARIZES`, `CO_CHANGED` |
 | `weight` | number | no | `1.0` | Edge weight |
 
 ```json
@@ -734,6 +734,7 @@ The following relationship types are available for `associate_memories` and appe
 | `EXPLAINS` | Knowledge | Provides explanation for |
 | `SHARES_THEME` | Semantic | Shares a common theme |
 | `SUMMARIZES` | Knowledge | Summary of |
+| `CO_CHANGED` | Temporal | Files that frequently change together in git commits |
 
 ## Memory Types Reference
 
@@ -845,6 +846,69 @@ Generate human-readable markdown insights from detected patterns. Groups finding
   "name": "pattern_insights",
   "arguments": {
     "min_frequency": 2
+  }
+}
+```
+
+---
+
+## Enrichment Tools (3)
+
+### enrich_git_history
+
+Analyze git commit history for a repository. Annotates file nodes with commit counts, authors, churn rates, and last-modified timestamps. Creates `CO_CHANGED` edges between files that frequently change together. Stores activity insights as Insight memories tagged `track:activity`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | yes | -- | Absolute path to the git repository root |
+| `days` | integer | no | `90` | Number of days of git history to analyze |
+
+```json
+{
+  "name": "enrich_git_history",
+  "arguments": {
+    "path": "/Users/dev/myproject",
+    "days": 180
+  }
+}
+```
+
+---
+
+### enrich_security
+
+Scan graph nodes for security-sensitive patterns (auth, secrets, credentials, tokens, encryption, etc.). Annotates matching nodes with `security_flags` in their payload. Stores security findings as Insight memories tagged `track:security` with severity levels.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `namespace` | string | no | -- | Filter to a specific namespace |
+
+```json
+{
+  "name": "enrich_security",
+  "arguments": {
+    "namespace": "/Users/dev/myproject"
+  }
+}
+```
+
+---
+
+### enrich_performance
+
+Compute coupling scores, dependency depth, critical path (PageRank), and file complexity for graph nodes. Annotates nodes with `coupling_score`, `dependency_layer`, `critical_path_rank`, and `symbol_count`. Stores performance findings as Insight memories tagged `track:performance`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `namespace` | string | no | -- | Filter to a specific namespace |
+| `top` | integer | no | `10` | Number of top results per category |
+
+```json
+{
+  "name": "enrich_performance",
+  "arguments": {
+    "namespace": "/Users/dev/myproject",
+    "top": 20
   }
 }
 ```

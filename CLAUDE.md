@@ -4,19 +4,19 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 38 MCP tools, 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), optional LLM observation compression, real-time file watching, and cross-session pattern detection.
+Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 42 MCP tools, 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), optional LLM observation compression, real-time file watching, and cross-session pattern detection.
 
 ## Workspace Structure (12 crates)
 
 | Crate | Purpose |
 |-------|---------|
-| codemem-core | Shared types (`types.rs`), traits (`traits.rs`), errors (`error.rs`), config (`config.rs`): MemoryNode, Edge, Session, DetectedPattern, CodememConfig, 7 MemoryTypes, 23 RelationshipTypes, 12 NodeKinds, ScoringWeights, VectorBackend/GraphBackend/StorageBackend traits |
+| codemem-core | Shared types (`types.rs`), traits (`traits.rs`), errors (`error.rs`), config (`config.rs`): MemoryNode, Edge, Session, DetectedPattern, CodememConfig, 7 MemoryTypes, 24 RelationshipTypes, 12 NodeKinds, ScoringWeights, VectorBackend/GraphBackend/StorageBackend traits |
 | codemem-storage | rusqlite (bundled), WAL mode, versioned schema migrations; split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning) |
 | codemem-vector | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200 |
 | codemem-graph | petgraph + SQLite; split into `traversal.rs` (GraphBackend impl), `algorithms.rs` (PageRank, Louvain, SCC, betweenness, topological), cached centrality |
 | codemem-embeddings | Pluggable via `from_env()`: Candle (local BERT, default), Ollama, OpenAI-compatible. `CachedProvider` wrapper, BAAI/bge-base-en-v1.5 (768-dim), LRU cache 10K. Safe concurrency via `LockPoisoned` error handling |
 | codemem-index | tree-sitter code indexing, 14 languages (Rust, TS, JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) |
-| codemem-mcp | JSON-RPC stdio server, 38 MCP tools; split into `tools_memory.rs`, `tools_graph.rs`, `tools_recall.rs`, `tools_consolidation.rs`, `scoring.rs`, `types.rs`, `compress.rs`, `patterns.rs`, `metrics.rs`. RwLock-based scoring weights, typed lock helpers, temporal edges, self-editing tools (refine/split/merge), LLM-powered consolidation, operational metrics |
+| codemem-mcp | JSON-RPC stdio server, 42 MCP tools; split into `tools_memory.rs`, `tools_graph.rs`, `tools_recall.rs`, `tools_consolidation.rs`, `tools_enrich.rs`, `scoring.rs`, `types.rs`, `compress.rs`, `patterns.rs`, `metrics.rs`. RwLock-based scoring weights, typed lock helpers, temporal edges, self-editing tools (refine/split/merge), LLM-powered consolidation, enrichment pipeline (git history, security, performance), operational metrics |
 | codemem-hooks | PostToolUse JSON parser, per-tool extractors, diff-aware memory (semantic summaries) |
 | codemem-cli | clap derive, 18 commands; split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`, `commands_doctor.rs`, `commands_config.rs`, `commands_migrate.rs` |
 | codemem-viz | PCA visualization dashboard with timeline, distribution, and D3 graph endpoints |
@@ -28,7 +28,7 @@ Codemem is a standalone Rust memory engine for AI coding assistants — a single
 - **Embedding engine**: Pluggable via `CODEMEM_EMBED_PROVIDER` env var — Candle (default, pure Rust ML), Ollama (local server), OpenAI (API-compatible, works with Voyage AI/Together/Azure). `from_env()` factory in codemem-embeddings selects provider at runtime. All providers wrapped with LRU cache (10K).
 - **Contextual embeddings**: Text enriched with metadata + graph context before embedding
 - **7 memory types**: Decision, Pattern, Preference, Style, Habit, Insight, Context
-- **23 relationship types**: RELATES_TO, LEADS_TO, PART_OF, REINFORCES, CONTRADICTS, EVOLVED_INTO, DERIVED_FROM, INVALIDATED_BY, DEPENDS_ON, IMPORTS, EXTENDS, CALLS, CONTAINS, SUPERSEDES, BLOCKS, IMPLEMENTS, INHERITS, SIMILAR_TO, PRECEDED_BY, EXEMPLIFIES, EXPLAINS, SHARES_THEME, SUMMARIZES
+- **24 relationship types**: RELATES_TO, LEADS_TO, PART_OF, REINFORCES, CONTRADICTS, EVOLVED_INTO, DERIVED_FROM, INVALIDATED_BY, DEPENDS_ON, IMPORTS, EXTENDS, CALLS, CONTAINS, SUPERSEDES, BLOCKS, IMPLEMENTS, INHERITS, SIMILAR_TO, PRECEDED_BY, EXEMPLIFIES, EXPLAINS, SHARES_THEME, SUMMARIZES, CO_CHANGED
 - **9-component hybrid scoring**: vector_similarity 25%, graph_strength 25% (PageRank 40% + betweenness 30% + degree 20% + cluster 10%), BM25_token_overlap 15%, temporal 10%, tag_matching 10%, importance 5%, confidence 5%, recency 5%
 - **BM25 scoring**: Okapi BM25 (k1=1.2, b=0.75) with code-aware tokenizer (camelCase/snake_case splitting)
 - **4 lifecycle hooks**: SessionStart (context injection), UserPromptSubmit (prompt capture), PostToolUse (observation capture), Stop (session summary)
@@ -63,6 +63,6 @@ cargo build --release          # Optimized release binary
 ## Documentation
 
 - [Architecture](docs/architecture.md) — System design with Mermaid diagrams
-- [MCP Tools](docs/mcp-tools.md) — All 38 tools reference
+- [MCP Tools](docs/mcp-tools.md) — All 42 tools reference
 - [CLI Reference](docs/cli-reference.md) — All 18 commands
 - [Comparison](docs/comparison.md) — vs claude-mem, AgentDB, AutoMem, and more

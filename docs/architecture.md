@@ -20,7 +20,7 @@ The following diagram shows the full Codemem system: AI assistant integration po
 graph TB
     subgraph "AI Coding Assistant"
         H[4 Lifecycle Hooks<br/>SessionStart, UserPromptSubmit,<br/>PostToolUse, Stop]
-        M[MCP Tools<br/>38 tools via JSON-RPC stdio]
+        M[MCP Tools<br/>42 tools via JSON-RPC stdio]
     end
 
     subgraph "Codemem Binary"
@@ -35,7 +35,7 @@ graph TB
             VEC[codemem-vector<br/>usearch HNSW]
             STORE[codemem-storage<br/>rusqlite WAL + sessions]
             GRAPH[codemem-graph<br/>petgraph + cached centrality]
-            IDX[codemem-index<br/>tree-sitter, 13 languages]
+            IDX[codemem-index<br/>tree-sitter, 14 languages]
         end
 
         VIZ[codemem-viz<br/>Dashboard]
@@ -79,43 +79,25 @@ graph TB
 Each arrow reads "depends on." The `codemem-core` crate sits at the root with no internal dependencies. Higher-level crates compose the lower-level ones.
 
 ```mermaid
-graph BT
-    core[codemem-core]
+flowchart TD
+    cli[codemem-cli]
+
+    cli --> mcp & hooks & viz & watch & index
+    cli --> storage & vector & graphCrate & embeddings
+
+    mcp[codemem-mcp] --> storage & vector & graphCrate & embeddings & index
+    hooks[codemem-hooks] --> storage & vector & embeddings
+    viz[codemem-viz] --> storage
+    bench[codemem-bench] --> storage & vector & graphCrate & embeddings
+
     storage[codemem-storage] --> core
     vector[codemem-vector] --> core
     graphCrate[codemem-graph] --> core
-    graphCrate --> storage
     embeddings[codemem-embeddings] --> core
     index[codemem-index] --> core
-    index --> storage
-    hooks[codemem-hooks] --> core
-    hooks --> storage
-    hooks --> vector
-    hooks --> embeddings
     watch[codemem-watch] --> core
-    mcp[codemem-mcp] --> core
-    mcp --> storage
-    mcp --> vector
-    mcp --> graphCrate
-    mcp --> embeddings
-    mcp --> index
-    cli[codemem-cli] --> core
-    cli --> storage
-    cli --> vector
-    cli --> graphCrate
-    cli --> embeddings
-    cli --> mcp
-    cli --> hooks
-    cli --> index
-    cli --> watch
-    cli --> viz
-    viz[codemem-viz] --> core
-    viz --> storage
-    bench[codemem-bench] --> core
-    bench --> storage
-    bench --> vector
-    bench --> graphCrate
-    bench --> embeddings
+
+    core[codemem-core]
 ```
 
 ---
@@ -124,13 +106,13 @@ graph BT
 
 | Crate | Description |
 |-------|-------------|
-| codemem-core | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`), config (`config.rs`: `CodememConfig` TOML persistence). 7 `MemoryType`s, 5 `PatternType`s, 23 `RelationshipType`s, 12 `NodeKind`s, `ScoringWeights` |
+| codemem-core | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`), config (`config.rs`: `CodememConfig` TOML persistence). 7 `MemoryType`s, 5 `PatternType`s, 24 `RelationshipType`s, 12 `NodeKind`s, `ScoringWeights` |
 | codemem-storage | rusqlite (bundled), WAL mode, versioned schema migrations. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning with `schema_version` table) |
 | codemem-vector | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200, efSearch=100, persistent ID mapping |
 | codemem-graph | petgraph + SQLite persistence. Split into `traversal.rs` (GraphBackend trait impl: BFS/DFS/shortest path), `algorithms.rs` (PageRank, personalized PageRank, Louvain, betweenness, SCC, topological layers). Cached centrality scores (`recompute_centrality()`) |
 | codemem-embeddings | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization. Safe concurrency via `LockPoisoned` error handling |
 | codemem-index | tree-sitter code indexing, 13 language extractors (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform), manifest parsing (Cargo.toml), reference resolution, incremental indexing |
-| codemem-mcp | JSON-RPC stdio server, 38 MCP tools. Split into `tools_memory.rs` (CRUD + self-editing), `tools_graph.rs` (analysis), `tools_recall.rs` (advanced recall/namespaces), `tools_consolidation.rs` (lifecycle + LLM summarization), `scoring.rs` (hybrid scorer), `types.rs` (protocol types), `compress.rs` (LLM compression), `patterns.rs` (cross-session detection), `metrics.rs` (operational metrics). BM25 scoring, contextual enrichment, temporal edges, power-law decay, semantic clustering |
+| codemem-mcp | JSON-RPC stdio server, 42 MCP tools. Split into `tools_memory.rs` (CRUD + self-editing), `tools_graph.rs` (analysis), `tools_recall.rs` (advanced recall/namespaces), `tools_consolidation.rs` (lifecycle + LLM summarization), `tools_enrich.rs` (git history, security, performance enrichment), `scoring.rs` (hybrid scorer), `types.rs` (protocol types), `compress.rs` (LLM compression), `patterns.rs` (cross-session detection), `metrics.rs` (operational metrics). BM25 scoring, contextual enrichment, temporal edges, power-law decay, semantic clustering |
 | codemem-hooks | PostToolUse JSON parser, extractors per tool type (Read, Glob, Grep, Edit, Write), diff-aware memory via `similar` crate (semantic summaries), edge materialization, content hashing |
 | codemem-cli | clap derive, 18 commands. Split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`, `commands_doctor.rs`, `commands_config.rs`, `commands_migrate.rs`. Multi-format export (JSONL/JSON/CSV/Markdown), health checks, config management |
 | codemem-watch | Real-time file watcher via `notify` + `notify-debouncer-mini` (50ms debounce), proper `.gitignore` parsing via `ignore` crate, 17 file extensions, crossbeam channels |
@@ -414,7 +396,7 @@ Indexes: `kind`, `memory_id`.
 | `id` | TEXT PK | Edge identifier |
 | `src` | TEXT NOT NULL | FK to `graph_nodes.id` (CASCADE delete) |
 | `dst` | TEXT NOT NULL | FK to `graph_nodes.id` (CASCADE delete) |
-| `relationship` | TEXT NOT NULL | One of the 23 `RelationshipType` values |
+| `relationship` | TEXT NOT NULL | One of the 24 `RelationshipType` values |
 | `weight` | REAL | Edge weight, default 1.0 |
 | `properties` | TEXT | JSON object for arbitrary properties |
 | `created_at` | INTEGER | Unix timestamp |
@@ -484,7 +466,7 @@ Used by incremental indexing to skip unchanged files on re-index.
 | Endpoint | REST/gRPC endpoint definition |
 | Test | Test function |
 
-### Relationship Types (23 `RelationshipType` variants)
+### Relationship Types (24 `RelationshipType` variants)
 
 | Category | Relationship | Description |
 |----------|-------------|-------------|
@@ -511,6 +493,7 @@ Used by incremental indexing to skip unchanged files on re-index.
 | Semantic | `EXPLAINS` | Insight explains a pattern |
 | Semantic | `SHARES_THEME` | High similarity across types (consolidation) |
 | Semantic | `SUMMARIZES` | Meta-memory summarizes a cluster |
+| Temporal | `CO_CHANGED` | Files that frequently change together in git commits |
 
 ### Graph Algorithms (implemented in `codemem-graph`)
 
@@ -588,7 +571,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 | `petgraph` | Directed graph data structure and algorithms |
 | `tokenizers` | HuggingFace tokenizer for bge-base-en-v1.5 |
 | `hf-hub` | Model download from HuggingFace Hub |
-| `tree-sitter` + language grammars | Code parsing for 13 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) |
+| `tree-sitter` + language grammars | Code parsing for 14 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) |
 | `clap` | CLI framework with derive macros |
 | `serde` / `serde_json` | Serialization for JSON-RPC, storage, and configuration |
 | `tokio` | Async runtime for MCP server and viz dashboard |
@@ -611,7 +594,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 
 ---
 
-## 12. MCP Tools (38 total)
+## 12. MCP Tools (41 total)
 
 ### Memory Operations
 | Tool | Description |
@@ -631,7 +614,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 ### Code Index Operations
 | Tool | Description |
 |------|-------------|
-| `index_codebase` | Index a directory with tree-sitter (13 languages) |
+| `index_codebase` | Index a directory with tree-sitter (14 languages) |
 | `search_symbols` | Search indexed code symbols |
 | `get_symbol_info` | Get detailed info about a specific symbol |
 | `get_dependencies` | Get package/module dependency graph |
@@ -675,6 +658,13 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 | `get_decision_chain` | Get chronological chain of Decision memories for a file or topic |
 | `detect_patterns` | Detect cross-session patterns (repeated searches, file hotspots, decision chains, tool preferences) |
 | `pattern_insights` | Generate human-readable markdown insights from detected patterns |
+
+### Enrichment
+| Tool | Description |
+|------|-------------|
+| `enrich_git_history` | Analyze git commit history, annotate graph nodes with temporal data, create CO_CHANGED edges |
+| `enrich_security` | Scan graph nodes for security-sensitive patterns and store severity-tagged findings |
+| `enrich_performance` | Compute coupling scores, dependency depth, and critical path analysis |
 
 ### System
 | Tool | Description |

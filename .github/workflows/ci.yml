@@ -49,7 +49,7 @@ jobs:
       - run: cargo test --workspace
 
   coverage:
-    name: Coverage
+    name: Rust Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -67,8 +67,59 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           files: lcov.info
+          flags: rust
           verbose: true
           fail_ci_if_error: true
+
+  ui-lint:
+    name: UI Lint & Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run tsc --noEmit
+      - run: bun run eslint .
+
+  ui-test:
+    name: UI E2E Tests
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install UI dependencies & build
+        working-directory: ui
+        run: bun install && bun run build
+
+      - name: Embed UI assets into API crate
+        run: rm -rf crates/codemem-api/ui-dist && cp -r ui/dist crates/codemem-api/ui-dist
+
+      - name: Build codemem release binary (with embedded UI)
+        run: cargo build --release
+
+      - name: Install Playwright browsers
+        working-directory: ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        working-directory: ui
+        run: npx playwright test
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: ui/test-results/
 
   bench:
     name: Benchmarks

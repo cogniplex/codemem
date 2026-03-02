@@ -20,6 +20,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build UI and embed into API crate
+        run: |
+          cd ui && bun install && bun run build && cd ..
+          rm -rf crates/codemem-api/ui-dist
+          cp -r ui/dist crates/codemem-api/ui-dist
+
       - name: Verify builds
         run: cargo build --workspace
 
@@ -48,12 +56,12 @@ jobs:
 
           # Layer 3: depends on layers 1-2
           publish codemem-graph
-          publish codemem-viz
           publish codemem-index
 
           # Layer 4: depends on layers 1-3
           publish codemem-hooks
           publish codemem-mcp
+          publish codemem-api
 
           # Layer 5: depends on everything
           publish codemem-cli
