@@ -170,6 +170,10 @@ impl StorageBackend for Storage {
         Storage::delete_graph_edges_for_node(self, node_id)
     }
 
+    fn delete_graph_nodes_by_prefix(&self, prefix: &str) -> Result<usize, CodememError> {
+        Storage::delete_graph_nodes_by_prefix(self, prefix)
+    }
+
     fn start_session(&self, id: &str, namespace: Option<&str>) -> Result<(), CodememError> {
         Storage::start_session(self, id, namespace)
     }
@@ -763,119 +767,69 @@ impl StorageBackend for Storage {
         Storage::graph_edges_for_namespace(self, namespace)
     }
 
+    fn record_session_activity(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        file_path: Option<&str>,
+        directory: Option<&str>,
+        pattern: Option<&str>,
+    ) -> Result<(), CodememError> {
+        Storage::record_session_activity(self, session_id, tool_name, file_path, directory, pattern)
+    }
+
+    fn get_session_activity_summary(
+        &self,
+        session_id: &str,
+    ) -> Result<codemem_core::SessionActivitySummary, CodememError> {
+        Storage::get_session_activity_summary(self, session_id)
+    }
+
+    fn get_session_hot_directories(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, usize)>, CodememError> {
+        Storage::get_session_hot_directories(self, session_id, limit)
+    }
+
+    fn has_auto_insight(
+        &self,
+        session_id: &str,
+        dedup_tag: &str,
+    ) -> Result<bool, CodememError> {
+        Storage::has_auto_insight(self, session_id, dedup_tag)
+    }
+
+    fn count_directory_reads(
+        &self,
+        session_id: &str,
+        directory: &str,
+    ) -> Result<usize, CodememError> {
+        Storage::count_directory_reads(self, session_id, directory)
+    }
+
+    fn was_file_read_in_session(
+        &self,
+        session_id: &str,
+        file_path: &str,
+    ) -> Result<bool, CodememError> {
+        Storage::was_file_read_in_session(self, session_id, file_path)
+    }
+
+    fn count_search_pattern_in_session(
+        &self,
+        session_id: &str,
+        pattern: &str,
+    ) -> Result<usize, CodememError> {
+        Storage::count_search_pattern_in_session(self, session_id, pattern)
+    }
+
     fn stats(&self) -> Result<StorageStats, CodememError> {
         Storage::stats(self)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::Storage;
-    use codemem_core::{MemoryNode, MemoryType, StorageBackend};
-    use std::collections::HashMap;
-
-    fn test_memory() -> MemoryNode {
-        let now = chrono::Utc::now();
-        let content = "Test memory content";
-        MemoryNode {
-            id: uuid::Uuid::new_v4().to_string(),
-            content: content.to_string(),
-            memory_type: MemoryType::Context,
-            importance: 0.7,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: Storage::content_hash(content),
-            tags: vec!["test".to_string()],
-            metadata: HashMap::new(),
-            namespace: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        }
-    }
-
-    #[test]
-    fn get_memories_batch_returns_multiple() {
-        let storage = Storage::open_in_memory().unwrap();
-        let m1 = test_memory();
-        let mut m2 = test_memory();
-        m2.id = uuid::Uuid::new_v4().to_string();
-        m2.content = "Different content".to_string();
-        m2.content_hash = Storage::content_hash(&m2.content);
-
-        storage.insert_memory(&m1).unwrap();
-        storage.insert_memory(&m2).unwrap();
-
-        let backend: &dyn StorageBackend = &storage;
-        let batch = backend.get_memories_batch(&[&m1.id, &m2.id]).unwrap();
-        assert_eq!(batch.len(), 2);
-    }
-
-    #[test]
-    fn get_memories_batch_empty() {
-        let storage = Storage::open_in_memory().unwrap();
-        let backend: &dyn StorageBackend = &storage;
-        let batch = backend.get_memories_batch(&[]).unwrap();
-        assert!(batch.is_empty());
-    }
-
-    #[test]
-    fn storage_backend_trait_object() {
-        let storage = Storage::open_in_memory().unwrap();
-        let backend: Box<dyn StorageBackend> = Box::new(storage);
-
-        let m = test_memory();
-        backend.insert_memory(&m).unwrap();
-        let retrieved = backend.get_memory(&m.id).unwrap().unwrap();
-        assert_eq!(retrieved.id, m.id);
-    }
-
-    #[test]
-    fn file_hashes_roundtrip() {
-        let storage = Storage::open_in_memory().unwrap();
-        let backend: &dyn StorageBackend = &storage;
-
-        let mut hashes = HashMap::new();
-        hashes.insert("src/main.rs".to_string(), "abc123".to_string());
-        hashes.insert("src/lib.rs".to_string(), "def456".to_string());
-
-        backend.save_file_hashes(&hashes).unwrap();
-        let loaded = backend.load_file_hashes().unwrap();
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded.get("src/main.rs"), Some(&"abc123".to_string()));
-    }
-
-    #[test]
-    fn decay_stale_memories_updates() {
-        let storage = Storage::open_in_memory().unwrap();
-        let backend: &dyn StorageBackend = &storage;
-
-        let m = test_memory();
-        backend.insert_memory(&m).unwrap();
-
-        // Decay memories older than far future = none affected
-        let count = backend.decay_stale_memories(0, 0.5).unwrap();
-        assert_eq!(count, 0);
-
-        // Decay all memories (threshold in the future)
-        let count = backend.decay_stale_memories(i64::MAX, 0.5).unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn find_forgettable_returns_low_importance() {
-        let storage = Storage::open_in_memory().unwrap();
-        let backend: &dyn StorageBackend = &storage;
-
-        let mut m = test_memory();
-        m.importance = 0.1;
-        backend.insert_memory(&m).unwrap();
-
-        let forgettable = backend.find_forgettable(0.5).unwrap();
-        assert_eq!(forgettable.len(), 1);
-        assert_eq!(forgettable[0], m.id);
-
-        let forgettable = backend.find_forgettable(0.05).unwrap();
-        assert!(forgettable.is_empty());
-    }
-}
+#[path = "tests/backend_tests.rs"]
+mod tests;

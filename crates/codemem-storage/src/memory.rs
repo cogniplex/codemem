@@ -1,7 +1,7 @@
 //! Memory CRUD operations on Storage.
 
 use crate::{MemoryRow, Storage};
-use codemem_core::{CodememError, MemoryNode};
+use codemem_core::{CodememError, MemoryNode, Repository};
 use rusqlite::{params, OptionalExtension};
 
 impl Storage {
@@ -199,68 +199,114 @@ impl Storage {
             .map_err(|e| CodememError::Storage(e.to_string()))?;
         Ok(count as usize)
     }
+
+    // ── Repository CRUD ─────────────────────────────────────────────────────
+
+    /// List all registered repositories.
+    pub fn list_repos(&self) -> Result<Vec<Repository>, CodememError> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, path, name, namespace, created_at, last_indexed_at, status FROM repositories ORDER BY created_at DESC",
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let repos = stmt
+            .query_map([], |row| {
+                Ok(Repository {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    name: row.get(2)?,
+                    namespace: row.get(3)?,
+                    created_at: row.get(4)?,
+                    last_indexed_at: row.get(5)?,
+                    status: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "idle".to_string()),
+                })
+            })
+            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .collect::<Result<Vec<Repository>, _>>()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(repos)
+    }
+
+    /// Add a new repository.
+    pub fn add_repo(&self, repo: &Repository) -> Result<(), CodememError> {
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO repositories (id, path, name, namespace, created_at, last_indexed_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                repo.id,
+                repo.path,
+                repo.name,
+                repo.namespace,
+                repo.created_at,
+                repo.last_indexed_at,
+                repo.status,
+            ],
+        )
+        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Remove a repository by ID.
+    pub fn remove_repo(&self, id: &str) -> Result<bool, CodememError> {
+        let conn = self.conn();
+        let rows = conn
+            .execute("DELETE FROM repositories WHERE id = ?1", params![id])
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(rows > 0)
+    }
+
+    /// Get a repository by ID.
+    pub fn get_repo(&self, id: &str) -> Result<Option<Repository>, CodememError> {
+        let conn = self.conn();
+        let result = conn
+            .query_row(
+                "SELECT id, path, name, namespace, created_at, last_indexed_at, status FROM repositories WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(Repository {
+                        id: row.get(0)?,
+                        path: row.get(1)?,
+                        name: row.get(2)?,
+                        namespace: row.get(3)?,
+                        created_at: row.get(4)?,
+                        last_indexed_at: row.get(5)?,
+                        status: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "idle".to_string()),
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(result)
+    }
+
+    /// Update a repository's status and optionally last_indexed_at.
+    pub fn update_repo_status(
+        &self,
+        id: &str,
+        status: &str,
+        indexed_at: Option<&str>,
+    ) -> Result<(), CodememError> {
+        let conn = self.conn();
+        if let Some(ts) = indexed_at {
+            conn.execute(
+                "UPDATE repositories SET status = ?1, last_indexed_at = ?2 WHERE id = ?3",
+                params![status, ts, id],
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        } else {
+            conn.execute(
+                "UPDATE repositories SET status = ?1 WHERE id = ?2",
+                params![status, id],
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::Storage;
-    use codemem_core::{CodememError, MemoryNode, MemoryType};
-    use std::collections::HashMap;
-
-    fn test_memory() -> MemoryNode {
-        let now = chrono::Utc::now();
-        let content = "Test memory content";
-        MemoryNode {
-            id: uuid::Uuid::new_v4().to_string(),
-            content: content.to_string(),
-            memory_type: MemoryType::Context,
-            importance: 0.7,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: Storage::content_hash(content),
-            tags: vec!["test".to_string()],
-            metadata: HashMap::new(),
-            namespace: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        }
-    }
-
-    #[test]
-    fn insert_and_get_memory() {
-        let storage = Storage::open_in_memory().unwrap();
-        let memory = test_memory();
-        storage.insert_memory(&memory).unwrap();
-
-        let retrieved = storage.get_memory(&memory.id).unwrap().unwrap();
-        assert_eq!(retrieved.id, memory.id);
-        assert_eq!(retrieved.content, memory.content);
-        assert_eq!(retrieved.access_count, 1); // bumped on get
-    }
-
-    #[test]
-    fn dedup_by_content_hash() {
-        let storage = Storage::open_in_memory().unwrap();
-        let m1 = test_memory();
-        storage.insert_memory(&m1).unwrap();
-
-        let mut m2 = test_memory();
-        m2.id = uuid::Uuid::new_v4().to_string();
-        m2.content_hash = m1.content_hash.clone(); // same hash
-
-        assert!(matches!(
-            storage.insert_memory(&m2),
-            Err(CodememError::Duplicate(_))
-        ));
-    }
-
-    #[test]
-    fn delete_memory() {
-        let storage = Storage::open_in_memory().unwrap();
-        let memory = test_memory();
-        storage.insert_memory(&memory).unwrap();
-        assert!(storage.delete_memory(&memory.id).unwrap());
-        assert!(storage.get_memory(&memory.id).unwrap().is_none());
-    }
-}
+#[path = "tests/memory_tests.rs"]
+mod tests;

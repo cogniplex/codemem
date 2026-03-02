@@ -360,6 +360,140 @@ impl Storage {
             .collect())
     }
 
+    // ── Insight / Tag Queries ──────────────────────────────────────────
+
+    /// Count memories whose content matches any of the given keywords (SQL LIKE).
+    pub fn count_memories_matching_keywords(
+        &self,
+        keywords: &[&str],
+        namespace: Option<&str>,
+    ) -> Result<usize, CodememError> {
+        if keywords.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn();
+        let like_clauses: Vec<String> = keywords
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("content LIKE ?{}", i + 1))
+            .collect();
+        let where_likes = like_clauses.join(" OR ");
+
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ns) =
+            namespace
+        {
+            let sql = format!(
+                "SELECT COUNT(*) FROM memories WHERE ({}) AND namespace = ?{}",
+                where_likes,
+                keywords.len() + 1,
+            );
+            let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = keywords
+                .iter()
+                .map(|k| Box::new(format!("%{k}%")) as Box<dyn rusqlite::types::ToSql>)
+                .collect();
+            p.push(Box::new(ns.to_string()));
+            (sql, p)
+        } else {
+            let sql = format!("SELECT COUNT(*) FROM memories WHERE ({})", where_likes);
+            let p: Vec<Box<dyn rusqlite::types::ToSql>> = keywords
+                .iter()
+                .map(|k| Box::new(format!("%{k}%")) as Box<dyn rusqlite::types::ToSql>)
+                .collect();
+            (sql, p)
+        };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|b| &**b).collect();
+
+        let count: i64 = conn
+            .query_row(&sql, params_refs.as_slice(), |row| row.get(0))
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(count as usize)
+    }
+
+    /// List memories that contain a specific tag, optionally scoped to a namespace.
+    pub fn list_memories_by_tag(
+        &self,
+        tag: &str,
+        namespace: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<codemem_core::MemoryNode>, CodememError> {
+        let conn = self.conn();
+        let like_pattern = format!("%\"{tag}\"%");
+
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(ns) = namespace {
+                (
+                    "SELECT id, content, memory_type, importance, confidence, access_count, \
+                     content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at \
+                     FROM memories WHERE tags LIKE ?1 AND namespace = ?2 \
+                     ORDER BY created_at DESC LIMIT ?3"
+                        .to_string(),
+                    vec![
+                        Box::new(like_pattern) as Box<dyn rusqlite::types::ToSql>,
+                        Box::new(ns.to_string()),
+                        Box::new(limit as i64),
+                    ],
+                )
+            } else {
+                (
+                    "SELECT id, content, memory_type, importance, confidence, access_count, \
+                     content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at \
+                     FROM memories WHERE tags LIKE ?1 \
+                     ORDER BY created_at DESC LIMIT ?2"
+                        .to_string(),
+                    vec![
+                        Box::new(like_pattern) as Box<dyn rusqlite::types::ToSql>,
+                        Box::new(limit as i64),
+                    ],
+                )
+            };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|b| &**b).collect();
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let created_ts: i64 = row.get(10)?;
+                let updated_ts: i64 = row.get(11)?;
+                let accessed_ts: i64 = row.get(12)?;
+                let tags_json: String = row.get(7)?;
+                let metadata_json: String = row.get(8)?;
+                let memory_type_str: String = row.get(2)?;
+
+                Ok(codemem_core::MemoryNode {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                    memory_type: memory_type_str
+                        .parse()
+                        .unwrap_or(codemem_core::MemoryType::Context),
+                    importance: row.get(3)?,
+                    confidence: row.get(4)?,
+                    access_count: row.get::<_, i64>(5).unwrap_or(0) as u32,
+                    content_hash: row.get(6)?,
+                    tags: serde_json::from_str(&tags_json).unwrap_or_default(),
+                    metadata: serde_json::from_str(&metadata_json).unwrap_or_default(),
+                    namespace: row.get(9)?,
+                    created_at: chrono::DateTime::from_timestamp(created_ts, 0)
+                        .unwrap_or_default()
+                        .with_timezone(&chrono::Utc),
+                    updated_at: chrono::DateTime::from_timestamp(updated_ts, 0)
+                        .unwrap_or_default()
+                        .with_timezone(&chrono::Utc),
+                    last_accessed_at: chrono::DateTime::from_timestamp(accessed_ts, 0)
+                        .unwrap_or_default()
+                        .with_timezone(&chrono::Utc),
+                })
+            })
+            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(rows)
+    }
+
     // ── Session Management ─────────────────────────────────────────────
 
     /// Start a new session.
@@ -389,6 +523,181 @@ impl Storage {
     /// List sessions, optionally filtered by namespace.
     pub fn list_sessions(&self, namespace: Option<&str>) -> Result<Vec<Session>, CodememError> {
         self.list_sessions_with_limit(namespace, usize::MAX)
+    }
+
+    // ── Session Activity Tracking ─────────────────────────────────
+
+    /// Record a session activity event.
+    pub fn record_session_activity(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        file_path: Option<&str>,
+        directory: Option<&str>,
+        pattern: Option<&str>,
+    ) -> Result<(), CodememError> {
+        let conn = self.conn();
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO session_activity (session_id, tool_name, file_path, directory, pattern, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![session_id, tool_name, file_path, directory, pattern, now],
+        )
+        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Get a summary of session activity counts.
+    pub fn get_session_activity_summary(
+        &self,
+        session_id: &str,
+    ) -> Result<codemem_core::SessionActivitySummary, CodememError> {
+        let conn = self.conn();
+
+        let files_read: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT file_path) FROM session_activity
+                 WHERE session_id = ?1 AND tool_name = 'Read' AND file_path IS NOT NULL",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let files_edited: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT file_path) FROM session_activity
+                 WHERE session_id = ?1 AND tool_name IN ('Edit', 'Write') AND file_path IS NOT NULL",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let searches: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_activity
+                 WHERE session_id = ?1 AND tool_name IN ('Grep', 'Glob')",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let total_actions: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_activity WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(codemem_core::SessionActivitySummary {
+            files_read: files_read as usize,
+            files_edited: files_edited as usize,
+            searches: searches as usize,
+            total_actions: total_actions as usize,
+        })
+    }
+
+    /// Get the most active directories in a session.
+    pub fn get_session_hot_directories(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, usize)>, CodememError> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT directory, COUNT(*) AS cnt FROM session_activity
+                 WHERE session_id = ?1 AND directory IS NOT NULL
+                 GROUP BY directory ORDER BY cnt DESC LIMIT ?2",
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![session_id, limit as i64], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(dir, cnt)| (dir, cnt as usize))
+            .collect())
+    }
+
+    /// Check whether an auto-insight dedup tag exists for a session.
+    pub fn has_auto_insight(
+        &self,
+        session_id: &str,
+        dedup_tag: &str,
+    ) -> Result<bool, CodememError> {
+        let conn = self.conn();
+        let like_session = format!("%\"session_id\":\"{session_id}\"%");
+        let like_dedup = format!("%\"auto_insight_tag\":\"{dedup_tag}\"%");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memories
+                 WHERE metadata LIKE ?1 AND metadata LIKE ?2",
+                params![like_session, like_dedup],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(count > 0)
+    }
+
+    /// Count Read events in a directory during a session.
+    pub fn count_directory_reads(
+        &self,
+        session_id: &str,
+        directory: &str,
+    ) -> Result<usize, CodememError> {
+        let conn = self.conn();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_activity
+                 WHERE session_id = ?1 AND tool_name = 'Read' AND directory = ?2",
+                params![session_id, directory],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(count as usize)
+    }
+
+    /// Check if a file was read in the current session.
+    pub fn was_file_read_in_session(
+        &self,
+        session_id: &str,
+        file_path: &str,
+    ) -> Result<bool, CodememError> {
+        let conn = self.conn();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_activity
+                 WHERE session_id = ?1 AND tool_name = 'Read' AND file_path = ?2",
+                params![session_id, file_path],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(count > 0)
+    }
+
+    /// Count how many times a search pattern was used in a session.
+    pub fn count_search_pattern_in_session(
+        &self,
+        session_id: &str,
+        pattern: &str,
+    ) -> Result<usize, CodememError> {
+        let conn = self.conn();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_activity
+                 WHERE session_id = ?1 AND tool_name IN ('Grep', 'Glob') AND pattern = ?2",
+                params![session_id, pattern],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(count as usize)
     }
 
     /// List sessions with a limit.
@@ -438,263 +747,40 @@ impl Storage {
                 .map_err(|e| CodememError::Storage(e.to_string()))
         }
     }
+    // ── Graph Cleanup ───────────────────────────────────────────────
+
+    /// Delete all graph nodes, their edges, and their embeddings where the
+    /// node ID starts with the given prefix. Returns count of nodes deleted.
+    pub fn delete_graph_nodes_by_prefix(&self, prefix: &str) -> Result<usize, CodememError> {
+        let conn = self.conn();
+        let like_pattern = format!("{prefix}%");
+
+        // Delete edges where src or dst matches prefix
+        conn.execute(
+            "DELETE FROM graph_edges WHERE src LIKE ?1 OR dst LIKE ?1",
+            params![like_pattern],
+        )
+        .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        // Delete embeddings for matching nodes
+        conn.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id LIKE ?1",
+            params![like_pattern],
+        )
+        .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        // Delete the nodes themselves
+        let rows = conn
+            .execute(
+                "DELETE FROM graph_nodes WHERE id LIKE ?1",
+                params![like_pattern],
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(rows)
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::Storage;
-    use codemem_core::{MemoryNode, MemoryType};
-    use std::collections::HashMap;
-
-    fn test_memory_with_metadata(
-        content: &str,
-        tool: &str,
-        extra: HashMap<String, serde_json::Value>,
-    ) -> MemoryNode {
-        let now = chrono::Utc::now();
-        let mut metadata = extra;
-        metadata.insert(
-            "tool".to_string(),
-            serde_json::Value::String(tool.to_string()),
-        );
-        MemoryNode {
-            id: uuid::Uuid::new_v4().to_string(),
-            content: content.to_string(),
-            memory_type: MemoryType::Context,
-            importance: 0.5,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: Storage::content_hash(content),
-            tags: vec![],
-            metadata,
-            namespace: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        }
-    }
-
-    #[test]
-    fn stats() {
-        let storage = Storage::open_in_memory().unwrap();
-        let stats = storage.stats().unwrap();
-        assert_eq!(stats.memory_count, 0);
-    }
-
-    #[test]
-    fn get_repeated_searches_groups_by_pattern() {
-        let storage = Storage::open_in_memory().unwrap();
-
-        for i in 0..3 {
-            let mut extra = HashMap::new();
-            extra.insert(
-                "pattern".to_string(),
-                serde_json::Value::String("error".to_string()),
-            );
-            let mem =
-                test_memory_with_metadata(&format!("grep search {i} for error"), "Grep", extra);
-            storage.insert_memory(&mem).unwrap();
-        }
-
-        let mut extra = HashMap::new();
-        extra.insert(
-            "pattern".to_string(),
-            serde_json::Value::String("*.rs".to_string()),
-        );
-        let mem = test_memory_with_metadata("glob search for rs files", "Glob", extra);
-        storage.insert_memory(&mem).unwrap();
-
-        let results = storage.get_repeated_searches(2, None).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, "error");
-        assert_eq!(results[0].1, 3);
-        assert_eq!(results[0].2.len(), 3);
-
-        let results = storage.get_repeated_searches(1, None).unwrap();
-        assert_eq!(results.len(), 2);
-    }
-
-    #[test]
-    fn get_file_hotspots_groups_by_file_path() {
-        let storage = Storage::open_in_memory().unwrap();
-
-        for i in 0..4 {
-            let mut extra = HashMap::new();
-            extra.insert(
-                "file_path".to_string(),
-                serde_json::Value::String("src/main.rs".to_string()),
-            );
-            let mem =
-                test_memory_with_metadata(&format!("read main.rs attempt {i}"), "Read", extra);
-            storage.insert_memory(&mem).unwrap();
-        }
-
-        let mut extra = HashMap::new();
-        extra.insert(
-            "file_path".to_string(),
-            serde_json::Value::String("src/lib.rs".to_string()),
-        );
-        let mem = test_memory_with_metadata("read lib.rs", "Read", extra);
-        storage.insert_memory(&mem).unwrap();
-
-        let results = storage.get_file_hotspots(3, None).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, "src/main.rs");
-        assert_eq!(results[0].1, 4);
-    }
-
-    #[test]
-    fn get_tool_usage_stats_counts_by_tool() {
-        let storage = Storage::open_in_memory().unwrap();
-
-        for i in 0..5 {
-            let mem = test_memory_with_metadata(&format!("read file {i}"), "Read", HashMap::new());
-            storage.insert_memory(&mem).unwrap();
-        }
-        for i in 0..3 {
-            let mem =
-                test_memory_with_metadata(&format!("grep search {i}"), "Grep", HashMap::new());
-            storage.insert_memory(&mem).unwrap();
-        }
-        let mem = test_memory_with_metadata("edit file", "Edit", HashMap::new());
-        storage.insert_memory(&mem).unwrap();
-
-        let stats = storage.get_tool_usage_stats(None).unwrap();
-        assert_eq!(stats.get("Read"), Some(&5));
-        assert_eq!(stats.get("Grep"), Some(&3));
-        assert_eq!(stats.get("Edit"), Some(&1));
-    }
-
-    #[test]
-    fn get_decision_chains_groups_edits_by_file() {
-        let storage = Storage::open_in_memory().unwrap();
-
-        for i in 0..3 {
-            let mut extra = HashMap::new();
-            extra.insert(
-                "file_path".to_string(),
-                serde_json::Value::String("src/main.rs".to_string()),
-            );
-            let mem = test_memory_with_metadata(&format!("edit main.rs {i}"), "Edit", extra);
-            storage.insert_memory(&mem).unwrap();
-        }
-
-        let mut extra = HashMap::new();
-        extra.insert(
-            "file_path".to_string(),
-            serde_json::Value::String("src/new.rs".to_string()),
-        );
-        let mem = test_memory_with_metadata("write new.rs", "Write", extra);
-        storage.insert_memory(&mem).unwrap();
-
-        let results = storage.get_decision_chains(2, None).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, "src/main.rs");
-        assert_eq!(results[0].1, 3);
-    }
-
-    #[test]
-    fn pattern_queries_empty_db() {
-        let storage = Storage::open_in_memory().unwrap();
-
-        let searches = storage.get_repeated_searches(1, None).unwrap();
-        assert!(searches.is_empty());
-
-        let hotspots = storage.get_file_hotspots(1, None).unwrap();
-        assert!(hotspots.is_empty());
-
-        let stats = storage.get_tool_usage_stats(None).unwrap();
-        assert!(stats.is_empty());
-
-        let chains = storage.get_decision_chains(1, None).unwrap();
-        assert!(chains.is_empty());
-    }
-
-    #[test]
-    fn pattern_queries_with_namespace_filter() {
-        let storage = Storage::open_in_memory().unwrap();
-
-        for i in 0..3 {
-            let mut extra = HashMap::new();
-            extra.insert(
-                "pattern".to_string(),
-                serde_json::Value::String("error".to_string()),
-            );
-            let mut mem = test_memory_with_metadata(&format!("ns-a grep {i}"), "Grep", extra);
-            mem.namespace = Some("project-a".to_string());
-            storage.insert_memory(&mem).unwrap();
-        }
-
-        for i in 0..2 {
-            let mut extra = HashMap::new();
-            extra.insert(
-                "pattern".to_string(),
-                serde_json::Value::String("error".to_string()),
-            );
-            let mut mem = test_memory_with_metadata(&format!("ns-b grep {i}"), "Grep", extra);
-            mem.namespace = Some("project-b".to_string());
-            storage.insert_memory(&mem).unwrap();
-        }
-
-        let results = storage.get_repeated_searches(1, None).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].1, 5);
-
-        let results = storage.get_repeated_searches(1, Some("project-a")).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].1, 3);
-    }
-
-    // ── Session Management Tests ────────────────────────────────────────
-
-    #[test]
-    fn session_lifecycle() {
-        let storage = Storage::open_in_memory().unwrap();
-
-        storage.start_session("sess-1", Some("my-project")).unwrap();
-
-        let sessions = storage.list_sessions(Some("my-project")).unwrap();
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].id, "sess-1");
-        assert_eq!(sessions[0].namespace, Some("my-project".to_string()));
-        assert!(sessions[0].ended_at.is_none());
-
-        storage
-            .end_session("sess-1", Some("Explored the codebase"))
-            .unwrap();
-
-        let sessions = storage.list_sessions(None).unwrap();
-        assert_eq!(sessions.len(), 1);
-        assert!(sessions[0].ended_at.is_some());
-        assert_eq!(
-            sessions[0].summary,
-            Some("Explored the codebase".to_string())
-        );
-    }
-
-    #[test]
-    fn list_sessions_filters_by_namespace() {
-        let storage = Storage::open_in_memory().unwrap();
-
-        storage.start_session("sess-a", Some("project-a")).unwrap();
-        storage.start_session("sess-b", Some("project-b")).unwrap();
-        storage.start_session("sess-c", None).unwrap();
-
-        let all = storage.list_sessions(None).unwrap();
-        assert_eq!(all.len(), 3);
-
-        let proj_a = storage.list_sessions(Some("project-a")).unwrap();
-        assert_eq!(proj_a.len(), 1);
-        assert_eq!(proj_a[0].id, "sess-a");
-    }
-
-    #[test]
-    fn start_session_ignores_duplicate() {
-        let storage = Storage::open_in_memory().unwrap();
-        storage.start_session("sess-1", Some("ns")).unwrap();
-        storage.start_session("sess-1", Some("ns")).unwrap();
-
-        let sessions = storage.list_sessions(None).unwrap();
-        assert_eq!(sessions.len(), 1);
-    }
-}
+#[path = "tests/queries_tests.rs"]
+mod tests;

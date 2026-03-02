@@ -23,6 +23,16 @@ const MIGRATIONS: &[Migration] = &[
         description: "Temporal edges (valid_from, valid_to)",
         sql: include_str!("migrations/003_temporal_edges.sql"),
     },
+    Migration {
+        version: 4,
+        description: "Repository tracking",
+        sql: include_str!("migrations/004_repositories.sql"),
+    },
+    Migration {
+        version: 5,
+        description: "Session activity tracking",
+        sql: include_str!("migrations/005_session_activity.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.
@@ -76,44 +86,5 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CodememError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn migrations_run_on_fresh_db() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        run_migrations(&conn).unwrap();
-
-        // Verify schema_version has 3 entries
-        let count: u32 = conn
-            .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 3);
-
-        // Verify memories table has session_id column
-        let has_session_id: bool = conn
-            .prepare("SELECT session_id FROM memories LIMIT 0")
-            .is_ok();
-        assert!(has_session_id);
-
-        // Verify file_hashes table exists
-        let has_file_hashes: bool = conn
-            .prepare("SELECT file_path FROM file_hashes LIMIT 0")
-            .is_ok();
-        assert!(has_file_hashes);
-    }
-
-    #[test]
-    fn migrations_are_idempotent() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        run_migrations(&conn).unwrap();
-        run_migrations(&conn).unwrap();
-
-        let count: u32 = conn
-            .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 3);
-    }
-}
+#[path = "tests/migrations_tests.rs"]
+mod tests;
