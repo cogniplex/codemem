@@ -36,7 +36,7 @@ function InsightFeed({ insights }: { insights: MemoryItem[] }) {
 }
 
 export function ActivityTab() {
-  const namespace = useNamespaceStore((s) => s.activeNamespace)
+  const namespace = useNamespaceStore((s) => s.active)
   const { data, isLoading } = useActivityInsights(
     namespace ? { namespace } : undefined,
   )

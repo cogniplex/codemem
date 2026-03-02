@@ -56,7 +56,7 @@ function SecurityFeed({ insights }: { insights: MemoryItem[] }) {
 }
 
 export function SecurityTab() {
-  const namespace = useNamespaceStore((s) => s.activeNamespace)
+  const namespace = useNamespaceStore((s) => s.active)
   const { data, isLoading } = useSecurityInsights(
     namespace ? { namespace } : undefined,
   )

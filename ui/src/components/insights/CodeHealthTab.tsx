@@ -33,7 +33,7 @@ function InsightFeed({ insights }: { insights: MemoryItem[] }) {
 const barColors = ['#818cf8', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#f5f3ff']
 
 export function CodeHealthTab() {
-  const namespace = useNamespaceStore((s) => s.activeNamespace)
+  const namespace = useNamespaceStore((s) => s.active)
   const { data, isLoading } = useCodeHealthInsights(
     namespace ? { namespace } : undefined,
   )

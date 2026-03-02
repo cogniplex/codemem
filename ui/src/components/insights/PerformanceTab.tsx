@@ -33,7 +33,7 @@ function InsightFeed({ insights }: { insights: MemoryItem[] }) {
 const barColors = ['#f87171', '#fb923c', '#fbbf24', '#a3e635', '#34d399', '#22d3ee']
 
 export function PerformanceTab() {
-  const namespace = useNamespaceStore((s) => s.activeNamespace)
+  const namespace = useNamespaceStore((s) => s.active)
   const { data, isLoading } = usePerformanceInsights(
     namespace ? { namespace } : undefined,
   )
