@@ -182,6 +182,10 @@ pub trait StorageBackend: Send + Sync {
     /// Delete all graph edges connected to a node. Returns count deleted.
     fn delete_graph_edges_for_node(&self, node_id: &str) -> Result<usize, CodememError>;
 
+    /// Delete all graph nodes, edges, and embeddings whose node ID starts with the given prefix.
+    /// Returns count of nodes deleted.
+    fn delete_graph_nodes_by_prefix(&self, prefix: &str) -> Result<usize, CodememError>;
+
     // ── Sessions ────────────────────────────────────────────────────
 
     /// Start a new session.
@@ -346,6 +350,59 @@ pub trait StorageBackend: Send + Sync {
 
     /// Save file hashes for incremental indexing.
     fn save_file_hashes(&self, hashes: &HashMap<String, String>) -> Result<(), CodememError>;
+
+    // ── Session Activity Tracking ─────────────────────────────────
+
+    /// Record a session activity event (tool use with context).
+    fn record_session_activity(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        file_path: Option<&str>,
+        directory: Option<&str>,
+        pattern: Option<&str>,
+    ) -> Result<(), CodememError>;
+
+    /// Get a summary of session activity counts.
+    fn get_session_activity_summary(
+        &self,
+        session_id: &str,
+    ) -> Result<crate::SessionActivitySummary, CodememError>;
+
+    /// Get the most active directories in a session. Returns (directory, count) pairs.
+    fn get_session_hot_directories(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, usize)>, CodememError>;
+
+    /// Check whether a particular auto-insight dedup tag already exists for a session.
+    fn has_auto_insight(
+        &self,
+        session_id: &str,
+        dedup_tag: &str,
+    ) -> Result<bool, CodememError>;
+
+    /// Count how many Read events occurred in a directory during a session.
+    fn count_directory_reads(
+        &self,
+        session_id: &str,
+        directory: &str,
+    ) -> Result<usize, CodememError>;
+
+    /// Check if a file was read in the current session.
+    fn was_file_read_in_session(
+        &self,
+        session_id: &str,
+        file_path: &str,
+    ) -> Result<bool, CodememError>;
+
+    /// Count how many times a search pattern was used in a session.
+    fn count_search_pattern_in_session(
+        &self,
+        session_id: &str,
+        pattern: &str,
+    ) -> Result<usize, CodememError>;
 
     // ── Stats ───────────────────────────────────────────────────────
 
