@@ -266,7 +266,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
             println!("[agents] code-mapper agent already installed, skipped");
             status_lines.push("Agent: code-mapper already present".to_string());
         } else {
-            let agent_content = include_str!("../../../.claude/agents/code-mapper.md");
+            let agent_content = include_str!("../../../examples/agents/code-mapper.md");
             std::fs::write(&agent_path, agent_content)?;
             println!("[agents] Installed code-mapper agent → .claude/agents/code-mapper.md");
             status_lines.push("Agent: code-mapper installed".to_string());
