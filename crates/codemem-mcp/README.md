@@ -1,6 +1,6 @@
 # codemem-mcp
 
-MCP server exposing 38 tools over JSON-RPC 2.0 (stdio transport).
+MCP server exposing 42 tools over JSON-RPC 2.0 (stdio transport).
 
 ## Overview
 
@@ -12,6 +12,7 @@ The central integration point for AI coding assistants. Handles memory CRUD, sel
 - `tools_graph.rs` — graph traversal, index_codebase, search_symbols, get_dependencies, get_impact, get_clusters, get_pagerank, search_code
 - `tools_recall.rs` — recall_with_expansion, recall_with_impact, namespace management
 - `tools_consolidation.rs` — decay (power-law), creative (semantic KNN), cluster (cosine + union-find), summarize (LLM), forget, consolidation status
+- `tools_enrich.rs` — git history analysis, security scanning, performance/coupling analysis
 - `scoring.rs` — 9-component hybrid scorer
 - `types.rs` — JSON-RPC protocol types, tool result wrappers
 - `compress.rs` — LLM-powered observation compression (Ollama/OpenAI/Anthropic)
@@ -39,6 +40,7 @@ The central integration point for AI coding assistants. Handles memory CRUD, sel
 | Recall & Namespace | 4 | recall_with_expansion, list_namespaces, namespace_stats, delete_namespace |
 | Consolidation | 6 | consolidate_decay/creative/cluster/forget/summarize, consolidation_status |
 | Impact & Patterns | 4 | recall_with_impact, get_decision_chain, detect_patterns, pattern_insights |
-| Observability | 1 | codemem_metrics |
+| Enrichment | 3 | enrich_git_history, enrich_security, enrich_performance |
+| Observability | 2 | codemem_metrics, session_checkpoint |
 
 See [MCP Tools Reference](../../docs/mcp-tools.md) for full API documentation.

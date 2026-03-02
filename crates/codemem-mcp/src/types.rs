@@ -6,7 +6,7 @@ use serde_json::Value;
 // ── JSON-RPC Types ──────────────────────────────────────────────────────────
 
 /// JSON-RPC 2.0 request.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     /// Absent for notifications (no response expected).
@@ -37,7 +37,7 @@ pub struct JsonRpcError {
 }
 
 impl JsonRpcResponse {
-    pub(crate) fn success(id: Value, result: Value) -> Self {
+    pub fn success(id: Value, result: Value) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
             id,
@@ -46,7 +46,7 @@ impl JsonRpcResponse {
         }
     }
 
-    pub(crate) fn error(id: Value, code: i64, message: impl Into<String>) -> Self {
+    pub fn error(id: Value, code: i64, message: impl Into<String>) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
             id,
@@ -79,7 +79,7 @@ pub struct ToolContent {
 }
 
 impl ToolResult {
-    pub(crate) fn text(msg: impl Into<String>) -> Self {
+    pub fn text(msg: impl Into<String>) -> Self {
         Self {
             content: vec![ToolContent {
                 content_type: "text".to_string(),
@@ -89,7 +89,7 @@ impl ToolResult {
         }
     }
 
-    pub(crate) fn tool_error(msg: impl Into<String>) -> Self {
+    pub fn tool_error(msg: impl Into<String>) -> Self {
         Self {
             content: vec![ToolContent {
                 content_type: "text".to_string(),
@@ -105,41 +105,10 @@ impl ToolResult {
 /// Cached code-index results for structural queries.
 pub(crate) struct IndexCache {
     pub(crate) symbols: Vec<codemem_index::Symbol>,
+    pub(crate) chunks: Vec<codemem_index::CodeChunk>,
     pub(crate) root_path: String,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_json_rpc_request() {
-        let json = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
-        let req: JsonRpcRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.method, "initialize");
-        assert!(req.id.is_some());
-    }
-
-    #[test]
-    fn parse_notification_no_id() {
-        let json = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
-        let req: JsonRpcRequest = serde_json::from_str(json).unwrap();
-        assert!(req.id.is_none());
-    }
-
-    #[test]
-    fn tool_result_serialization() {
-        let result = ToolResult::text("hello");
-        let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["content"][0]["type"], "text");
-        assert_eq!(json["content"][0]["text"], "hello");
-        assert_eq!(json["isError"], false);
-    }
-
-    #[test]
-    fn tool_error_serialization() {
-        let result = ToolResult::tool_error("something went wrong");
-        let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["isError"], true);
-    }
-}
+#[path = "tests/types_tests.rs"]
+mod tests;

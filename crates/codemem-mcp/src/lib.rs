@@ -1,6 +1,6 @@
 //! codemem-mcp: MCP server for Codemem (JSON-RPC 2.0 over stdio).
 //!
-//! Implements 38 tools: store_memory, recall_memory, update_memory,
+//! Implements 42 tools: store_memory, recall_memory, update_memory,
 //! delete_memory, associate_memories, graph_traverse, codemem_stats, codemem_health,
 //! index_codebase, search_symbols, get_symbol_info, get_dependencies, get_impact,
 //! get_clusters, get_cross_repo, get_pagerank, search_code, set_scoring_weights,
@@ -9,7 +9,7 @@
 //! consolidate_cluster, consolidate_forget, consolidation_status,
 //! recall_with_impact, get_decision_chain, detect_patterns, pattern_insights,
 //! refine_memory, split_memory, merge_memories, consolidate_summarize,
-//! codemem_metrics.
+//! codemem_metrics, session_checkpoint.
 //!
 //! Transport: Newline-delimited JSON-RPC messages over stdio.
 //! All logging goes to stderr; stdout is reserved for JSON-RPC only.
@@ -27,10 +27,13 @@ use std::sync::{Mutex, RwLock};
 
 pub mod bm25;
 pub(crate) mod compress;
+#[cfg(feature = "http")]
+pub mod http;
 pub mod metrics;
 pub mod patterns;
 pub mod scoring;
 pub mod tools_consolidation;
+pub mod tools_enrich;
 pub mod tools_graph;
 pub mod tools_memory;
 pub mod tools_recall;
@@ -41,6 +44,9 @@ pub(crate) mod test_helpers;
 
 // Re-export public types for downstream consumers.
 pub use types::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, ToolContent, ToolResult};
+
+// Re-export BM25 index type for downstream consumers.
+pub use bm25::Bm25Index;
 
 use scoring::write_response;
 use types::IndexCache;
@@ -150,7 +156,7 @@ impl McpServer {
             .map_err(|e| CodememError::LockPoisoned(format!("vector: {e}")))
     }
 
-    pub(crate) fn lock_graph(
+    pub fn lock_graph(
         &self,
     ) -> Result<std::sync::MutexGuard<'_, GraphEngine>, CodememError> {
         self.graph
@@ -319,6 +325,71 @@ impl McpServer {
         format!("{ctx}\n{body}")
     }
 
+    /// Build contextual text for a code chunk before embedding.
+    /// Includes file path, parent symbol, node kind, and the chunk text
+    /// (truncated to 4000 chars).
+    pub(crate) fn enrich_chunk_text(&self, chunk: &codemem_index::CodeChunk) -> String {
+        let mut ctx = String::new();
+        ctx.push_str(&format!("[chunk:{}]", chunk.node_kind));
+        ctx.push_str(&format!(" File: {}", chunk.file_path));
+        ctx.push_str(&format!(" Lines: {}-{}", chunk.line_start, chunk.line_end));
+        if let Some(ref parent) = chunk.parent_symbol {
+            ctx.push_str(&format!(" Parent: {}", parent));
+        }
+
+        let body = if chunk.text.len() > 4000 {
+            &chunk.text[..4000]
+        } else {
+            &chunk.text
+        };
+
+        format!("{ctx}\n{body}")
+    }
+
+    // ── Public Accessors (for REST API layer) ─────────────────────────────
+
+    /// Access the underlying storage backend.
+    pub fn storage(&self) -> &dyn StorageBackend {
+        &*self.storage
+    }
+
+    /// Access the graph engine (mutex-protected).
+    pub fn graph(&self) -> &Mutex<GraphEngine> {
+        &self.graph
+    }
+
+    /// Access the vector index (mutex-protected).
+    pub fn vector(&self) -> &Mutex<HnswIndex> {
+        &self.vector
+    }
+
+    /// Access the embedding provider (mutex-protected, optional).
+    pub fn embeddings(
+        &self,
+    ) -> Option<&Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
+        self.embeddings.as_ref()
+    }
+
+    /// Access the BM25 index (mutex-protected).
+    pub fn bm25(&self) -> &Mutex<bm25::Bm25Index> {
+        &self.bm25_index
+    }
+
+    /// Access the database path.
+    pub fn db_path(&self) -> Option<&Path> {
+        self.db_path.as_deref()
+    }
+
+    /// Access the loaded configuration.
+    pub fn config(&self) -> &codemem_core::CodememConfig {
+        &self.config
+    }
+
+    /// Access the operational metrics collector.
+    pub fn metrics_collector(&self) -> &std::sync::Arc<metrics::InMemoryMetrics> {
+        &self.metrics
+    }
+
     /// Save the HNSW index to disk. The index file path is derived from
     /// the database path with an `.idx` extension. No-op if db_path is None
     /// (e.g., in-memory / testing mode).
@@ -338,44 +409,14 @@ impl McpServer {
         }
     }
 
-    /// Run the MCP server. Reads newline-delimited JSON-RPC from stdin,
-    /// writes responses to stdout. Blocks until stdin is closed.
+    /// Run the MCP server over stdio. Convenience method that creates a
+    /// `StdioTransport` and runs it. Blocks until stdin is closed.
     pub fn run(&self) -> io::Result<()> {
-        let stdin = io::stdin();
-        let stdout = io::stdout();
-        let mut stdout = stdout.lock();
-
-        for line in stdin.lock().lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let request: JsonRpcRequest = match serde_json::from_str(&line) {
-                Ok(req) => req,
-                Err(e) => {
-                    let resp =
-                        JsonRpcResponse::error(Value::Null, -32700, format!("Parse error: {e}"));
-                    write_response(&mut stdout, &resp)?;
-                    continue;
-                }
-            };
-
-            // Notifications (no id) don't get a response
-            if request.id.is_none() {
-                self.handle_notification(&request.method);
-                continue;
-            }
-
-            let id = request.id.unwrap();
-            let response = self.handle_request(&request.method, request.params.as_ref(), id);
-            write_response(&mut stdout, &response)?;
-        }
-
-        Ok(())
+        let transport = StdioTransport::new(self);
+        transport.run()
     }
 
-    fn handle_notification(&self, method: &str) {
+    pub fn handle_notification(&self, method: &str) {
         match method {
             "notifications/initialized" => {
                 tracing::info!("Client initialized, codemem MCP server ready");
@@ -497,8 +538,65 @@ impl McpServer {
             "merge_memories" => self.tool_merge_memories(args),
             "consolidate_summarize" => self.tool_consolidate_summarize(args),
             "codemem_metrics" => self.tool_metrics(),
+            "enrich_git_history" => self.tool_enrich_git_history(args),
+            "enrich_security" => self.tool_enrich_security(args),
+            "enrich_performance" => self.tool_enrich_performance(args),
+            "session_checkpoint" => self.tool_session_checkpoint(args),
             _ => ToolResult::tool_error(format!("Unknown tool: {name}")),
         }
+    }
+}
+
+// ── Stdio Transport ────────────────────────────────────────────────────────
+
+/// Stdio transport for the MCP server.
+/// Reads newline-delimited JSON-RPC from stdin, writes responses to stdout.
+pub struct StdioTransport<'a> {
+    server: &'a McpServer,
+}
+
+impl<'a> StdioTransport<'a> {
+    /// Create a new stdio transport wrapping the given server.
+    pub fn new(server: &'a McpServer) -> Self {
+        Self { server }
+    }
+
+    /// Run the transport loop. Blocks until stdin is closed.
+    pub fn run(&self) -> io::Result<()> {
+        let stdin = io::stdin();
+        let stdout = io::stdout();
+        let mut stdout = stdout.lock();
+
+        for line in stdin.lock().lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let request: JsonRpcRequest = match serde_json::from_str(&line) {
+                Ok(req) => req,
+                Err(e) => {
+                    let resp =
+                        JsonRpcResponse::error(Value::Null, -32700, format!("Parse error: {e}"));
+                    write_response(&mut stdout, &resp)?;
+                    continue;
+                }
+            };
+
+            // Notifications (no id) don't get a response
+            if request.id.is_none() {
+                self.server.handle_notification(&request.method);
+                continue;
+            }
+
+            let id = request.id.unwrap();
+            let response =
+                self.server
+                    .handle_request(&request.method, request.params.as_ref(), id);
+            write_response(&mut stdout, &response)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -582,7 +680,7 @@ fn tool_definitions() -> Vec<Value> {
                                  "EVOLVED_INTO","DERIVED_FROM","INVALIDATED_BY","DEPENDS_ON",
                                  "IMPORTS","EXTENDS","CALLS","CONTAINS","SUPERSEDES","BLOCKS",
                                  "IMPLEMENTS","INHERITS","SIMILAR_TO","PRECEDED_BY",
-                                 "EXEMPLIFIES","EXPLAINS","SHARES_THEME","SUMMARIZES"]
+                                 "EXEMPLIFIES","EXPLAINS","SHARES_THEME","SUMMARIZES","CO_CHANGED"]
                     },
                     "weight": { "type": "number", "default": 1.0 }
                 },
@@ -1023,85 +1121,59 @@ fn tool_definitions() -> Vec<Value> {
                 "properties": {}
             }
         }),
+        // ── Enrichment Tools ──────────────────────────────────────────────────
+        json!({
+            "name": "enrich_git_history",
+            "description": "Enrich the knowledge graph with git history: annotate file nodes with commit counts, authors, and churn rate; create CoChanged edges between files that change together; store activity Insights.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path to the git repository root" },
+                    "days": { "type": "integer", "default": 90, "description": "Number of days of history to analyze (default: 90)" },
+                    "namespace": { "type": "string", "description": "Namespace for stored insights" }
+                },
+                "required": ["path"]
+            }
+        }),
+        json!({
+            "name": "enrich_security",
+            "description": "Scan the knowledge graph for security-sensitive files, endpoints, and functions. Annotates nodes with security flags and stores security Insights.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "namespace": { "type": "string", "description": "Namespace filter for insights" }
+                }
+            }
+        }),
+        json!({
+            "name": "enrich_performance",
+            "description": "Analyze graph coupling, dependency depth, critical path (PageRank), and file complexity. Annotates nodes and stores performance Insights.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "namespace": { "type": "string", "description": "Namespace filter for insights" },
+                    "top": { "type": "integer", "default": 10, "description": "Number of top items to report (default: 10)" }
+                }
+            }
+        }),
+        // ── Session Checkpoint Tool ─────────────────────────────────────────────
+        json!({
+            "name": "session_checkpoint",
+            "description": "Mid-session checkpoint: summarize activity so far, detect session-scoped and cross-session patterns, identify focus areas, and store new pattern insights. Returns a markdown progress report.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string", "description": "The current session ID" },
+                    "namespace": { "type": "string", "description": "Optional namespace to scope pattern detection" }
+                },
+                "required": ["session_id"]
+            }
+        }),
     ]
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use test_helpers::*;
-
-    #[test]
-    fn handle_initialize() {
-        let server = test_server();
-        let resp = server.handle_request("initialize", None, json!(1));
-        assert!(resp.result.is_some());
-        assert!(resp.error.is_none());
-
-        let result = resp.result.unwrap();
-        assert_eq!(result["protocolVersion"], "2024-11-05");
-        assert_eq!(result["serverInfo"]["name"], "codemem");
-    }
-
-    #[test]
-    fn handle_tools_list_returns_38_tools() {
-        let server = test_server();
-        let resp = server.handle_request("tools/list", None, json!(2));
-        let result = resp.result.unwrap();
-        let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 38);
-
-        let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-        assert!(names.contains(&"store_memory"));
-        assert!(names.contains(&"recall_memory"));
-        assert!(names.contains(&"graph_traverse"));
-        assert!(names.contains(&"codemem_health"));
-        assert!(names.contains(&"index_codebase"));
-        assert!(names.contains(&"search_symbols"));
-        assert!(names.contains(&"get_symbol_info"));
-        assert!(names.contains(&"get_dependencies"));
-        assert!(names.contains(&"get_impact"));
-        assert!(names.contains(&"get_clusters"));
-        assert!(names.contains(&"get_cross_repo"));
-        assert!(names.contains(&"get_pagerank"));
-        assert!(names.contains(&"search_code"));
-        assert!(names.contains(&"set_scoring_weights"));
-        assert!(names.contains(&"export_memories"));
-        assert!(names.contains(&"import_memories"));
-        assert!(names.contains(&"recall_with_expansion"));
-        assert!(names.contains(&"list_namespaces"));
-        assert!(names.contains(&"namespace_stats"));
-        assert!(names.contains(&"delete_namespace"));
-        assert!(names.contains(&"consolidate_decay"));
-        assert!(names.contains(&"consolidate_creative"));
-        assert!(names.contains(&"consolidate_cluster"));
-        assert!(names.contains(&"consolidate_forget"));
-        assert!(names.contains(&"consolidation_status"));
-        assert!(names.contains(&"recall_with_impact"));
-        assert!(names.contains(&"get_decision_chain"));
-        assert!(names.contains(&"detect_patterns"));
-        assert!(names.contains(&"pattern_insights"));
-        assert!(names.contains(&"refine_memory"));
-        assert!(names.contains(&"split_memory"));
-        assert!(names.contains(&"merge_memories"));
-        assert!(names.contains(&"consolidate_summarize"));
-        assert!(names.contains(&"codemem_metrics"));
-    }
-
-    #[test]
-    fn handle_unknown_method() {
-        let server = test_server();
-        let resp = server.handle_request("some/unknown", None, json!(5));
-        assert!(resp.error.is_some());
-        assert_eq!(resp.error.unwrap().code, -32601);
-    }
-
-    #[test]
-    fn handle_ping() {
-        let server = test_server();
-        let resp = server.handle_request("ping", None, json!(6));
-        assert!(resp.result.is_some());
-    }
-}
+#[path = "tests/lib_tests.rs"]
+mod tests;

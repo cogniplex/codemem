@@ -46,6 +46,17 @@ pub(crate) fn format_recall_results(
                 "importance": r.memory.importance,
                 "tags": r.memory.tags,
                 "access_count": r.memory.access_count,
+                "namespace": r.memory.namespace,
+                "breakdown": {
+                    "vector_similarity": r.score_breakdown.vector_similarity,
+                    "graph_strength": r.score_breakdown.graph_strength,
+                    "token_overlap": r.score_breakdown.token_overlap,
+                    "temporal": r.score_breakdown.temporal,
+                    "tag_matching": r.score_breakdown.tag_matching,
+                    "importance": r.score_breakdown.importance,
+                    "confidence": r.score_breakdown.confidence,
+                    "recency": r.score_breakdown.recency,
+                },
             })
         })
         .collect();
@@ -135,16 +146,5 @@ pub(crate) fn compute_score(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn write_response_newline_delimited() {
-        let resp = JsonRpcResponse::success(json!(1), json!({"ok": true}));
-        let mut buf = Vec::new();
-        write_response(&mut buf, &resp).unwrap();
-        let output = String::from_utf8(buf).unwrap();
-        assert!(output.ends_with('\n'));
-        assert!(!output.contains("Content-Length"));
-    }
-}
+#[path = "tests/scoring_tests.rs"]
+mod tests;
