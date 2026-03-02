@@ -43,11 +43,17 @@ This is incremental — it skips unchanged files via SHA-256 file hashes. Create
 
 #### Step 2: Run static enrichment (fast)
 
+Run all three enrichment tools. Each is fast (grep-based static analysis) and auto-tags insights with `static-analysis` for later agent review.
+
 ```
 enrich_git_history { "path": "/path/to/project", "days": 90 }
+enrich_security { "path": "/path/to/project" }
+enrich_performance { "path": "/path/to/project" }
 ```
 
-This provides churn and co-change data. All insights are auto-tagged with `static-analysis` for later agent review.
+- **Git history**: Churn, co-change coupling, author distribution
+- **Security**: Unsafe patterns, hardcoded secrets, input validation gaps, trust boundaries
+- **Performance**: N+1 queries, missing caching, blocking I/O, large allocations, concurrency issues
 
 #### Step 3: Compute priorities
 
