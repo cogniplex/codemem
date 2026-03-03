@@ -42,7 +42,7 @@ impl McpServer {
             content: content.to_string(),
             memory_type: MemoryType::Insight,
             importance: importance.clamp(0.0, 1.0),
-            confidence: 0.8,
+            confidence: self.config.enrichment.insight_confidence,
             access_count: 0,
             content_hash: hash,
             tags: all_tags.clone(),
@@ -59,6 +59,27 @@ impl McpServer {
         // 1. Insert into storage (dedup by content hash)
         if self.storage.insert_memory(&memory).is_err() {
             return None; // duplicate or error — skip silently
+        }
+
+        // 1b. Semantic dedup: check top-3 nearest embeddings for near-duplicates
+        if let Ok(Some(emb_guard)) = self.lock_embeddings() {
+            if let Ok(embedding) = emb_guard.embed(content) {
+                drop(emb_guard);
+                if let Ok(vec) = self.lock_vector() {
+                    let neighbors = vec.search(&embedding, 3).unwrap_or_default();
+                    for (neighbor_id, distance) in &neighbors {
+                        if *neighbor_id == id {
+                            continue;
+                        }
+                        let similarity = 1.0 - (*distance as f64);
+                        if similarity > self.config.enrichment.dedup_similarity_threshold {
+                            // Too similar to an existing memory — roll back
+                            let _ = self.storage.delete_memory(&id);
+                            return None;
+                        }
+                    }
+                }
+            }
         }
 
         // 2. BM25 index
@@ -90,7 +111,7 @@ impl McpServer {
                         src: id.clone(),
                         dst: link_id.clone(),
                         relationship: RelationshipType::RelatesTo,
-                        weight: 1.0,
+                        weight: 0.3,
                         properties: HashMap::new(),
                         created_at: now,
                         valid_from: None,
@@ -101,6 +122,9 @@ impl McpServer {
                 }
             }
         }
+
+        // 4b. Auto-link to code nodes mentioned in content
+        self.auto_link_to_code_nodes(&id, content, links);
 
         // 5. Vector embedding
         if let Ok(Some(emb_guard)) = self.lock_embeddings() {
@@ -330,13 +354,13 @@ impl McpServer {
 
         // High-activity files
         for (file_path, stats) in &file_stats {
-            if stats.commit_count > 10 {
+            if stats.commit_count > self.config.enrichment.git_min_commit_count {
                 let authors_str = stats.authors.join(", ");
                 let content = format!(
                     "High activity: {} — {} commits in the last {} days by {}",
                     file_path, stats.commit_count, days, authors_str
                 );
-                let importance = (stats.commit_count as f64 / 50.0).clamp(0.4, 1.0);
+                let importance = (stats.commit_count as f64 / 100.0).clamp(0.2, 0.6);
                 if self
                     .store_insight(
                         &content,
@@ -355,7 +379,7 @@ impl McpServer {
 
         // Co-change patterns
         for ((file_a, file_b), info) in &co_change_info {
-            if info.count >= 3 {
+            if info.count >= self.config.enrichment.git_min_co_change_count {
                 let content = format!(
                     "Co-change pattern: {} and {} change together in {} commits — likely coupled",
                     file_a, file_b, info.count
@@ -365,7 +389,7 @@ impl McpServer {
                         &content,
                         "activity",
                         &["git-history", "coupling"],
-                        0.6,
+                        0.4,
                         namespace,
                         &[format!("file:{file_a}"), format!("file:{file_b}")],
                     )
@@ -582,7 +606,7 @@ impl McpServer {
             let degree = graph.get_edges(&node.id).map(|e| e.len()).unwrap_or(0);
             coupling_data.push((node.id.clone(), node.label.clone(), degree));
 
-            if degree > 15 {
+            if degree > self.config.enrichment.perf_min_coupling_degree {
                 high_coupling_count += 1;
             }
         }
@@ -663,7 +687,7 @@ impl McpServer {
         // High-coupling nodes
         coupling_data.sort_by(|a, b| b.2.cmp(&a.2));
         for (node_id, label, degree) in coupling_data.iter().take(top) {
-            if *degree > 15 {
+            if *degree > self.config.enrichment.perf_min_coupling_degree {
                 let content = format!(
                     "High coupling: {} has {} dependencies — refactoring risk",
                     label, degree
@@ -730,7 +754,7 @@ impl McpServer {
         let mut complex_files: Vec<_> = file_symbol_counts.iter().collect();
         complex_files.sort_by(|a, b| b.1.cmp(a.1));
         for (file_path, sym_count) in complex_files.iter().take(top) {
-            if **sym_count > 20 {
+            if **sym_count > self.config.enrichment.perf_min_symbol_count {
                 let content = format!("Complex file: {} — {} symbols", file_path, sym_count);
                 if self
                     .store_insight(

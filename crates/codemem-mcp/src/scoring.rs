@@ -114,24 +114,11 @@ pub(crate) fn compute_score(
         .max(0) as f64;
     let recency = (-access_hours / (7.0 * 24.0)).exp();
 
-    // Enhanced graph scoring using cached centrality metrics.
-    // Combines PageRank, betweenness centrality, normalized degree,
-    // and a cluster bonus for richer graph-awareness.
-    let pagerank = graph.get_pagerank(&memory.id);
-    let betweenness = graph.get_betweenness(&memory.id);
-    let degree = graph.neighbors(&memory.id).map(|n| n.len()).unwrap_or(0) as f64;
-    let max_degree = graph.max_degree();
-    let normalized_degree = degree / max_degree.max(1.0);
-
-    // Cluster bonus: if the memory has many neighbors, it gets a small bonus (capped at 1.0).
-    let cluster_bonus = graph
-        .neighbors(&memory.id)
-        .map(|n| (n.len() as f64 / 10.0).min(1.0))
-        .unwrap_or(0.0);
-
-    let graph_strength =
-        (0.4 * pagerank + 0.3 * betweenness + 0.2 * normalized_degree + 0.1 * cluster_bonus)
-            .min(1.0);
+    // Enhanced graph scoring: bridge memory UUIDs to code-graph centrality.
+    // Memory nodes live in a separate ID space from code nodes (sym:, file:),
+    // so we use graph_strength_for_memory() which traverses neighbors to find
+    // connected code nodes and aggregates their PageRank/betweenness.
+    let graph_strength = graph.graph_strength_for_memory(&memory.id);
 
     ScoreBreakdown {
         vector_similarity,

@@ -497,3 +497,108 @@ fn decision_chain_follows_temporal_order() {
         "at least one decision should have connections"
     );
 }
+
+// ── Tag-Aware Forget Tests ──────────────────────────────────────────
+
+#[test]
+fn consolidate_forget_with_target_tags() {
+    let server = test_server();
+
+    // Store two low-importance memories: one with static-analysis tag, one without
+    let now = chrono::Utc::now();
+    for (content, tags) in [
+        (
+            "enrichment noise about coupling",
+            vec!["static-analysis".to_string()],
+        ),
+        ("important manual insight", vec!["manual".to_string()]),
+    ] {
+        let id = uuid::Uuid::new_v4().to_string();
+        let hash = Storage::content_hash(content);
+        let memory = MemoryNode {
+            id,
+            content: content.to_string(),
+            memory_type: MemoryType::Insight,
+            importance: 0.3,
+            confidence: 0.5,
+            access_count: 0,
+            content_hash: hash,
+            tags,
+            metadata: HashMap::new(),
+            namespace: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+        };
+        server.storage.insert_memory(&memory).unwrap();
+    }
+
+    assert_eq!(server.storage.memory_count().unwrap(), 2);
+
+    // Forget only static-analysis tagged memories below 0.5
+    let params = json!({
+        "name": "consolidate_forget",
+        "arguments": {
+            "importance_threshold": 0.5,
+            "target_tags": ["static-analysis"]
+        }
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(1));
+    let result = resp.result.unwrap();
+    let text = result["content"][0]["text"].as_str().unwrap();
+    let parsed: Value = serde_json::from_str(text).unwrap();
+
+    assert_eq!(parsed["deleted"], 1);
+    // The manual insight should survive
+    assert_eq!(server.storage.memory_count().unwrap(), 1);
+}
+
+#[test]
+fn consolidate_forget_with_max_access_count() {
+    let server = test_server();
+
+    let now = chrono::Utc::now();
+    // Store two static-analysis memories: one never accessed, one accessed twice
+    for (content, access_count) in [
+        ("never accessed enrichment insight", 0u32),
+        ("twice accessed enrichment insight", 2u32),
+    ] {
+        let id = uuid::Uuid::new_v4().to_string();
+        let hash = Storage::content_hash(content);
+        let memory = MemoryNode {
+            id,
+            content: content.to_string(),
+            memory_type: MemoryType::Insight,
+            importance: 0.3,
+            confidence: 0.5,
+            access_count,
+            content_hash: hash,
+            tags: vec!["static-analysis".to_string()],
+            metadata: HashMap::new(),
+            namespace: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+        };
+        server.storage.insert_memory(&memory).unwrap();
+    }
+
+    assert_eq!(server.storage.memory_count().unwrap(), 2);
+
+    // Forget only with max_access_count=0 (only never-accessed)
+    let params = json!({
+        "name": "consolidate_forget",
+        "arguments": {
+            "importance_threshold": 0.5,
+            "target_tags": ["static-analysis"],
+            "max_access_count": 0
+        }
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(1));
+    let result = resp.result.unwrap();
+    let text = result["content"][0]["text"].as_str().unwrap();
+    let parsed: Value = serde_json::from_str(text).unwrap();
+
+    assert_eq!(parsed["deleted"], 1);
+    assert_eq!(server.storage.memory_count().unwrap(), 1);
+}

@@ -131,6 +131,18 @@ impl McpServer {
             }
         }
 
+        // Auto-link memory to code nodes mentioned in content
+        let explicit_links: Vec<String> = args
+            .get("links")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.auto_link_to_code_nodes(&id, content, &explicit_links);
+
         // Generate contextual embedding and insert into vector index
         // (after graph node + links so enrichment can reference them)
         if let Some(emb_guard) = match self.lock_embeddings() {
@@ -196,16 +208,41 @@ impl McpServer {
         // Parse optional namespace filter
         let namespace_filter: Option<&str> = args.get("namespace").and_then(|v| v.as_str());
 
-        self.recall_memories(query, k, &memory_type_filter, namespace_filter)
+        // Parse optional quality filters
+        let exclude_tags: Vec<String> = args
+            .get("exclude_tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let min_importance: Option<f64> = args.get("min_importance").and_then(|v| v.as_f64());
+        let min_confidence: Option<f64> = args.get("min_confidence").and_then(|v| v.as_f64());
+
+        self.recall_memories(
+            query,
+            k,
+            &memory_type_filter,
+            namespace_filter,
+            &exclude_tags,
+            min_importance,
+            min_confidence,
+        )
     }
 
-    /// Search the server's storage with optional type and namespace filters.
+    /// Search the server's storage with optional type, namespace, and quality filters.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn recall_memories(
         &self,
         query: &str,
         k: usize,
         memory_type_filter: &Option<MemoryType>,
         namespace_filter: Option<&str>,
+        exclude_tags: &[String],
+        min_importance: Option<f64>,
+        min_confidence: Option<f64>,
     ) -> ToolResult {
         // Try vector search first (if embeddings available)
         let vector_results: Vec<(String, f32)> = if let Some(emb_guard) =
@@ -268,6 +305,22 @@ impl McpServer {
                             continue;
                         }
                     }
+                    // Apply quality filters
+                    if !exclude_tags.is_empty()
+                        && memory.tags.iter().any(|t| exclude_tags.contains(t))
+                    {
+                        continue;
+                    }
+                    if let Some(min) = min_importance {
+                        if memory.importance < min {
+                            continue;
+                        }
+                    }
+                    if let Some(min) = min_confidence {
+                        if memory.confidence < min {
+                            continue;
+                        }
+                    }
 
                     let breakdown =
                         compute_score(&memory, query, &query_tokens, 0.0, &graph, &bm25);
@@ -299,6 +352,22 @@ impl McpServer {
                     // Apply namespace filter
                     if let Some(ns) = namespace_filter {
                         if memory.namespace.as_deref() != Some(ns) {
+                            continue;
+                        }
+                    }
+                    // Apply quality filters
+                    if !exclude_tags.is_empty()
+                        && memory.tags.iter().any(|t| exclude_tags.contains(t))
+                    {
+                        continue;
+                    }
+                    if let Some(min) = min_importance {
+                        if memory.importance < min {
+                            continue;
+                        }
+                    }
+                    if let Some(min) = min_confidence {
+                        if memory.confidence < min {
                             continue;
                         }
                     }

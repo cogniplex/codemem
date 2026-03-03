@@ -533,3 +533,102 @@ fn save_index_persists_to_disk() {
     let expected_idx_path = db_path.with_extension("idx");
     assert_eq!(expected_idx_path, dir.path().join("test.idx"),);
 }
+
+// ── Recall Quality Filter Tests ───────────────────────────────────
+
+#[test]
+fn recall_with_exclude_tags_filters_out() {
+    let server = test_server();
+
+    // Store a regular memory and one with static-analysis tag
+    store_memory(&server, "rust ownership rules", "insight", &["rust"]);
+
+    // Store one with static-analysis tag directly
+    let now = chrono::Utc::now();
+    let id = uuid::Uuid::new_v4().to_string();
+    let hash = Storage::content_hash("rust auto-generated analysis");
+    let memory = MemoryNode {
+        id: id.clone(),
+        content: "rust auto-generated analysis".to_string(),
+        memory_type: MemoryType::Insight,
+        importance: 0.5,
+        confidence: 0.5,
+        access_count: 0,
+        content_hash: hash,
+        tags: vec!["rust".to_string(), "static-analysis".to_string()],
+        metadata: HashMap::new(),
+        namespace: None,
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: now,
+    };
+    server.storage.insert_memory(&memory).unwrap();
+    server.bm25_index.lock().unwrap().add_document(&id, "rust auto-generated analysis");
+
+    // Recall without filter — both should appear
+    let params = json!({
+        "name": "recall_memory",
+        "arguments": { "query": "rust" }
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(500));
+    let result = resp.result.unwrap();
+    let text = result["content"][0]["text"].as_str().unwrap();
+    let results: Vec<Value> = serde_json::from_str(text).unwrap();
+    assert_eq!(results.len(), 2);
+
+    // Recall with exclude_tags=["static-analysis"] — only the regular one
+    let params = json!({
+        "name": "recall_memory",
+        "arguments": { "query": "rust", "exclude_tags": ["static-analysis"] }
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(501));
+    let result = resp.result.unwrap();
+    let text = result["content"][0]["text"].as_str().unwrap();
+    let results: Vec<Value> = serde_json::from_str(text).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0]["content"].as_str().unwrap().contains("ownership"));
+}
+
+#[test]
+fn recall_with_min_importance_filters() {
+    let server = test_server();
+
+    // Store two memories with different importance
+    let now = chrono::Utc::now();
+    for (content, importance) in [
+        ("rust high importance memory", 0.8),
+        ("rust low importance memory", 0.2),
+    ] {
+        let id = uuid::Uuid::new_v4().to_string();
+        let hash = Storage::content_hash(content);
+        let memory = MemoryNode {
+            id: id.clone(),
+            content: content.to_string(),
+            memory_type: MemoryType::Insight,
+            importance,
+            confidence: 1.0,
+            access_count: 0,
+            content_hash: hash,
+            tags: vec!["rust".to_string()],
+            metadata: HashMap::new(),
+            namespace: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+        };
+        server.storage.insert_memory(&memory).unwrap();
+        server.bm25_index.lock().unwrap().add_document(&id, content);
+    }
+
+    // Recall with min_importance=0.5 — only the high importance one
+    let params = json!({
+        "name": "recall_memory",
+        "arguments": { "query": "rust", "min_importance": 0.5 }
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(502));
+    let result = resp.result.unwrap();
+    let text = result["content"][0]["text"].as_str().unwrap();
+    let results: Vec<Value> = serde_json::from_str(text).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0]["content"].as_str().unwrap().contains("high"));
+}

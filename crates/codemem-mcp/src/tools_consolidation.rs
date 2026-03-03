@@ -453,10 +453,34 @@ impl McpServer {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.1);
 
+        // Parse optional tag-aware filtering
+        let target_tags: Vec<String> = args
+            .get("target_tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let max_access_count = args
+            .get("max_access_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+
         // Find memories to forget
-        let ids = match self.storage.find_forgettable(importance_threshold) {
-            Ok(ids) => ids,
-            Err(e) => return ToolResult::tool_error(format!("Forget cycle failed: {e}")),
+        let ids = if target_tags.is_empty() {
+            match self.storage.find_forgettable(importance_threshold) {
+                Ok(ids) => ids,
+                Err(e) => return ToolResult::tool_error(format!("Forget cycle failed: {e}")),
+            }
+        } else {
+            // Tag-aware: scan memories matching tags below threshold
+            match self.find_forgettable_by_tags(importance_threshold, &target_tags, max_access_count)
+            {
+                Ok(ids) => ids,
+                Err(e) => return ToolResult::tool_error(format!("Forget cycle failed: {e}")),
+            }
         };
 
         let deleted = ids.len();
@@ -1316,6 +1340,33 @@ impl McpServer {
         }
 
         ToolResult::text(report)
+    }
+
+    /// Find memories matching any of the target tags below importance threshold
+    /// and with access_count <= max_access_count. Returns list of memory IDs.
+    /// Uses list_memories_filtered to avoid get_memory's access_count side effect.
+    fn find_forgettable_by_tags(
+        &self,
+        importance_threshold: f64,
+        target_tags: &[String],
+        max_access_count: u32,
+    ) -> Result<Vec<String>, codemem_core::CodememError> {
+        let all_memories = self.storage.list_memories_filtered(None, None)?;
+        let mut forgettable = Vec::new();
+
+        for memory in &all_memories {
+            if memory.importance >= importance_threshold {
+                continue;
+            }
+            if memory.access_count > max_access_count {
+                continue;
+            }
+            if memory.tags.iter().any(|t| target_tags.contains(t)) {
+                forgettable.push(memory.id.clone());
+            }
+        }
+
+        Ok(forgettable)
     }
 }
 

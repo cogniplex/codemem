@@ -131,7 +131,9 @@ impl McpServer {
 
         for direct_id in &direct_ids {
             // Use BFS expansion from this memory's graph node
-            if let Ok(expanded_nodes) = graph.bfs(direct_id, expansion_depth) {
+            if let Ok(expanded_nodes) =
+                graph.bfs_filtered(direct_id, expansion_depth, &[NodeKind::Chunk], None)
+            {
                 for expanded_node in &expanded_nodes {
                     // Skip the start node itself (already in results)
                     if expanded_node.id == *direct_id {
