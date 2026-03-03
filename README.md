@@ -9,6 +9,8 @@ A standalone Rust memory engine for AI coding assistants. Single binary, zero ru
 
 Codemem stores what your AI assistant discovers -- files read, symbols searched, edits made -- so repositories don't need re-exploring across sessions.
 
+![Codemem Graph UI -- Knowledge graph with community detection, edge visualization, and node kind filters](docs/graph-ui.png)
+
 ## Quick Start
 
 ### Install
