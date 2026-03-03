@@ -39,7 +39,17 @@ Use the right memory type for each finding — don't default everything to "insi
 index_codebase { "path": "/path/to/project" }
 ```
 
-This is incremental — it skips unchanged files via SHA-256 file hashes. Creates graph nodes (`sym:qualified_name`) for every symbol and edges for every resolved reference.
+This is incremental — it skips unchanged files via SHA-256 file hashes. Creates:
+- `sym:qualified_name` nodes for every symbol
+- `file:path` nodes for every source file
+- `pkg:dir/` nodes forming a directory tree above files
+- CALLS, IMPORTS, IMPLEMENTS, CONTAINS edges for every resolved reference
+
+After indexing, **auto-compaction** prunes low-value nodes from the graph:
+- **Chunk compaction**: Scores chunks by connectivity, symbol parentage, memory links, and code size. Keeps top-K per file.
+- **Symbol compaction**: Scores symbols by call connectivity (30%), visibility (20%), kind (15%), memory links (20%), and code size (15%). Prunes private unreferenced symbols while always retaining classes, interfaces, modules, and memory-linked symbols.
+
+Pruned nodes are removed from graph traversal/PageRank but their embeddings remain in the vector index for semantic search. The response includes `chunks_pruned`, `symbols_pruned`, and `packages_created` counts.
 
 #### Step 2: Run static enrichment (fast)
 
@@ -54,6 +64,16 @@ enrich_performance { "path": "/path/to/project" }
 - **Git history**: Churn, co-change coupling, author distribution
 - **Security**: Unsafe patterns, hardcoded secrets, input validation gaps, trust boundaries
 - **Performance**: N+1 queries, missing caching, blocking I/O, large allocations, concurrency issues
+
+#### Step 2b: Browse the directory structure
+
+Use `summary_tree` to get a hierarchical overview before diving into details:
+
+```
+summary_tree { "start_id": "pkg:src/", "max_depth": 3 }
+```
+
+This returns a packages → files → symbols tree (chunks excluded by default). Use it to understand the module layout and identify high-symbol-count files. Add `"include_chunks": true` if you need chunk-level detail.
 
 #### Step 3: Compute priorities
 
@@ -79,10 +99,10 @@ Compute this by querying existing tools and doing arithmetic in your reasoning �
 #### Step 4: Check what's already analyzed
 
 ```
-recall_memory { "query": "agent analyzed", "tags": ["agent-analyzed"] }
+recall_memory { "query": "agent analyzed", "tags": ["agent-analyzed"], "exclude_tags": ["static-analysis"], "min_importance": 0.1 }
 ```
 
-For each file, compare the stored `file_hash` in metadata with the current hash from the graph's `file_hashes` table. Files with stale hashes need re-analysis; files with matching hashes can be skipped.
+Use `exclude_tags` to skip static-analysis noise and `min_importance` to filter out decayed low-value memories. For each file, compare the stored `file_hash` in metadata with the current hash from the graph's `file_hashes` table. Files with stale hashes need re-analysis; files with matching hashes can be skipped.
 
 #### Step 5: Check for pending file changes
 
@@ -122,19 +142,24 @@ Work Packet for each agent:
 Each analysis agent should:
 
 1. **Read assigned files** using the Read tool — actually read the code
-2. **Understand WHY** the code is structured this way, not just WHAT it does
-3. **Store diverse memory types** using `store_memory`:
+2. **Explore graph context** for each file using filtered traversal:
+   ```
+   graph_traverse { "start_id": "file:<path>", "max_depth": 2, "exclude_kinds": ["chunk"], "include_relationships": ["CALLS", "IMPORTS", "IMPLEMENTS"] }
+   ```
+   This skips chunk dead-ends and structural CONTAINS edges, showing only meaningful code relationships.
+3. **Understand WHY** the code is structured this way, not just WHAT it does
+4. **Store diverse memory types** using `store_memory`:
    - Link to graph nodes: `links: ["file:path", "sym:qualified_name"]`
    - Use appropriate types (Decision, Pattern, Preference, Style, Insight, Context, Habit)
-4. **Review existing `static-analysis` tagged memories** for assigned files:
+5. **Review existing `static-analysis` tagged memories** for assigned files:
    ```
-   recall_memory { "query": "static analysis for <file>", "tags": ["static-analysis"] }
+   recall_memory { "query": "static analysis for <file>", "tags": ["static-analysis"], "min_confidence": 0.3 }
    ```
-   For each result:
+   Use `min_confidence` to skip the lowest-quality auto-generated insights. For each result:
    - If it's noise (e.g., "Complex file: X — 48 symbols"): `delete_memory { "id": "..." }`
    - If it's useful but shallow: `refine_memory { "id": "...", "new_content": "deeper analysis..." }`
    - If it's accurate: leave it, or add `agent-verified` tag via `update_memory`
-5. **Mark files as analyzed** after processing:
+6. **Mark files as analyzed** after processing:
    ```
    store_memory {
      "content": "Agent analysis complete for <file_path>",
@@ -162,7 +187,17 @@ Each analysis agent should:
 
 After all analysis agents complete, review their findings for quality and consistency.
 
-#### Step 10: Consolidate findings
+#### Step 10: Clean up low-quality static-analysis noise
+
+Before consolidating, use tag-aware forget to bulk-remove low-value enrichment memories that agents didn't refine or verify:
+
+```
+consolidate_forget { "importance_threshold": 0.4, "target_tags": ["static-analysis"], "max_access_count": 1 }
+```
+
+This removes `static-analysis` tagged memories with importance < 0.4 that were only accessed once (never recalled by an agent). Memories that agents refined or verified will have higher access counts and survive.
+
+#### Step 11: Consolidate findings
 
 ```
 consolidate_cluster { "threshold": 0.85 }
@@ -176,7 +211,7 @@ consolidate_creative {}
 
 Find cross-cutting connections between memories that individual agents may have missed.
 
-#### Step 11: Store architectural summary
+#### Step 12: Store architectural summary
 
 Store a high-level architectural summary as a high-importance Decision memory:
 
@@ -190,7 +225,7 @@ store_memory {
 }
 ```
 
-#### Step 12: Clean up pending-analysis memories
+#### Step 13: Clean up pending-analysis memories
 
 Delete any `pending-analysis` tagged memories that were processed during this run:
 
@@ -279,9 +314,11 @@ For re-analysis after file changes:
 
 | Artifact | Storage | Description |
 |----------|---------|-------------|
-| Symbol nodes | `graph_nodes` table | One per function/struct/class/method/etc. ID format: `sym:qualified_name` |
-| Reference edges | `graph_edges` table | CALLS, IMPORTS, IMPLEMENTS, INHERITS, DEPENDS_ON between symbols |
-| Symbol embeddings | `memory_embeddings` + HNSW index | 768-dim contextual embeddings for semantic code search |
+| Symbol nodes | `graph_nodes` table | One per function/struct/class/method/etc. ID format: `sym:qualified_name`. Low-value symbols auto-pruned by compaction |
+| File nodes | `graph_nodes` table | One per source file. ID format: `file:path` |
+| Package nodes | `graph_nodes` table | One per directory. ID format: `pkg:dir/`. Forms a directory tree via CONTAINS edges |
+| Reference edges | `graph_edges` table | CALLS, IMPORTS, IMPLEMENTS, INHERITS, DEPENDS_ON between symbols. Weighted by relationship type (configurable) |
+| Symbol embeddings | `memory_embeddings` + HNSW index | 768-dim contextual embeddings for semantic code search. Preserved even when graph nodes are compacted |
 | File hash cache | `file_hashes` table | SHA-256 per file for incremental re-indexing |
 | Diverse memories | `memories` table | Decisions, patterns, preferences, styles, insights, habits — not just insights |
 | Static analysis tags | `static-analysis` tag | All enrichment pipeline outputs tagged for agent reviewability |
@@ -293,12 +330,16 @@ Rust (.rs), TypeScript (.ts/.tsx), Python (.py), Go (.go), C/C++ (.c/.h/.cpp/.hp
 
 ## Tips
 
-- Run `get_pagerank` first to orient yourself — the top 10 symbols tell you where the architectural weight is
+- Start with `summary_tree { "start_id": "pkg:src/" }` to see the module hierarchy at a glance
+- Run `get_pagerank` to identify where the architectural weight is — the top 10 symbols tell you what matters
+- Use `graph_traverse` with `"exclude_kinds": ["chunk"]` and `"include_relationships": ["CALLS", "IMPORTS"]` to see clean call graphs without structural noise
 - Use `get_impact` with depth=2 before refactoring to understand blast radius
-- After major refactors, re-run `index_codebase` to update the graph
+- After major refactors, re-run `index_codebase` to update the graph (compaction runs automatically)
 - `search_code` finds functions by meaning ("parse JSON config") while `search_symbols` finds by name substring ("parse")
+- Use `recall_memory` with `"exclude_tags": ["static-analysis"]` to skip enrichment noise, or `"min_importance": 0.5` to only get high-value memories
 - **Always choose the right memory type** — decisions explain WHY, patterns explain HOW, insights explain WHAT matters
 - Store at least one memory of each type per codebase analysis to build a complete picture
 - **Review static-analysis memories** — delete noise, refine shallow findings, verify accurate ones
+- **Use tag-aware forget** — `consolidate_forget` with `target_tags: ["static-analysis"]` cleans up enrichment noise in bulk
 - **High-priority files first** — spend the most agent time on high-PageRank, high-churn code
 - **Clean up after yourself** — delete `pending-analysis` memories once processed
