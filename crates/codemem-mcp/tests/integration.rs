@@ -278,12 +278,12 @@ fn stats_empty_server() {
 // ── Tools List ─────────────────────────────────────────────────────────────
 
 #[test]
-fn tools_list_returns_all_42_tools() {
+fn tools_list_returns_all_43_tools() {
     let server = test_server();
     let resp = server.handle_request("tools/list", None, json!(1));
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 42);
+    assert_eq!(tools.len(), 43);
 
     let expected = [
         "store_memory",
@@ -292,6 +292,7 @@ fn tools_list_returns_all_42_tools() {
         "delete_memory",
         "associate_memories",
         "graph_traverse",
+        "summary_tree",
         "codemem_stats",
         "codemem_health",
         "index_codebase",

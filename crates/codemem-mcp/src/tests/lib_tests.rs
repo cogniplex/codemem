@@ -14,12 +14,12 @@ fn handle_initialize() {
 }
 
 #[test]
-fn handle_tools_list_returns_42_tools() {
+fn handle_tools_list_returns_43_tools() {
     let server = test_server();
     let resp = server.handle_request("tools/list", None, json!(2));
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 42);
+    assert_eq!(tools.len(), 43);
 
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     assert!(names.contains(&"store_memory"));

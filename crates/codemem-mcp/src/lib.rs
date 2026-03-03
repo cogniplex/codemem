@@ -344,6 +344,87 @@ impl McpServer {
         format!("{ctx}\n{body}")
     }
 
+    // ── Auto-linking ─────────────────────────────────────────────────────
+
+    /// Scan memory content for file paths and qualified symbol names that exist
+    /// as graph nodes, and create RELATES_TO edges with weight 0.5.
+    /// Skips any IDs that already appear in `existing_links`.
+    /// Returns the count of new edges created.
+    pub(crate) fn auto_link_to_code_nodes(
+        &self,
+        memory_id: &str,
+        content: &str,
+        existing_links: &[String],
+    ) -> usize {
+        let mut graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+
+        let existing_set: std::collections::HashSet<&str> =
+            existing_links.iter().map(|s| s.as_str()).collect();
+
+        // Extract candidate node IDs from content
+        let mut candidates: Vec<String> = Vec::new();
+
+        // Look for file paths: word tokens containing '/' or ending in common extensions
+        for word in content.split_whitespace() {
+            let cleaned = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-' && c != ':');
+            if cleaned.is_empty() {
+                continue;
+            }
+            // file: prefix pattern
+            if cleaned.contains('/') || cleaned.contains('.') {
+                let file_id = format!("file:{cleaned}");
+                if !existing_set.contains(file_id.as_str()) {
+                    candidates.push(file_id);
+                }
+            }
+            // Qualified symbol names (contains ::)
+            if cleaned.contains("::") {
+                let sym_id = format!("sym:{cleaned}");
+                if !existing_set.contains(sym_id.as_str()) {
+                    candidates.push(sym_id);
+                }
+            }
+        }
+
+        let now = chrono::Utc::now();
+        let mut created = 0;
+        let mut seen = std::collections::HashSet::new();
+
+        for candidate_id in &candidates {
+            if !seen.insert(candidate_id.clone()) {
+                continue;
+            }
+            // Only create edge if the target node exists in the graph
+            if graph.get_node(candidate_id).ok().flatten().is_none() {
+                continue;
+            }
+            let edge = codemem_core::Edge {
+                id: format!("{memory_id}-RELATES_TO-{candidate_id}"),
+                src: memory_id.to_string(),
+                dst: candidate_id.clone(),
+                relationship: codemem_core::RelationshipType::RelatesTo,
+                weight: 0.5,
+                properties: std::collections::HashMap::from([(
+                    "auto_linked".to_string(),
+                    serde_json::json!(true),
+                )]),
+                created_at: now,
+                valid_from: None,
+                valid_to: None,
+            };
+            if self.storage.insert_graph_edge(&edge).is_ok()
+                && graph.add_edge(edge).is_ok()
+            {
+                created += 1;
+            }
+        }
+
+        created
+    }
+
     // ── Public Accessors (for REST API layer) ─────────────────────────────
 
     /// Access the underlying storage backend.
@@ -502,6 +583,7 @@ impl McpServer {
             "delete_memory" => self.tool_delete_memory(args),
             "associate_memories" => self.tool_associate_memories(args),
             "graph_traverse" => self.tool_graph_traverse(args),
+            "summary_tree" => self.tool_summary_tree(args),
             "codemem_stats" => self.tool_stats(),
             "codemem_health" => self.tool_health(),
             "index_codebase" => self.tool_index_codebase(args),
@@ -633,7 +715,10 @@ fn tool_definitions() -> Vec<Value> {
                     "query": { "type": "string", "description": "Natural language search query" },
                     "k": { "type": "integer", "default": 10, "description": "Number of results" },
                     "memory_type": { "type": "string", "description": "Filter by memory type" },
-                    "namespace": { "type": "string", "description": "Filter results to a specific namespace" }
+                    "namespace": { "type": "string", "description": "Filter results to a specific namespace" },
+                    "exclude_tags": { "type": "array", "items": { "type": "string" }, "description": "Exclude memories with any of these tags (e.g. [\"static-analysis\"])" },
+                    "min_importance": { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Only return memories with importance >= this value" },
+                    "min_confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Only return memories with confidence >= this value" }
                 },
                 "required": ["query"]
             }
@@ -685,13 +770,36 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "graph_traverse",
-            "description": "Multi-hop graph traversal from a start node for reasoning and bridge discovery",
+            "description": "Multi-hop graph traversal from a start node with optional filtering by node kind and relationship type",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "start_id": { "type": "string" },
                     "max_depth": { "type": "integer", "default": 2 },
-                    "algorithm": { "type": "string", "enum": ["bfs", "dfs"], "default": "bfs" }
+                    "algorithm": { "type": "string", "enum": ["bfs", "dfs"], "default": "bfs" },
+                    "exclude_kinds": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": ["file","package","function","class","module","memory","method","interface","type","constant","endpoint","test","chunk"] },
+                        "description": "Node kinds to exclude from results and traversal (e.g. [\"chunk\"] to skip chunks)"
+                    },
+                    "include_relationships": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Only follow edges of these relationship types (e.g. [\"CALLS\",\"IMPORTS\"]). If omitted, all relationships are followed."
+                    }
+                },
+                "required": ["start_id"]
+            }
+        }),
+        json!({
+            "name": "summary_tree",
+            "description": "Return a hierarchical summary tree (packages → files → symbols). Start from a pkg: node to see the directory structure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "start_id": { "type": "string", "description": "Node ID to start from (e.g. 'pkg:src/')" },
+                    "max_depth": { "type": "integer", "default": 3, "description": "Maximum tree depth" },
+                    "include_chunks": { "type": "boolean", "default": false, "description": "Include chunk nodes in the tree" }
                 },
                 "required": ["start_id"]
             }
@@ -982,11 +1090,13 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "consolidate_forget",
-            "description": "Run forget consolidation: delete memories with importance below threshold and zero access count",
+            "description": "Run forget consolidation: delete memories with importance below threshold. Optionally target specific tags for cleanup.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "importance_threshold": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.1, "description": "Delete memories with importance below this value (default: 0.1)" }
+                    "importance_threshold": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.1, "description": "Delete memories with importance below this value (default: 0.1)" },
+                    "target_tags": { "type": "array", "items": { "type": "string" }, "description": "Only forget memories with any of these tags (e.g. [\"static-analysis\"])" },
+                    "max_access_count": { "type": "integer", "default": 0, "description": "Only forget memories accessed at most this many times (default: 0)" }
                 }
             }
         }),
