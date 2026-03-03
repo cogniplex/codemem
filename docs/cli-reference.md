@@ -171,7 +171,7 @@ codemem consolidate --status
 
 ## `codemem index`
 
-Index a codebase for structural analysis using tree-sitter. Parses source files across 13 supported languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) and extracts functions, structs, classes, imports, and call relationships.
+Index a codebase for structural analysis using ast-grep. Parses source files across 13 supported languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) and extracts functions, structs, classes, imports, and call relationships.
 
 **Syntax**
 

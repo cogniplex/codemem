@@ -266,7 +266,7 @@ No parameters.
 
 ### index_codebase
 
-Index a codebase directory to extract symbols and references using tree-sitter, populating the structural knowledge graph. Supports Rust, TypeScript, Python, Go, C/C++, and Java.
+Index a codebase directory to extract symbols and references using ast-grep, populating the structural knowledge graph. Supports Rust, TypeScript, Python, Go, C/C++, and Java.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

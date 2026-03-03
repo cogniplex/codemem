@@ -6,22 +6,16 @@ This file provides guidance to Claude Code when working with this repository.
 
 Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 43 MCP tools, 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), optional LLM observation compression, real-time file watching, cross-session pattern detection, a REST/SSE API, and a React web UI.
 
-## Workspace Structure (13 crates)
+## Workspace Structure (6 crates)
 
 | Crate | Purpose |
 |-------|---------|
 | codemem-core | Shared types (`types.rs`), traits (`traits.rs`), errors (`error.rs`), config (`config.rs`): MemoryNode, Edge, Session, DetectedPattern, CodememConfig, ChunkingConfig, EnrichmentConfig, 7 MemoryTypes, 24 RelationshipTypes, 13 NodeKinds, ScoringWeights, VectorBackend/GraphBackend/StorageBackend traits |
-| codemem-storage | rusqlite (bundled), WAL mode, versioned schema migrations; split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning) |
-| codemem-vector | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200 |
-| codemem-graph | petgraph + SQLite; split into `traversal.rs` (GraphBackend impl + `bfs_filtered`/`dfs_filtered` for kind-aware traversal), `algorithms.rs` (PageRank, Louvain, SCC, betweenness, topological), cached centrality, graph compaction (`compact_graph`), package nodes (`pkg:dir/`) |
+| codemem-storage | rusqlite (bundled) WAL mode + usearch HNSW vector index + petgraph graph engine. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning), `vector.rs` (HNSW 768-dim cosine, M=16), `graph/` (traversal with BFS/DFS/kind-aware filtering, algorithms: PageRank, Louvain, SCC, betweenness, topological, cached centrality, graph compaction, package nodes) |
 | codemem-embeddings | Pluggable via `from_env()`: Candle (local BERT, default), Ollama, OpenAI-compatible. `CachedProvider` wrapper, BAAI/bge-base-en-v1.5 (768-dim), LRU cache 10K. Safe concurrency via `LockPoisoned` error handling |
-| codemem-index | tree-sitter code indexing, 14 languages (Rust, TS, JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) |
-| codemem-mcp | JSON-RPC stdio server, 43 MCP tools; split into `tools_memory.rs`, `tools_graph.rs` (+ `summary_tree`), `tools_recall.rs`, `tools_consolidation.rs` (+ `consolidate_summarize`), `tools_enrich.rs`, `scoring.rs`, `types.rs`, `compress.rs`, `patterns.rs`, `metrics.rs`. Static enrichment insights auto-tagged `static-analysis` for agent reviewability |
-| codemem-hooks | PostToolUse JSON parser, per-tool extractors, diff-aware memory (semantic summaries) |
-| codemem-cli | clap derive, 18 commands. Stop hook stores `pending-analysis` tagged memories for changed files; SessionStart surfaces pending analysis in context |
-| codemem-api | REST/SSE API with Axum; routes for memories, graph (subgraph, neighbors, communities, pagerank, impact, browse, reload), vectors (PCA 3D point cloud), stats, patterns, insights, agents (recipe runner), config, timeline, namespaces. Power-iteration PCA (`pca.rs`). Embeds UI assets from `ui-dist/` |
+| codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules), `hooks/` (lifecycle hook handlers: PostToolUse, SessionStart, Stop), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `bm25.rs` (Okapi BM25 scoring), `scoring.rs` (hybrid scoring helpers), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `metrics.rs` (operational metrics) |
+| codemem | Unified binary + library crate with three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 43 MCP tools, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 18 commands, lifecycle hooks, config management) |
 | codemem-bench | Criterion benchmarks, 20% regression threshold |
-| codemem-watch | Real-time file watcher via notify (<50ms debounce), proper .gitignore parsing via `ignore` crate |
 
 ## Web UI (`ui/`)
 
@@ -71,7 +65,7 @@ cd ui && npx playwright test    # E2E tests
 
 ## Key Dependencies
 
-candle-core/nn/transformers (ML inference), usearch (HNSW), rusqlite (bundled SQLite), petgraph (graph), tokenizers (HuggingFace), tree-sitter (code parsing), clap (CLI), serde/serde_json, hf-hub (model download), lru (cache), sha2 (dedup), similar (diffs), notify/notify-debouncer-mini (file watching), reqwest (HTTP for embedding providers + LLM compression), criterion (benchmarks), toml (config persistence), ignore (gitignore parsing), tempfile (test fixtures), axum/tower-http (REST API), tokio (async runtime), ndarray (PCA)
+candle-core/nn/transformers (ML inference), usearch (HNSW), rusqlite (bundled SQLite), petgraph (graph), tokenizers (HuggingFace), ast-grep-core/ast-grep-language (code parsing via tree-sitter), clap (CLI), serde/serde_json, serde_yaml (rule definitions), hf-hub (model download), lru (cache), sha2 (dedup), similar (diffs), notify/notify-debouncer-mini (file watching), reqwest (HTTP for embedding providers + LLM compression), criterion (benchmarks), toml (config persistence), ignore (gitignore parsing), tempfile (test fixtures), axum/tower-http (REST API), tokio (async runtime), ndarray (PCA)
 
 ## Build & Test
 
@@ -80,7 +74,7 @@ cargo build                    # Build all crates
 cargo test --workspace         # Run all tests (531 tests)
 cargo bench                    # Run benchmarks
 cargo build --release          # Optimized release binary
-cargo install --path crates/codemem-cli  # Install CLI binary
+cargo install --path crates/codemem      # Install CLI binary
 cargo fmt --all -- --check     # Check formatting
 cargo clippy --workspace --all-targets -- -D warnings  # Lint check
 ```
@@ -96,7 +90,7 @@ All checks must pass on push to main:
 | Test | `cargo test --workspace` (ubuntu + macos) |
 | Coverage | `cargo llvm-cov` → Codecov |
 | UI Lint | `bun run tsc --noEmit` + `bun run eslint .` |
-| UI E2E | Build UI, embed in API crate, Playwright tests |
+| UI E2E | Build UI, embed in codemem crate, Playwright tests |
 | Benchmarks | `cargo bench --workspace --no-run` |
 
 **Important**: CI uses `RUSTFLAGS: -D warnings` — all warnings are errors. Run `cargo clippy --workspace --all-targets -- -D warnings` locally before pushing.

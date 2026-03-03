@@ -13,7 +13,7 @@ A comprehensive comparison of Codemem v0.6.3 against other memory and context to
 | **Startup** | <100ms | ~2s | Seconds | Seconds | Seconds | Seconds | Seconds | Seconds | 10-30s | Seconds |
 | **Offline** | Yes | Partial | Partial | No | No | Partial | Partial | No | No | Partial (Ollama) |
 | **Embedding** | Pluggable: Candle (local), Ollama, OpenAI-compatible (768-dim) | Chroma (via uvx) | Pluggable (24+ providers) | Built-in | Pluggable (OpenAI, etc.) | Configurable | Pluggable | OpenAI/Voyage/Ollama | Qdrant + Voyage AI | OpenAI, Gemini, Ollama |
-| **Code-aware** | Yes (tree-sitter + CST chunking) | No | No | Partial (code connector) | No | Yes (Letta Code) | Partial (codify) | Yes (AST splitting) | No | No |
+| **Code-aware** | Yes (ast-grep + CST chunking) | No | No | Partial (code connector) | No | Yes (Letta Code) | Partial (codify) | Yes (AST splitting) | No | No |
 | **MCP tools** | 43 | 3 | Yes (OpenMemory MCP) | Yes (plugin) | Yes (Graphiti MCP) | Yes | Yes (cognee-mcp) | 4 | 4 | Yes |
 | **Graph** | Built-in (petgraph, 25 algos) | No | Neo4j (optional) | No | Neo4j/FalkorDB/Kuzu | No | Neo4j/FalkorDB/Kuzu | No | FalkorDB | Temporal KG |
 | **Compression** | Pluggable LLM (optional) | AI-powered (always on) | No | No | No | No | No | No | No | No |
@@ -58,7 +58,7 @@ A comprehensive comparison of Codemem v0.6.3 against other memory and context to
 
 **When to choose Supermemory**: Need multi-modal memory (documents, images, video), want cloud-hosted with connectors to SaaS tools, prioritize benchmark-leading accuracy.
 
-**When to choose Codemem**: Need offline/air-gapped operation, code-specific structural intelligence (tree-sitter + CST chunking), graph algorithms (PageRank, community detection), single-binary deployment with no cloud dependency.
+**When to choose Codemem**: Need offline/air-gapped operation, code-specific structural intelligence (ast-grep + CST chunking), graph algorithms (PageRank, community detection), single-binary deployment with no cloud dependency.
 
 ### Codemem vs Zep/Graphiti
 
@@ -100,7 +100,7 @@ A comprehensive comparison of Codemem v0.6.3 against other memory and context to
 | Aspect | Codemem | Cognee |
 |--------|--------|--------|
 | **Knowledge extraction** | Hook-based capture + CST-aware chunking + structural code indexing | LLM-based triplet extraction from any data source |
-| **Code support** | 14 language extractors (Rust, TS/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) via tree-sitter | `codify` tool for Python codebases |
+| **Code support** | 14 language extractors (Rust, TS/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) via ast-grep | `codify` tool for Python codebases |
 | **Pipeline** | Ingest -> enrich -> embed -> store -> graph | ECL: Extract -> Cognify -> Load |
 | **Multi-tenancy** | Namespace scoping per project | pgvector + Neo4j with tenant permission checks |
 | **Integrations** | MCP server (any MCP client) | LangGraph, Google ADK, Claude Agent SDK, Memgraph, n8n |
@@ -117,7 +117,7 @@ A comprehensive comparison of Codemem v0.6.3 against other memory and context to
 | Aspect | Codemem | claude-context |
 |--------|--------|---------------|
 | **Scope** | Full memory engine (capture + recall + graph + consolidation + auto-insights) | Code search/retrieval only |
-| **Code parsing** | tree-sitter (14 languages) + CST-aware chunking | AST splitting (14 languages) |
+| **Code parsing** | ast-grep (14 languages) + CST-aware chunking | AST splitting (14 languages) |
 | **MCP tools** | 43 tools | 4 tools (index, search, clear, status) |
 | **Memory** | Persistent across sessions with 7 memory types | Index only (no persistent learning) |
 | **Embedding** | Pluggable: Candle (local, default), Ollama, OpenAI-compatible | External API required (OpenAI/Voyage/Ollama/Gemini) |
@@ -139,7 +139,7 @@ A comprehensive comparison of Codemem v0.6.3 against other memory and context to
 | **Runtime deps** | None | Node.js + Bun + uv + Python + Express on port 37777 |
 | **Hooks** | 4 lifecycle hooks + trigger-based auto-insights | 5 lifecycle hooks |
 | **Knowledge graph** | petgraph with 25 algorithms (PageRank, Louvain, betweenness, SCC) | None |
-| **Code intelligence** | tree-sitter indexing (14 languages), CST-aware chunking, structural relationships | None (stores raw text observations) |
+| **Code intelligence** | ast-grep indexing (14 languages), CST-aware chunking, structural relationships | None (stores raw text observations) |
 | **Scoring** | 9-component hybrid (vector + graph + BM25 + temporal + tags + importance + confidence + recency) | FTS5 keyword + Chroma vector (separate) |
 | **Embeddings** | Pluggable: Candle BERT (Metal/CUDA, default), Ollama, OpenAI-compatible | Chroma (external process via uvx) |
 | **BM25** | Okapi BM25 with code-aware tokenizer (camelCase/snake_case splitting) | SQLite FTS5 (not code-aware) |
