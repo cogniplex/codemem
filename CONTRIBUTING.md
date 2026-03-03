@@ -45,7 +45,6 @@ Codemem is a Cargo workspace with 12 crates. See [docs/architecture.md](docs/arc
 | codemem-hooks | Adding tool extractors, diff computation, changing ingest behavior |
 | codemem-cli | Adding CLI commands, changing command-line interface |
 | codemem-watch | File watcher behavior, ignore patterns, debounce settings |
-| codemem-viz | Visualization dashboard, PCA projections |
 | codemem-bench | Adding benchmarks, changing performance targets |
 
 ## Code Style

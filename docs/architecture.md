@@ -39,7 +39,6 @@ graph TB
         end
 
         API[codemem-api<br/>REST/SSE API + embedded UI]
-        VIZ[codemem-viz<br/>Dashboard]
         BENCH[codemem-bench<br/>Criterion benchmarks]
     end
 
@@ -94,7 +93,6 @@ flowchart TD
     mcp[codemem-mcp] --> storage & vector & graphCrate & embeddings & index
     api[codemem-api] --> mcp & storage & vector & graphCrate & embeddings
     hooks[codemem-hooks] --> storage & vector & embeddings
-    viz[codemem-viz] --> storage
     bench[codemem-bench] --> storage & vector & graphCrate & embeddings
 
     storage[codemem-storage] --> core
@@ -124,7 +122,6 @@ flowchart TD
 | codemem-cli | clap derive, 18 commands. Split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`, `commands_doctor.rs`, `commands_config.rs`, `commands_migrate.rs`. Multi-format export (JSONL/JSON/CSV/Markdown), health checks, config management |
 | codemem-watch | Real-time file watcher via `notify` + `notify-debouncer-mini` (50ms debounce), proper `.gitignore` parsing via `ignore` crate, 17 file extensions, crossbeam channels |
 | codemem-api | REST/SSE API with Axum. Routes for memories, graph (subgraph, neighbors, communities, pagerank, impact, browse, reload), vectors (PCA-projected 3D point cloud), stats, patterns, insights, agents (recipe runner), config, timeline, namespaces, sessions. Embeds React UI assets from `ui-dist/`. Power-iteration PCA (`pca.rs`) for 3D vector space visualization |
-| codemem-viz | Axum REST API + embedded HTML frontend, PCA projection of embeddings to 3D, interactive dashboard |
 | codemem-bench | Criterion benchmarks (vector, storage, graph), 20% CI regression threshold |
 
 ---

@@ -20,7 +20,6 @@ Codemem is a standalone Rust memory engine for AI coding assistants — a single
 | codemem-hooks | PostToolUse JSON parser, per-tool extractors, diff-aware memory (semantic summaries) |
 | codemem-cli | clap derive, 18 commands. Stop hook stores `pending-analysis` tagged memories for changed files; SessionStart surfaces pending analysis in context |
 | codemem-api | REST/SSE API with Axum; routes for memories, graph (subgraph, neighbors, communities, pagerank, impact, browse, reload), vectors (PCA 3D point cloud), stats, patterns, insights, agents (recipe runner), config, timeline, namespaces. Power-iteration PCA (`pca.rs`). Embeds UI assets from `ui-dist/` |
-| codemem-viz | PCA visualization dashboard with timeline, distribution, and D3 graph endpoints |
 | codemem-bench | Criterion benchmarks, 20% regression threshold |
 | codemem-watch | Real-time file watcher via notify (<50ms debounce), proper .gitignore parsing via `ignore` crate |
 

@@ -169,7 +169,6 @@ codemem stats         # Database statistics
 codemem serve         # Start MCP server (JSON-RPC stdio)
 codemem index         # Index codebase with tree-sitter
 codemem consolidate   # Run consolidation cycles
-codemem viz           # Interactive memory graph dashboard
 codemem watch         # Real-time file watcher
 codemem export/import # Backup and restore (JSONL, JSON, CSV, Markdown)
 codemem sessions      # Session management (list, start, end)

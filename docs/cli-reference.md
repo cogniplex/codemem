@@ -167,31 +167,6 @@ codemem consolidate --status
 
 ---
 
-## `codemem viz`
-
-Start an interactive PCA visualization dashboard in the browser. Renders memory embeddings projected to 2D/3D space, color-coded by memory type, with graph edges overlaid.
-
-**Syntax**
-
-```
-codemem viz [--port <num>] [--no-open]
-```
-
-**Flags**
-
-| Flag | Description |
-|------|-------------|
-| `--port <num>` | Port for the dashboard server (default: 4242) |
-| `--no-open` | Do not automatically open the browser |
-
-**Example**
-
-```bash
-codemem viz
-codemem viz --port 8080
-codemem viz --no-open
-```
-
 ---
 
 ## `codemem index`
