@@ -16,6 +16,7 @@ pub struct CodememConfig {
     pub embedding: EmbeddingConfig,
     pub storage: StorageConfig,
     pub chunking: ChunkingConfig,
+    pub enrichment: EnrichmentConfig,
 }
 
 impl CodememConfig {
@@ -120,6 +121,16 @@ pub struct ChunkingConfig {
     pub max_chunk_size: usize,
     /// Minimum chunk size in non-whitespace characters.
     pub min_chunk_size: usize,
+    /// Whether to auto-compact the graph after indexing.
+    pub auto_compact: bool,
+    /// Maximum number of retained chunk graph-nodes per file after compaction.
+    pub max_retained_chunks_per_file: usize,
+    /// Minimum chunk score (0.0–1.0) to survive compaction.
+    pub min_chunk_score_threshold: f64,
+    /// Maximum number of retained symbol graph-nodes per file after compaction.
+    pub max_retained_symbols_per_file: usize,
+    /// Minimum symbol score (0.0–1.0) to survive compaction.
+    pub min_symbol_score_threshold: f64,
 }
 
 impl Default for ChunkingConfig {
@@ -128,6 +139,42 @@ impl Default for ChunkingConfig {
             enabled: true,
             max_chunk_size: 1500,
             min_chunk_size: 50,
+            auto_compact: true,
+            max_retained_chunks_per_file: 10,
+            min_chunk_score_threshold: 0.2,
+            max_retained_symbols_per_file: 15,
+            min_symbol_score_threshold: 0.15,
+        }
+    }
+}
+
+/// Enrichment pipeline configuration for controlling insight generation thresholds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EnrichmentConfig {
+    /// Minimum commit count for a file to generate a high-activity insight.
+    pub git_min_commit_count: usize,
+    /// Minimum co-change count for a file pair to generate a coupling insight.
+    pub git_min_co_change_count: usize,
+    /// Minimum coupling degree for a node to generate a high-coupling insight.
+    pub perf_min_coupling_degree: usize,
+    /// Minimum symbol count for a file to generate a complexity insight.
+    pub perf_min_symbol_count: usize,
+    /// Default confidence for auto-generated insights.
+    pub insight_confidence: f64,
+    /// Cosine similarity threshold for deduplicating insights.
+    pub dedup_similarity_threshold: f64,
+}
+
+impl Default for EnrichmentConfig {
+    fn default() -> Self {
+        Self {
+            git_min_commit_count: 25,
+            git_min_co_change_count: 5,
+            perf_min_coupling_degree: 25,
+            perf_min_symbol_count: 30,
+            insight_confidence: 0.5,
+            dedup_similarity_threshold: 0.90,
         }
     }
 }
