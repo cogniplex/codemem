@@ -1,6 +1,7 @@
-import { X, Expand, Network } from 'lucide-react'
+import { X, Expand, Network, Target } from 'lucide-react'
 import type { GraphNode, GraphEdge } from '../../api/types'
 import { KIND_COLORS } from './constants'
+import { trimLabel, trimNamespace } from '../../utils/paths'
 
 interface Props {
   node: GraphNode
@@ -8,9 +9,10 @@ interface Props {
   allNodes: GraphNode[]
   onClose: () => void
   onExpandNeighbors: (nodeId: string) => void
+  onFocus?: (nodeId: string) => void
 }
 
-export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbors }: Props) {
+export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbors, onFocus }: Props) {
   const connectedEdges = edges.filter((e) => e.src === node.id || e.dst === node.id)
   const nodeMap = new Map(allNodes.map((n) => [n.id, n]))
 
@@ -34,7 +36,7 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
       <div className="space-y-3 p-4">
         <div>
           <p className="text-xs text-zinc-500">Label</p>
-          <p className="text-sm font-medium text-zinc-200 break-words">{node.label}</p>
+          <p className="text-sm font-medium text-zinc-200 break-words">{trimLabel(node.label, node.namespace)}</p>
         </div>
 
         <div className="flex gap-4">
@@ -57,18 +59,29 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
         {node.namespace && (
           <div>
             <p className="text-xs text-zinc-500">Namespace</p>
-            <p className="truncate text-sm text-zinc-300">{node.namespace}</p>
+            <p className="truncate text-sm text-zinc-300">{trimNamespace(node.namespace)}</p>
           </div>
         )}
 
-        {/* Expand button */}
-        <button
-          onClick={() => onExpandNeighbors(node.id)}
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:border-violet-500 hover:text-violet-300"
-        >
-          <Expand size={14} />
-          Expand neighbors
-        </button>
+        {/* Action buttons */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => onExpandNeighbors(node.id)}
+            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:border-violet-500 hover:text-violet-300"
+          >
+            <Expand size={14} />
+            Expand
+          </button>
+          {onFocus && (
+            <button
+              onClick={() => onFocus(node.id)}
+              className="flex flex-1 items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:border-violet-500 hover:text-violet-300"
+            >
+              <Target size={14} />
+              Focus
+            </button>
+          )}
+        </div>
 
         {/* Connected edges */}
         <div>
@@ -90,7 +103,7 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
                   <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400">
                     {edge.relationship}
                   </span>
-                  <span className="truncate text-zinc-300">{target?.label ?? targetId}</span>
+                  <span className="truncate text-zinc-300">{trimLabel(target?.label ?? targetId, node.namespace)}</span>
                 </div>
               )
             })}

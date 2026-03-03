@@ -3,7 +3,7 @@ import { Header } from './Header'
 import { SearchModal } from './SearchModal'
 import { useUiStore } from '../../stores/ui'
 import { DashboardView } from '../dashboard/DashboardView'
-import { GraphExplorer } from '../graph/GraphExplorer'
+import { GraphView } from '../graph/GraphView'
 import { MemoryBrowser } from '../memories/MemoryBrowser'
 import { RepoManager } from '../repos/RepoManager'
 import { TimelineView } from '../timeline/TimelineView'
@@ -14,7 +14,7 @@ import { SettingsView } from '../settings/SettingsView'
 const views: Record<string, React.FC> = {
   dashboard: DashboardView,
   repos: RepoManager,
-  graph: GraphExplorer,
+  graph: GraphView,
   memories: MemoryBrowser,
   timeline: TimelineView,
   agents: AgentRunner,

@@ -56,7 +56,7 @@ export const api = {
     return request<import('./types').SubgraphResponse>(`/api/graph/subgraph?${search}`)
   },
   neighbors: (id: string, depth?: number) =>
-    request<import('./types').SubgraphResponse>(`/api/graph/neighbors/${id}?depth=${depth ?? 1}`),
+    request<import('./types').SubgraphResponse>(`/api/graph/neighbors/${encodeURIComponent(id)}?depth=${depth ?? 1}`),
   communities: (params?: { resolution?: number }) =>
     request<import('./types').CommunitiesResponse>(`/api/graph/communities?resolution=${params?.resolution ?? 1.0}`),
   pagerank: (top?: number) =>
@@ -65,6 +65,19 @@ export const api = {
     request<import('./types').SubgraphResponse>(`/api/graph/shortest-path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
   impact: (id: string) =>
     request<import('./types').SubgraphResponse>(`/api/graph/impact/${encodeURIComponent(id)}`),
+  graphBrowse: (params?: { namespace?: string; kind?: string; q?: string; offset?: number; limit?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.namespace) search.set('namespace', params.namespace)
+    if (params?.kind) search.set('kind', params.kind)
+    if (params?.q) search.set('q', params.q)
+    if (params?.offset !== undefined) search.set('offset', String(params.offset))
+    if (params?.limit !== undefined) search.set('limit', String(params.limit))
+    return request<import('./types').BrowseResponse>(`/api/graph/browse?${search}`)
+  },
+  vectors: (namespace?: string) => {
+    const search = namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''
+    return request<import('./types').VectorPoint[]>(`/api/vectors${search}`)
+  },
 
   // Namespaces
   namespaces: () => request<import('./types').NamespaceItem[]>('/api/namespaces'),

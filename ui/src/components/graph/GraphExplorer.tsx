@@ -2,10 +2,13 @@ import { useState, useCallback, useMemo } from 'react'
 import { Loader2, AlertTriangle } from 'lucide-react'
 import { useSubgraph, useCommunities, useNeighbors } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
+import { ALL_RELATIONSHIPS } from './constants'
 import { SigmaGraph } from './SigmaGraph'
 import { GraphControls } from './GraphControls'
 import { NodeInspector } from './NodeInspector'
 import { CommunityLegend } from './CommunityLegend'
+import { RelationshipFilters } from './RelationshipFilters'
+import { FocusToolbar } from './FocusToolbar'
 
 const ALL_KINDS = new Set([
   'function', 'method', 'class', 'file', 'module', 'package',
@@ -24,6 +27,13 @@ export function GraphExplorer() {
   const [searchLabel, setSearchLabel] = useState('')
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
   const [layoutRunning, setLayoutRunning] = useState(false)
+  const [activeRelationships, setActiveRelationships] = useState<Set<string>>(() => new Set(ALL_RELATIONSHIPS))
+  const [focusMode, setFocusMode] = useState<{ nodeId: string; depth: number } | null>(null)
+
+  // Fetch neighbors for focus mode
+  const focusNeighborId = focusMode?.nodeId ?? ''
+  const focusDepth = focusMode?.depth ?? 1
+  const { data: focusData } = useNeighbors(focusNeighborId, focusDepth)
 
   const subgraphParams = useMemo(
     () => ({
@@ -60,9 +70,22 @@ export function GraphExplorer() {
     return [...subgraphEdges, ...extra]
   }, [subgraphEdges, neighborEdges])
 
+  // When in focus mode, use focus data instead of merged subgraph
+  const displayNodes = focusMode && focusData ? focusData.nodes : mergedNodes
+  const displayEdges = focusMode && focusData ? focusData.edges : mergedEdges
+
+  // Compute edge counts by relationship type for filters
+  const edgeCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const edge of displayEdges) {
+      counts[edge.relationship] = (counts[edge.relationship] ?? 0) + 1
+    }
+    return counts
+  }, [displayEdges])
+
   const selectedNode = useMemo(
-    () => mergedNodes.find((n) => n.id === selectedNodeId) ?? null,
-    [mergedNodes, selectedNodeId],
+    () => displayNodes.find((n) => n.id === selectedNodeId) ?? null,
+    [displayNodes, selectedNodeId],
   )
 
   const handleToggleKind = useCallback((kind: string) => {
@@ -80,6 +103,28 @@ export function GraphExplorer() {
 
   const handleExpandNeighbors = useCallback((nodeId: string) => {
     setExpandedNodeId(nodeId)
+  }, [])
+
+  const handleToggleRelationship = useCallback((rel: string) => {
+    setActiveRelationships((prev) => {
+      const next = new Set(prev)
+      if (next.has(rel)) next.delete(rel)
+      else next.add(rel)
+      return next
+    })
+  }, [])
+
+  const handleFocus = useCallback((nodeId: string) => {
+    setFocusMode({ nodeId, depth: 1 })
+    setSelectedNodeId(null)
+  }, [])
+
+  const handleFocusDepthChange = useCallback((depth: number) => {
+    setFocusMode((prev) => prev ? { ...prev, depth } : null)
+  }, [])
+
+  const handleExitFocus = useCallback(() => {
+    setFocusMode(null)
   }, [])
 
   if (isLoading) {
@@ -100,7 +145,7 @@ export function GraphExplorer() {
     )
   }
 
-  if (!mergedNodes.length) {
+  if (!displayNodes.length) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-zinc-500">No graph nodes found. Index a repository first.</p>
@@ -108,19 +153,35 @@ export function GraphExplorer() {
     )
   }
 
+  // Find focus node label for toolbar
+  const focusNodeLabel = focusMode
+    ? displayNodes.find((n) => n.id === focusMode.nodeId)?.label ?? focusMode.nodeId
+    : ''
+
   return (
     <div className="relative h-full w-full">
       <SigmaGraph
-        nodes={mergedNodes}
-        edges={mergedEdges}
-        communities={communitiesData?.communities ?? null}
-        showCommunities={showCommunities}
+        nodes={displayNodes}
+        edges={displayEdges}
+        communities={focusMode ? null : (communitiesData?.communities ?? null)}
+        showCommunities={!focusMode && showCommunities}
         showEdges={showEdges}
         onNodeClick={handleNodeClick}
         highlightNodeId={selectedNodeId}
         searchLabel={searchLabel}
         onLayoutRunning={setLayoutRunning}
+        activeRelationships={activeRelationships}
+        focusNodeId={focusMode?.nodeId ?? null}
       />
+
+      {focusMode && (
+        <FocusToolbar
+          nodeLabel={focusNodeLabel}
+          depth={focusMode.depth}
+          onDepthChange={handleFocusDepthChange}
+          onExit={handleExitFocus}
+        />
+      )}
 
       {layoutRunning && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
@@ -131,30 +192,41 @@ export function GraphExplorer() {
         </div>
       )}
 
-      <GraphControls
-        kinds={kinds}
-        onToggleKind={handleToggleKind}
-        maxNodes={maxNodes}
-        onMaxNodesChange={setMaxNodes}
-        showCommunities={showCommunities}
-        onToggleCommunities={() => setShowCommunities((v) => !v)}
-        showEdges={showEdges}
-        onToggleEdges={() => setShowEdges((v) => !v)}
-        searchLabel={searchLabel}
-        onSearchChange={setSearchLabel}
-      />
+      {!focusMode && (
+        <GraphControls
+          kinds={kinds}
+          onToggleKind={handleToggleKind}
+          maxNodes={maxNodes}
+          onMaxNodesChange={setMaxNodes}
+          showCommunities={showCommunities}
+          onToggleCommunities={() => setShowCommunities((v) => !v)}
+          showEdges={showEdges}
+          onToggleEdges={() => setShowEdges((v) => !v)}
+          searchLabel={searchLabel}
+          onSearchChange={setSearchLabel}
+        />
+      )}
 
       {selectedNode && (
         <NodeInspector
           node={selectedNode}
-          edges={mergedEdges}
-          allNodes={mergedNodes}
+          edges={displayEdges}
+          allNodes={displayNodes}
           onClose={() => setSelectedNodeId(null)}
           onExpandNeighbors={handleExpandNeighbors}
+          onFocus={handleFocus}
         />
       )}
 
-      {showCommunities && communitiesData?.communities && (
+      {showEdges && (
+        <RelationshipFilters
+          activeRelationships={activeRelationships}
+          edgeCounts={edgeCounts}
+          onToggle={handleToggleRelationship}
+        />
+      )}
+
+      {!focusMode && showCommunities && communitiesData?.communities && (
         <CommunityLegend communities={communitiesData.communities} />
       )}
     </div>

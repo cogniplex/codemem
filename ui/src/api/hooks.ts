@@ -60,6 +60,12 @@ export const useCommunities = (resolution?: number, enabled = true) =>
 export const usePagerank = (top?: number) =>
   useQuery({ queryKey: ['pagerank', top], queryFn: () => api.pagerank(top) })
 
+export const useGraphBrowse = (params?: Parameters<typeof api.graphBrowse>[0]) =>
+  useQuery({ queryKey: ['graph-browse', params], queryFn: () => api.graphBrowse(params) })
+
+export const useVectors = (namespace?: string) =>
+  useQuery({ queryKey: ['vectors', namespace], queryFn: () => api.vectors(namespace) })
+
 // Namespaces
 export const useNamespaces = () => useQuery({ queryKey: ['namespaces'], queryFn: api.namespaces })
 

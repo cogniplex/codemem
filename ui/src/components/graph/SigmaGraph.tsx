@@ -1,28 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import Graph from 'graphology'
 import Sigma from 'sigma'
-import FA2LayoutSupervisor from 'graphology-layout-forceatlas2/worker'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
 import type { GraphNode, GraphEdge } from '../../api/types'
-import { KIND_COLORS } from './constants'
-
-const EDGE_COLORS: Record<string, string> = {
-  // Structural — blue/cyan
-  CONTAINS: '#3b82f650', PART_OF: '#3b82f650', IMPORTS: '#06b6d4a0',
-  // Execution — subtle so CALLS (97% of edges) doesn't blind you
-  CALLS: '#52525b30', EXTENDS: '#34d39960', IMPLEMENTS: '#22c55ea0', INHERITS: '#4ade8060',
-  // Semantic — purple/violet
-  RELATES_TO: '#8b5cf660', SIMILAR_TO: '#a78bfa60', SHARES_THEME: '#c084fc60',
-  EXPLAINS: '#a78bfa60', EXEMPLIFIES: '#c084fc60', SUMMARIZES: '#8b5cf660',
-  // Temporal — amber/orange
-  LEADS_TO: '#f59e0b60', PRECEDED_BY: '#fbbf2460', EVOLVED_INTO: '#fb923c60', DERIVED_FROM: '#f9731660',
-  // Dependency — teal
-  DEPENDS_ON: '#14b8a660',
-  // Negative — red/rose
-  CONTRADICTS: '#ef444480', INVALIDATED_BY: '#f8717180', BLOCKS: '#dc262680', SUPERSEDES: '#fb718580',
-  // Reinforcement — lime
-  REINFORCES: '#a3e63580',
-}
+import { KIND_COLORS, EDGE_COLORS } from './constants'
+import { trimLabel } from '../../utils/paths'
 
 const COMMUNITY_PALETTE = [
   '#a78bfa', '#22d3ee', '#34d399', '#fbbf24', '#f87171',
@@ -44,6 +26,8 @@ interface Props {
   highlightNodeId?: string | null
   searchLabel?: string
   onLayoutRunning?: (running: boolean) => void
+  activeRelationships?: Set<string> | null
+  focusNodeId?: string | null
 }
 
 export function SigmaGraph({
@@ -56,10 +40,11 @@ export function SigmaGraph({
   highlightNodeId,
   searchLabel,
   onLayoutRunning,
+  activeRelationships,
+  focusNodeId,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
-  const layoutRef = useRef<FA2LayoutSupervisor | null>(null)
 
   // Track graph instance in STATE so React properly detects changes
   // (refs don't trigger re-renders — this was the expand neighbors bug)
@@ -69,21 +54,22 @@ export function SigmaGraph({
     onLayoutRunning?.(running)
   }, [onLayoutRunning])
 
-  // Build graph when data changes
+  // Derive a common namespace prefix for path trimming
+  const namespacePrefix = nodes[0]?.namespace ?? null
+
+  // Build graph when data changes — community coloring is handled
+  // by the node reducer below, not here, to avoid expensive rebuilds.
   useEffect(() => {
     const graph = new Graph()
 
     // First pass: add nodes with placeholder size
     for (const node of nodes) {
-      const color =
-        showCommunities && communities?.[node.id] != null
-          ? communityColor(communities[node.id])
-          : KIND_COLORS[node.kind] ?? '#71717a'
-
       graph.addNode(node.id, {
-        label: node.label,
+        label: trimLabel(node.label, namespacePrefix),
         size: 3, // placeholder — resized after edges are added
-        color,
+        color: KIND_COLORS[node.kind] ?? '#71717a',
+        kind: node.kind,
+        centrality: node.centrality,
         x: Math.random() * 100,
         y: Math.random() * 100,
       })
@@ -122,18 +108,19 @@ export function SigmaGraph({
       }
     })
 
-    // Pre-compute layout synchronously so nodes are fully positioned before
-    // Sigma renders — eliminates the initial chaotic wiggle entirely.
+    // Pre-compute layout synchronously — fully positions nodes before Sigma
+    // renders, eliminating wiggle. No live supervisor needed after this.
     const nodeCount = graph.order
     if (nodeCount > 0) {
-      const preIterations = nodeCount > 500 ? 300 : nodeCount > 100 ? 200 : 100
+      // Scale iterations with graph size, but cap to avoid freezing
+      const preIterations = nodeCount > 500 ? 300 : nodeCount > 100 ? 200 : 150
       forceAtlas2.assign(graph, {
         iterations: preIterations,
         settings: {
-          gravity: 5,
+          gravity: 8,
           scalingRatio: nodeCount > 300 ? 30 : 15,
-          slowDown: 5,
-          barnesHutOptimize: nodeCount > 100,
+          slowDown: 10,
+          barnesHutOptimize: true,
           barnesHutTheta: 0.5,
           strongGravityMode: true,
           linLogMode: false,
@@ -142,13 +129,13 @@ export function SigmaGraph({
       })
     }
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: graphInstance as state triggers Sigma re-init
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: graphInstance triggers Sigma re-init
     setGraphInstance(graph)
 
     return () => {
       graph.clear()
     }
-  }, [nodes, edges, communities, showCommunities])
+  }, [nodes, edges, namespacePrefix])
 
   // Init Sigma renderer — depends on graphInstance STATE, not a ref
   useEffect(() => {
@@ -159,51 +146,109 @@ export function SigmaGraph({
       labelColor: { color: '#d4d4d8' },
       labelSize: 11,
       labelRenderedSizeThreshold: 6,
-      defaultDrawNodeHover: (context, data, settings) => {
-        // Show the full label on hover (even for nodes whose label was hidden)
-        const label = data.label ?? (data as Record<string, unknown>).formerLabel as string | undefined
-        const size = settings.labelSize
-        const font = settings.labelFont
-        const weight = settings.labelWeight
-        context.font = `${weight} ${size}px ${font}`
+      defaultDrawNodeHover: (context, data) => {
+        const attrs = data as Record<string, unknown>
+        const label = (data.label ?? attrs.formerLabel) as string | undefined
+        const kind = (attrs.kind as string) ?? ''
+        const centrality = (attrs.centrality as number) ?? 0
+        const degree = graphInstance.degree(data.key ?? '')
 
-        context.fillStyle = '#18181bf0'
-        context.shadowOffsetX = 0
-        context.shadowOffsetY = 0
-        context.shadowBlur = 8
-        context.shadowColor = '#000'
+        const PAD = 8
+        const LINE_H = 16
+        const BADGE_H = 18
+        const CARD_W = 200
 
-        const PADDING = 4
-        if (typeof label === 'string') {
-          const textWidth = context.measureText(label).width
-          const boxWidth = Math.round(textWidth + 8)
-          const boxHeight = Math.round(size + 2 * PADDING)
-          const radius = Math.max(data.size, size / 2) + PADDING
-
-          const angleRadian = Math.asin(boxHeight / 2 / radius)
-          const xDeltaCoord = Math.sqrt(Math.abs(radius ** 2 - (boxHeight / 2) ** 2))
-
-          context.beginPath()
-          context.moveTo(data.x + xDeltaCoord, data.y + boxHeight / 2)
-          context.lineTo(data.x + radius + boxWidth, data.y + boxHeight / 2)
-          context.lineTo(data.x + radius + boxWidth, data.y - boxHeight / 2)
-          context.lineTo(data.x + xDeltaCoord, data.y - boxHeight / 2)
-          context.arc(data.x, data.y, radius, angleRadian, -angleRadian)
-          context.closePath()
-          context.fill()
-        } else {
-          context.beginPath()
-          context.arc(data.x, data.y, data.size + PADDING, 0, Math.PI * 2)
-          context.closePath()
-          context.fill()
+        // Wrap label into lines
+        const lines: string[] = []
+        if (label) {
+          context.font = '600 12px sans-serif'
+          const words = label.split(/(?=[A-Z/_:.])|[\s]+/)
+          let line = ''
+          for (const word of words) {
+            const test = line + word
+            if (context.measureText(test).width > CARD_W - 2 * PAD && line) {
+              lines.push(line)
+              line = word
+            } else {
+              line = test
+            }
+          }
+          if (line) lines.push(line)
+          if (lines.length > 3) {
+            lines.length = 3
+            lines[2] = lines[2].slice(0, -3) + '...'
+          }
         }
 
+        const cardH = PAD + BADGE_H + 4 + lines.length * LINE_H + 4 + LINE_H + PAD
+        const cardX = data.x + data.size + 6
+        const cardY = data.y - cardH / 2
+
+        // Shadow
+        context.shadowOffsetX = 0
+        context.shadowOffsetY = 2
+        context.shadowBlur = 12
+        context.shadowColor = 'rgba(0,0,0,0.5)'
+
+        // Card background with rounded corners
+        const r = 6
+        context.beginPath()
+        context.moveTo(cardX + r, cardY)
+        context.lineTo(cardX + CARD_W - r, cardY)
+        context.quadraticCurveTo(cardX + CARD_W, cardY, cardX + CARD_W, cardY + r)
+        context.lineTo(cardX + CARD_W, cardY + cardH - r)
+        context.quadraticCurveTo(cardX + CARD_W, cardY + cardH, cardX + CARD_W - r, cardY + cardH)
+        context.lineTo(cardX + r, cardY + cardH)
+        context.quadraticCurveTo(cardX, cardY + cardH, cardX, cardY + cardH - r)
+        context.lineTo(cardX, cardY + r)
+        context.quadraticCurveTo(cardX, cardY, cardX + r, cardY)
+        context.closePath()
+        context.fillStyle = 'rgba(24,24,27,0.95)'
+        context.fill()
         context.shadowBlur = 0
 
-        if (label) {
-          context.fillStyle = '#f4f4f5'
-          context.fillText(label, data.x + data.size + 3, data.y + size / 3)
+        // Kind badge
+        let badgeY = cardY + PAD
+        if (kind) {
+          const badgeColor = KIND_COLORS[kind] ?? '#71717a'
+          context.font = '600 10px sans-serif'
+          const badgeW = context.measureText(kind).width + 12
+          const badgeR = 4
+          context.beginPath()
+          context.moveTo(cardX + PAD + badgeR, badgeY)
+          context.lineTo(cardX + PAD + badgeW - badgeR, badgeY)
+          context.quadraticCurveTo(cardX + PAD + badgeW, badgeY, cardX + PAD + badgeW, badgeY + badgeR)
+          context.lineTo(cardX + PAD + badgeW, badgeY + BADGE_H - badgeR)
+          context.quadraticCurveTo(cardX + PAD + badgeW, badgeY + BADGE_H, cardX + PAD + badgeW - badgeR, badgeY + BADGE_H)
+          context.lineTo(cardX + PAD + badgeR, badgeY + BADGE_H)
+          context.quadraticCurveTo(cardX + PAD, badgeY + BADGE_H, cardX + PAD, badgeY + BADGE_H - badgeR)
+          context.lineTo(cardX + PAD, badgeY + badgeR)
+          context.quadraticCurveTo(cardX + PAD, badgeY, cardX + PAD + badgeR, badgeY)
+          context.closePath()
+          context.fillStyle = badgeColor + '30'
+          context.fill()
+          context.fillStyle = badgeColor
+          context.fillText(kind, cardX + PAD + 6, badgeY + 13)
+          badgeY += BADGE_H + 4
         }
+
+        // Label lines
+        context.font = '600 12px sans-serif'
+        context.fillStyle = '#f4f4f5'
+        for (const line of lines) {
+          context.fillText(line, cardX + PAD, badgeY + 12)
+          badgeY += LINE_H
+        }
+
+        // Footer: degree + centrality
+        badgeY += 4
+        context.font = '400 10px sans-serif'
+        context.fillStyle = '#a1a1aa'
+        context.fillText(
+          `${degree} connections  ·  ${(centrality * 100).toFixed(1)}% centrality`,
+          cardX + PAD,
+          badgeY + 10,
+        )
       },
       renderEdgeLabels: true,
       edgeLabelColor: { color: '#a1a1aa' },
@@ -217,28 +262,9 @@ export function SigmaGraph({
       onNodeClick?.(node)
     })
 
-    // Layout is fully pre-computed synchronously — no live FA2 needed.
-    // Keep the supervisor available for on-demand use (e.g. after expanding neighbors).
-    const nodeCount = graphInstance.order
-    const layout = new FA2LayoutSupervisor(graphInstance, {
-      settings: {
-        gravity: 5,
-        scalingRatio: nodeCount > 300 ? 30 : 15,
-        slowDown: 20,
-        barnesHutOptimize: nodeCount > 100,
-        barnesHutTheta: 0.5,
-        strongGravityMode: true,
-        linLogMode: false,
-        adjustSizes: true,
-      },
-    })
-    layoutRef.current = layout
-
     return () => {
-      layout.kill()
       sigma.kill()
       sigmaRef.current = null
-      layoutRef.current = null
     }
   }, [graphInstance, onNodeClick, nodes.length, notifyLayout])
 
@@ -261,7 +287,15 @@ export function SigmaGraph({
     }
   }, [searchLabel, graphInstance])
 
-  // Highlight selected node — dim others for visual focus
+  // Helper: apply community color to a node if enabled
+  const applyCommunityColor = useCallback((node: string, data: Record<string, unknown>) => {
+    if (showCommunities && communities?.[node] != null) {
+      return { ...data, color: communityColor(communities[node]) }
+    }
+    return data
+  }, [showCommunities, communities])
+
+  // Node + edge reducers: highlight, focus, community coloring, relationship filters, edge toggle
   useEffect(() => {
     const sigma = sigmaRef.current
     if (!sigma || !graphInstance) return
@@ -276,13 +310,12 @@ export function SigmaGraph({
 
       sigma.setSetting('nodeReducer', (node, data) => {
         if (node === highlightNodeId) {
-          // Restore label for highlighted node
           const label = data.label ?? (data as Record<string, unknown>).formerLabel as string | undefined
           return { ...data, label, color: '#ffffff', zIndex: 10, size: (data.size ?? 5) * 1.5 }
         }
         if (connectedIds.has(node)) {
           const label = data.label ?? (data as Record<string, unknown>).formerLabel as string | undefined
-          return { ...data, label, zIndex: 5 }
+          return applyCommunityColor(node, { ...data, label, zIndex: 5 })
         }
         return { ...data, color: '#3f3f46', zIndex: 0, label: null }
       })
@@ -290,16 +323,41 @@ export function SigmaGraph({
       sigma.setSetting('edgeReducer', (edge, data) => {
         const src = graphInstance.source(edge)
         const dst = graphInstance.target(edge)
+        const edgeLabel = (data as Record<string, unknown>).label as string | undefined
+        if (activeRelationships && edgeLabel && !activeRelationships.has(edgeLabel)) {
+          return { ...data, hidden: true }
+        }
         if (connectedIds.has(src) && connectedIds.has(dst)) {
           return { ...data, size: Math.max((data.size ?? 1) * 1.5, 1.5), forceLabel: true }
         }
         return { ...data, color: '#27272a00', size: 0, hidden: true }
       })
+    } else if (focusNodeId) {
+      sigma.setSetting('nodeReducer', (node, data) => {
+        if (node === focusNodeId) {
+          const label = data.label ?? (data as Record<string, unknown>).formerLabel as string | undefined
+          return { ...data, label, color: '#ffffff', zIndex: 10, size: (data.size ?? 5) * 1.8, borderColor: '#ffffff' }
+        }
+        const label = data.label ?? (data as Record<string, unknown>).formerLabel as string | undefined
+        return applyCommunityColor(node, { ...data, label, zIndex: 5 })
+      })
+
+      sigma.setSetting('edgeReducer', (_edge, data) => {
+        const edgeLabel = (data as Record<string, unknown>).label as string | undefined
+        if (activeRelationships && edgeLabel && !activeRelationships.has(edgeLabel)) {
+          return { ...data, hidden: true }
+        }
+        return { ...data, forceLabel: true }
+      })
     } else {
-      sigma.setSetting('nodeReducer', (_node, data) => data)
-      // When no node is selected: hide or show edges based on toggle
+      // Default: apply community coloring through reducer (no graph rebuild)
+      sigma.setSetting('nodeReducer', (node, data) => applyCommunityColor(node, data))
       sigma.setSetting('edgeReducer', (_edge, data) => {
         if (!showEdges) {
+          return { ...data, hidden: true }
+        }
+        const edgeLabel = (data as Record<string, unknown>).label as string | undefined
+        if (activeRelationships && edgeLabel && !activeRelationships.has(edgeLabel)) {
           return { ...data, hidden: true }
         }
         return { ...data, label: null }
@@ -307,7 +365,7 @@ export function SigmaGraph({
     }
 
     sigma.refresh()
-  }, [highlightNodeId, graphInstance, showEdges])
+  }, [highlightNodeId, graphInstance, showEdges, activeRelationships, focusNodeId, applyCommunityColor])
 
   return (
     <div

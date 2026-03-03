@@ -220,6 +220,39 @@ export interface PerformanceInsightsResponse {
   critical_path: PagerankEntry[]
 }
 
+// ── Browse ────────────────────────────────────────────────────────────────
+
+export interface BrowseNodeItem {
+  id: string
+  kind: string
+  label: string
+  centrality: number
+  namespace?: string
+  degree: number
+}
+
+export interface BrowseResponse {
+  nodes: BrowseNodeItem[]
+  total: number
+  kinds: Record<string, number>
+  edge_count: number
+}
+
+// ── Vectors ───────────────────────────────────────────────────────────────
+
+export interface VectorPoint {
+  id: string
+  x: number
+  y: number
+  z: number
+  memory_type: string
+  importance: number
+  namespace?: string
+  label: string
+}
+
+// ── Recipe Events ─────────────────────────────────────────────────────────
+
 export interface RecipeStartEvent {
   recipe: string
   name: string
