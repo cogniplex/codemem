@@ -113,9 +113,10 @@ fn get_tool_usage_stats_counts_by_tool() {
     storage.insert_memory(&mem).unwrap();
 
     let stats = storage.get_tool_usage_stats(None).unwrap();
-    assert_eq!(stats.get("Read"), Some(&5));
-    assert_eq!(stats.get("Grep"), Some(&3));
-    assert_eq!(stats.get("Edit"), Some(&1));
+    let stats_map: HashMap<String, usize> = stats.into_iter().collect();
+    assert_eq!(stats_map.get("Read"), Some(&5));
+    assert_eq!(stats_map.get("Grep"), Some(&3));
+    assert_eq!(stats_map.get("Edit"), Some(&1));
 }
 
 #[test]

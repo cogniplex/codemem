@@ -3,7 +3,7 @@ use codemem_core::{
     CodememError, Edge, GraphBackend, GraphNode, GraphStats, NodeKind, RelationshipType,
 };
 use petgraph::graph::NodeIndex;
-use petgraph::visit::Bfs;
+use petgraph::visit::{Bfs, EdgeRef};
 use petgraph::Direction;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -32,19 +32,35 @@ impl GraphBackend for GraphEngine {
 
     fn remove_node(&mut self, id: &str) -> Result<bool, CodememError> {
         if let Some(idx) = self.id_to_index.remove(id) {
+            // petgraph::DiGraph::remove_node swaps the last node into the removed
+            // slot, invalidating the last node's NodeIndex. We must fix id_to_index.
+            let last_idx = NodeIndex::new(self.graph.node_count() - 1);
             self.graph.remove_node(idx);
+            // After removal, the node that was at `last_idx` is now at `idx`
+            // (unless we removed the last node itself).
+            if idx != last_idx {
+                if let Some(swapped_id) = self.graph.node_weight(idx) {
+                    self.id_to_index.insert(swapped_id.clone(), idx);
+                }
+            }
             self.nodes.remove(id);
 
-            // Remove associated edges
-            let edge_ids: Vec<String> = self
-                .edges
-                .iter()
-                .filter(|(_, e)| e.src == id || e.dst == id)
-                .map(|(eid, _)| eid.clone())
-                .collect();
-            for eid in edge_ids {
-                self.edges.remove(&eid);
+            // Remove associated edges using edge adjacency index
+            if let Some(edge_ids) = self.edge_adj.remove(id) {
+                for eid in &edge_ids {
+                    if let Some(edge) = self.edges.remove(eid) {
+                        // Also remove from the other endpoint's adjacency list
+                        let other = if edge.src == id { &edge.dst } else { &edge.src };
+                        if let Some(other_edges) = self.edge_adj.get_mut(other) {
+                            other_edges.retain(|e| e != eid);
+                        }
+                    }
+                }
             }
+
+            // Clean up centrality caches
+            self.cached_pagerank.remove(id);
+            self.cached_betweenness.remove(id);
 
             Ok(true)
         } else {
@@ -63,30 +79,57 @@ impl GraphBackend for GraphEngine {
             .ok_or_else(|| CodememError::NotFound(format!("Destination node {}", edge.dst)))?;
 
         self.graph.add_edge(*src_idx, *dst_idx, edge.weight);
+        // Maintain edge adjacency index
+        self.edge_adj
+            .entry(edge.src.clone())
+            .or_default()
+            .push(edge.id.clone());
+        self.edge_adj
+            .entry(edge.dst.clone())
+            .or_default()
+            .push(edge.id.clone());
         self.edges.insert(edge.id.clone(), edge);
         Ok(())
     }
 
     fn get_edges(&self, node_id: &str) -> Result<Vec<Edge>, CodememError> {
         let edges: Vec<Edge> = self
-            .edges
-            .values()
-            .filter(|e| e.src == node_id || e.dst == node_id)
-            .cloned()
-            .collect();
+            .edge_adj
+            .get(node_id)
+            .map(|edge_ids| {
+                edge_ids
+                    .iter()
+                    .filter_map(|eid| self.edges.get(eid).cloned())
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(edges)
     }
 
     fn remove_edge(&mut self, id: &str) -> Result<bool, CodememError> {
         if let Some(edge) = self.edges.remove(id) {
-            // Also remove from petgraph
+            // Remove from petgraph — match by weight to handle parallel edges
             if let (Some(&src_idx), Some(&dst_idx)) = (
                 self.id_to_index.get(&edge.src),
                 self.id_to_index.get(&edge.dst),
             ) {
-                if let Some(edge_idx) = self.graph.find_edge(src_idx, dst_idx) {
-                    self.graph.remove_edge(edge_idx);
+                // Iterate edges_connecting to find the correct one by weight
+                let target_weight = edge.weight;
+                let petgraph_edge_idx = self
+                    .graph
+                    .edges_connecting(src_idx, dst_idx)
+                    .find(|e| (*e.weight() - target_weight).abs() < f64::EPSILON)
+                    .map(|e| e.id());
+                if let Some(eidx) = petgraph_edge_idx {
+                    self.graph.remove_edge(eidx);
                 }
+            }
+            // Maintain edge adjacency index
+            if let Some(src_edges) = self.edge_adj.get_mut(&edge.src) {
+                src_edges.retain(|e| e != id);
+            }
+            if let Some(dst_edges) = self.edge_adj.get_mut(&edge.dst) {
+                dst_edges.retain(|e| e != id);
             }
             Ok(true)
         } else {
@@ -198,7 +241,7 @@ impl GraphBackend for GraphEngine {
                     continue;
                 }
 
-                // Check relationship filter if set
+                // Check relationship filter if set, using edge adjacency index
                 if let Some(allowed_rels) = include_relationships {
                     let src_id = self
                         .graph
@@ -210,23 +253,26 @@ impl GraphBackend for GraphEngine {
                         .node_weight(neighbor_idx)
                         .cloned()
                         .unwrap_or_default();
-                    let edge_matches = self.edges.values().any(|e| {
-                        e.src == src_id && e.dst == dst_id && allowed_rels.contains(&e.relationship)
-                    });
+                    let edge_matches = self
+                        .edge_adj
+                        .get(&src_id)
+                        .map(|edge_ids| {
+                            edge_ids.iter().any(|eid| {
+                                self.edges.get(eid).is_some_and(|e| {
+                                    e.src == src_id
+                                        && e.dst == dst_id
+                                        && allowed_rels.contains(&e.relationship)
+                                })
+                            })
+                        })
+                        .unwrap_or(false);
                     if !edge_matches {
                         continue;
                     }
                 }
 
-                // Check if neighbor's kind is excluded
-                if let Some(neighbor_id) = self.graph.node_weight(neighbor_idx) {
-                    if let Some(neighbor_node) = self.nodes.get(neighbor_id) {
-                        if exclude_kinds.contains(&neighbor_node.kind) {
-                            continue;
-                        }
-                    }
-                }
-
+                // Always traverse through excluded-kind nodes but don't include
+                // them in results (handled above when popped from queue).
                 visited.insert(neighbor_idx);
                 queue.push_back((neighbor_idx, depth + 1));
             }
@@ -275,7 +321,7 @@ impl GraphBackend for GraphEngine {
                     continue;
                 }
 
-                // Check relationship filter if set
+                // Check relationship filter if set, using edge adjacency index
                 if let Some(allowed_rels) = include_relationships {
                     let src_id = self
                         .graph
@@ -287,23 +333,26 @@ impl GraphBackend for GraphEngine {
                         .node_weight(neighbor_idx)
                         .cloned()
                         .unwrap_or_default();
-                    let edge_matches = self.edges.values().any(|e| {
-                        e.src == src_id && e.dst == dst_id && allowed_rels.contains(&e.relationship)
-                    });
+                    let edge_matches = self
+                        .edge_adj
+                        .get(&src_id)
+                        .map(|edge_ids| {
+                            edge_ids.iter().any(|eid| {
+                                self.edges.get(eid).is_some_and(|e| {
+                                    e.src == src_id
+                                        && e.dst == dst_id
+                                        && allowed_rels.contains(&e.relationship)
+                                })
+                            })
+                        })
+                        .unwrap_or(false);
                     if !edge_matches {
                         continue;
                     }
                 }
 
-                // Check if neighbor's kind is excluded
-                if let Some(neighbor_id) = self.graph.node_weight(neighbor_idx) {
-                    if let Some(neighbor_node) = self.nodes.get(neighbor_id) {
-                        if exclude_kinds.contains(&neighbor_node.kind) {
-                            continue;
-                        }
-                    }
-                }
-
+                // Always traverse through excluded-kind nodes but don't include
+                // them in results (handled above when popped from stack).
                 stack.push((neighbor_idx, depth + 1));
             }
         }
@@ -343,6 +392,7 @@ impl GraphBackend for GraphEngine {
         }
     }
 
+    // Note: O(n+e) per call. Could be cached if this becomes a hot path.
     fn stats(&self) -> GraphStats {
         let mut node_kind_counts = HashMap::new();
         for node in self.nodes.values() {

@@ -4,7 +4,7 @@
 //! snake_case, and other programming conventions. Replaces the naive
 //! split+intersect token overlap in hybrid scoring.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // ── Code-Aware Tokenizer ────────────────────────────────────────────────────
 
@@ -231,15 +231,11 @@ impl Bm25Index {
         (raw / max_score).min(1.0)
     }
 
-    /// Score a query against arbitrary text (not necessarily in the index).
-    /// Useful for scoring documents that haven't been indexed yet.
-    pub fn score_text(&self, query: &str, document: &str) -> f64 {
-        if self.doc_count == 0 {
-            return 0.0;
-        }
-
-        let query_tokens = tokenize(query);
-        if query_tokens.is_empty() {
+    /// Score pre-tokenized query tokens against arbitrary text (not necessarily in the index).
+    /// Use this when scoring multiple documents against the same query to avoid
+    /// re-tokenizing the query each time.
+    pub fn score_text_with_tokens(&self, query_tokens: &[String], document: &str) -> f64 {
+        if self.doc_count == 0 || query_tokens.is_empty() {
             return 0.0;
         }
 
@@ -256,14 +252,21 @@ impl Bm25Index {
             *doc_term_freqs.entry(token.clone()).or_insert(0) += 1;
         }
 
-        let raw = self.raw_bm25_score(&query_tokens, &doc_term_freqs, doc_len);
+        let raw = self.raw_bm25_score(query_tokens, &doc_term_freqs, doc_len);
 
-        let max_score = self.max_possible_score(&query_tokens);
+        let max_score = self.max_possible_score(query_tokens);
         if max_score <= 0.0 {
             return 0.0;
         }
 
         (raw / max_score).min(1.0)
+    }
+
+    /// Score a query against arbitrary text (not necessarily in the index).
+    /// Useful for scoring documents that haven't been indexed yet.
+    pub fn score_text(&self, query: &str, document: &str) -> f64 {
+        let query_tokens = tokenize(query);
+        self.score_text_with_tokens(&query_tokens, document)
     }
 
     /// Build a BM25 index from a slice of (id, content) pairs.
@@ -295,13 +298,12 @@ impl Bm25Index {
         let mut score = 0.0;
 
         // De-duplicate query tokens for scoring (each unique term scored once)
-        let mut seen_query_terms: HashMap<&str, bool> = HashMap::new();
+        let mut seen_query_terms: HashSet<&str> = HashSet::new();
 
         for qt in query_tokens {
-            if seen_query_terms.contains_key(qt.as_str()) {
+            if !seen_query_terms.insert(qt.as_str()) {
                 continue;
             }
-            seen_query_terms.insert(qt.as_str(), true);
 
             // Term frequency in document
             let tf = *doc_term_freqs.get(qt).unwrap_or(&0) as f64;
@@ -332,13 +334,12 @@ impl Bm25Index {
         let n = self.doc_count as f64;
 
         let mut max_score = 0.0;
-        let mut seen: HashMap<&str, bool> = HashMap::new();
+        let mut seen: HashSet<&str> = HashSet::new();
 
         for qt in query_tokens {
-            if seen.contains_key(qt.as_str()) {
+            if !seen.insert(qt.as_str()) {
                 continue;
             }
-            seen.insert(qt.as_str(), true);
 
             let df = *self.doc_freq.get(qt).unwrap_or(&0) as f64;
             let idf = ((n - df + 0.5) / (df + 0.5) + 1.0).ln();

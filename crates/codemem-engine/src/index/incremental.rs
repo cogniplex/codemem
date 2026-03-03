@@ -51,9 +51,22 @@ impl ChangeDetector {
         self.known_hashes.get(path) != Some(&hash)
     }
 
+    /// Check if a file has changed and return (changed, hash) to avoid double-hashing.
+    /// Callers can pass the returned hash to `record_hash` to skip recomputation.
+    pub fn check_changed(&self, path: &str, content: &[u8]) -> (bool, String) {
+        let hash = Self::hash_content(content);
+        let changed = self.known_hashes.get(path) != Some(&hash);
+        (changed, hash)
+    }
+
     /// Update the stored hash for a file after successful indexing.
     pub fn update_hash(&mut self, path: &str, content: &[u8]) {
         let hash = Self::hash_content(content);
+        self.known_hashes.insert(path.to_string(), hash);
+    }
+
+    /// Record a pre-computed hash for a file (avoids re-hashing when used with `check_changed`).
+    pub fn record_hash(&mut self, path: &str, hash: String) {
         self.known_hashes.insert(path.to_string(), hash);
     }
 

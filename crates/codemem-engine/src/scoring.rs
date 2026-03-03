@@ -15,6 +15,10 @@ pub fn graph_strength_for_memory(graph: &GraphEngine, memory_id: &str) -> f64 {
         None => return 0.0,
     };
 
+    if metrics.code_neighbor_count == 0 {
+        return 0.0;
+    }
+
     let connectivity_bonus = (metrics.code_neighbor_count as f64 / 5.0).min(1.0);
     let edge_weight_bonus =
         (metrics.total_edge_weight / metrics.code_neighbor_count as f64).min(1.0);

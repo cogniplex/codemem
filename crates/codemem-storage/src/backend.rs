@@ -9,14 +9,52 @@ use codemem_core::{
 use rusqlite::params;
 use std::collections::HashMap;
 
-impl StorageBackend for Storage {
-    fn insert_memory(&self, memory: &MemoryNode) -> Result<(), CodememError> {
-        Storage::insert_memory(self, memory)
-    }
+/// Macro to delegate pure-forwarding trait methods to `Storage` inherent methods.
+macro_rules! delegate_storage {
+    // &self, no args
+    ($method:ident(&self) -> $ret:ty) => {
+        fn $method(&self) -> $ret {
+            Storage::$method(self)
+        }
+    };
+    // &self, one arg
+    ($method:ident(&self, $a1:ident: $t1:ty) -> $ret:ty) => {
+        fn $method(&self, $a1: $t1) -> $ret {
+            Storage::$method(self, $a1)
+        }
+    };
+    // &self, two args
+    ($method:ident(&self, $a1:ident: $t1:ty, $a2:ident: $t2:ty) -> $ret:ty) => {
+        fn $method(&self, $a1: $t1, $a2: $t2) -> $ret {
+            Storage::$method(self, $a1, $a2)
+        }
+    };
+    // &self, three args
+    ($method:ident(&self, $a1:ident: $t1:ty, $a2:ident: $t2:ty, $a3:ident: $t3:ty) -> $ret:ty) => {
+        fn $method(&self, $a1: $t1, $a2: $t2, $a3: $t3) -> $ret {
+            Storage::$method(self, $a1, $a2, $a3)
+        }
+    };
+    // &self, five args
+    ($method:ident(&self, $a1:ident: $t1:ty, $a2:ident: $t2:ty, $a3:ident: $t3:ty, $a4:ident: $t4:ty, $a5:ident: $t5:ty) -> $ret:ty) => {
+        fn $method(&self, $a1: $t1, $a2: $t2, $a3: $t3, $a4: $t4, $a5: $t5) -> $ret {
+            Storage::$method(self, $a1, $a2, $a3, $a4, $a5)
+        }
+    };
+}
 
-    fn get_memory(&self, id: &str) -> Result<Option<MemoryNode>, CodememError> {
-        Storage::get_memory(self, id)
-    }
+impl StorageBackend for Storage {
+    // ── Memory CRUD (delegated) ───────────────────────────────────────
+
+    delegate_storage!(insert_memory(&self, memory: &MemoryNode) -> Result<(), CodememError>);
+    delegate_storage!(get_memory(&self, id: &str) -> Result<Option<MemoryNode>, CodememError>);
+    delegate_storage!(get_memory_no_touch(&self, id: &str) -> Result<Option<MemoryNode>, CodememError>);
+    delegate_storage!(update_memory(&self, id: &str, content: &str, importance: Option<f64>) -> Result<(), CodememError>);
+    delegate_storage!(delete_memory(&self, id: &str) -> Result<bool, CodememError>);
+    delegate_storage!(list_memory_ids(&self) -> Result<Vec<String>, CodememError>);
+    delegate_storage!(list_memory_ids_for_namespace(&self, namespace: &str) -> Result<Vec<String>, CodememError>);
+    delegate_storage!(list_namespaces(&self) -> Result<Vec<String>, CodememError>);
+    delegate_storage!(memory_count(&self) -> Result<usize, CodememError>);
 
     fn get_memories_batch(&self, ids: &[&str]) -> Result<Vec<MemoryNode>, CodememError> {
         if ids.is_empty() {
@@ -67,42 +105,10 @@ impl StorageBackend for Storage {
         Ok(memories)
     }
 
-    fn update_memory(
-        &self,
-        id: &str,
-        content: &str,
-        importance: Option<f64>,
-    ) -> Result<(), CodememError> {
-        Storage::update_memory(self, id, content, importance)
-    }
+    // ── Embedding Persistence (delegated where possible) ──────────────
 
-    fn delete_memory(&self, id: &str) -> Result<bool, CodememError> {
-        Storage::delete_memory(self, id)
-    }
-
-    fn list_memory_ids(&self) -> Result<Vec<String>, CodememError> {
-        Storage::list_memory_ids(self)
-    }
-
-    fn list_memory_ids_for_namespace(&self, namespace: &str) -> Result<Vec<String>, CodememError> {
-        Storage::list_memory_ids_for_namespace(self, namespace)
-    }
-
-    fn list_namespaces(&self) -> Result<Vec<String>, CodememError> {
-        Storage::list_namespaces(self)
-    }
-
-    fn memory_count(&self) -> Result<usize, CodememError> {
-        Storage::memory_count(self)
-    }
-
-    fn store_embedding(&self, memory_id: &str, embedding: &[f32]) -> Result<(), CodememError> {
-        Storage::store_embedding(self, memory_id, embedding)
-    }
-
-    fn get_embedding(&self, memory_id: &str) -> Result<Option<Vec<f32>>, CodememError> {
-        Storage::get_embedding(self, memory_id)
-    }
+    delegate_storage!(store_embedding(&self, memory_id: &str, embedding: &[f32]) -> Result<(), CodememError>);
+    delegate_storage!(get_embedding(&self, memory_id: &str) -> Result<Option<Vec<f32>>, CodememError>);
 
     fn delete_embedding(&self, memory_id: &str) -> Result<bool, CodememError> {
         let conn = self.conn()?;
@@ -139,49 +145,22 @@ impl StorageBackend for Storage {
         Ok(result)
     }
 
-    fn insert_graph_node(&self, node: &GraphNode) -> Result<(), CodememError> {
-        Storage::insert_graph_node(self, node)
-    }
+    // ── Graph Node/Edge Persistence (delegated) ───────────────────────
 
-    fn get_graph_node(&self, id: &str) -> Result<Option<GraphNode>, CodememError> {
-        Storage::get_graph_node(self, id)
-    }
+    delegate_storage!(insert_graph_node(&self, node: &GraphNode) -> Result<(), CodememError>);
+    delegate_storage!(get_graph_node(&self, id: &str) -> Result<Option<GraphNode>, CodememError>);
+    delegate_storage!(delete_graph_node(&self, id: &str) -> Result<bool, CodememError>);
+    delegate_storage!(all_graph_nodes(&self) -> Result<Vec<GraphNode>, CodememError>);
+    delegate_storage!(insert_graph_edge(&self, edge: &Edge) -> Result<(), CodememError>);
+    delegate_storage!(get_edges_for_node(&self, node_id: &str) -> Result<Vec<Edge>, CodememError>);
+    delegate_storage!(all_graph_edges(&self) -> Result<Vec<Edge>, CodememError>);
+    delegate_storage!(delete_graph_edges_for_node(&self, node_id: &str) -> Result<usize, CodememError>);
+    delegate_storage!(delete_graph_nodes_by_prefix(&self, prefix: &str) -> Result<usize, CodememError>);
 
-    fn delete_graph_node(&self, id: &str) -> Result<bool, CodememError> {
-        Storage::delete_graph_node(self, id)
-    }
+    // ── Sessions (delegated where possible) ───────────────────────────
 
-    fn all_graph_nodes(&self) -> Result<Vec<GraphNode>, CodememError> {
-        Storage::all_graph_nodes(self)
-    }
-
-    fn insert_graph_edge(&self, edge: &Edge) -> Result<(), CodememError> {
-        Storage::insert_graph_edge(self, edge)
-    }
-
-    fn get_edges_for_node(&self, node_id: &str) -> Result<Vec<Edge>, CodememError> {
-        Storage::get_edges_for_node(self, node_id)
-    }
-
-    fn all_graph_edges(&self) -> Result<Vec<Edge>, CodememError> {
-        Storage::all_graph_edges(self)
-    }
-
-    fn delete_graph_edges_for_node(&self, node_id: &str) -> Result<usize, CodememError> {
-        Storage::delete_graph_edges_for_node(self, node_id)
-    }
-
-    fn delete_graph_nodes_by_prefix(&self, prefix: &str) -> Result<usize, CodememError> {
-        Storage::delete_graph_nodes_by_prefix(self, prefix)
-    }
-
-    fn start_session(&self, id: &str, namespace: Option<&str>) -> Result<(), CodememError> {
-        Storage::start_session(self, id, namespace)
-    }
-
-    fn end_session(&self, id: &str, summary: Option<&str>) -> Result<(), CodememError> {
-        Storage::end_session(self, id, summary)
-    }
+    delegate_storage!(start_session(&self, id: &str, namespace: Option<&str>) -> Result<(), CodememError>);
+    delegate_storage!(end_session(&self, id: &str, summary: Option<&str>) -> Result<(), CodememError>);
 
     fn list_sessions(
         &self,
@@ -191,51 +170,19 @@ impl StorageBackend for Storage {
         self.list_sessions_with_limit(namespace, limit)
     }
 
-    fn insert_consolidation_log(
-        &self,
-        cycle_type: &str,
-        affected_count: usize,
-    ) -> Result<(), CodememError> {
-        Storage::insert_consolidation_log(self, cycle_type, affected_count)
-    }
+    // ── Consolidation (delegated) ─────────────────────────────────────
 
-    fn last_consolidation_runs(&self) -> Result<Vec<ConsolidationLogEntry>, CodememError> {
-        Storage::last_consolidation_runs(self)
-    }
+    delegate_storage!(insert_consolidation_log(&self, cycle_type: &str, affected_count: usize) -> Result<(), CodememError>);
+    delegate_storage!(last_consolidation_runs(&self) -> Result<Vec<ConsolidationLogEntry>, CodememError>);
 
-    fn get_repeated_searches(
-        &self,
-        min_count: usize,
-        namespace: Option<&str>,
-    ) -> Result<Vec<(String, usize, Vec<String>)>, CodememError> {
-        Storage::get_repeated_searches(self, min_count, namespace)
-    }
+    // ── Pattern Detection (delegated) ─────────────────────────────────
 
-    fn get_file_hotspots(
-        &self,
-        min_count: usize,
-        namespace: Option<&str>,
-    ) -> Result<Vec<(String, usize, Vec<String>)>, CodememError> {
-        Storage::get_file_hotspots(self, min_count, namespace)
-    }
+    delegate_storage!(get_repeated_searches(&self, min_count: usize, namespace: Option<&str>) -> Result<Vec<(String, usize, Vec<String>)>, CodememError>);
+    delegate_storage!(get_file_hotspots(&self, min_count: usize, namespace: Option<&str>) -> Result<Vec<(String, usize, Vec<String>)>, CodememError>);
+    delegate_storage!(get_tool_usage_stats(&self, namespace: Option<&str>) -> Result<Vec<(String, usize)>, CodememError>);
+    delegate_storage!(get_decision_chains(&self, min_count: usize, namespace: Option<&str>) -> Result<Vec<(String, usize, Vec<String>)>, CodememError>);
 
-    fn get_tool_usage_stats(
-        &self,
-        namespace: Option<&str>,
-    ) -> Result<Vec<(String, usize)>, CodememError> {
-        let map = Storage::get_tool_usage_stats(self, namespace)?;
-        let mut vec: Vec<(String, usize)> = map.into_iter().collect();
-        vec.sort_by(|a, b| b.1.cmp(&a.1));
-        Ok(vec)
-    }
-
-    fn get_decision_chains(
-        &self,
-        min_count: usize,
-        namespace: Option<&str>,
-    ) -> Result<Vec<(String, usize, Vec<String>)>, CodememError> {
-        Storage::get_decision_chains(self, min_count, namespace)
-    }
+    // ── Bulk Operations ───────────────────────────────────────────────
 
     fn decay_stale_memories(
         &self,
@@ -281,7 +228,7 @@ impl StorageBackend for Storage {
             .collect())
     }
 
-    fn find_cluster_duplicates(&self) -> Result<Vec<(String, String, f64)>, CodememError> {
+    fn find_hash_duplicates(&self) -> Result<Vec<(String, String, f64)>, CodememError> {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
@@ -323,6 +270,8 @@ impl StorageBackend for Storage {
 
         Ok(ids)
     }
+
+    // ── Batch Operations ──────────────────────────────────────────────
 
     fn insert_memories_batch(&self, memories: &[MemoryNode]) -> Result<(), CodememError> {
         let conn = self.conn()?;
@@ -482,6 +431,8 @@ impl StorageBackend for Storage {
         Ok(())
     }
 
+    // ── Temporal Edges ────────────────────────────────────────────────
+
     fn get_edges_at_time(&self, node_id: &str, timestamp: i64) -> Result<Vec<Edge>, CodememError> {
         let conn = self.conn()?;
         let mut stmt = conn
@@ -571,6 +522,8 @@ impl StorageBackend for Storage {
         };
         Ok(count as usize)
     }
+
+    // ── Query Helpers ─────────────────────────────────────────────────
 
     fn find_unembedded_memories(&self) -> Result<Vec<(String, String)>, CodememError> {
         let conn = self.conn()?;
@@ -712,67 +665,21 @@ impl StorageBackend for Storage {
         Ok(result)
     }
 
-    fn graph_edges_for_namespace(&self, namespace: &str) -> Result<Vec<Edge>, CodememError> {
-        Storage::graph_edges_for_namespace(self, namespace)
-    }
+    delegate_storage!(graph_edges_for_namespace(&self, namespace: &str) -> Result<Vec<Edge>, CodememError>);
 
-    fn record_session_activity(
-        &self,
-        session_id: &str,
-        tool_name: &str,
-        file_path: Option<&str>,
-        directory: Option<&str>,
-        pattern: Option<&str>,
-    ) -> Result<(), CodememError> {
-        Storage::record_session_activity(self, session_id, tool_name, file_path, directory, pattern)
-    }
+    // ── Session Activity (delegated) ──────────────────────────────────
 
-    fn get_session_activity_summary(
-        &self,
-        session_id: &str,
-    ) -> Result<codemem_core::SessionActivitySummary, CodememError> {
-        Storage::get_session_activity_summary(self, session_id)
-    }
+    delegate_storage!(record_session_activity(&self, session_id: &str, tool_name: &str, file_path: Option<&str>, directory: Option<&str>, pattern: Option<&str>) -> Result<(), CodememError>);
+    delegate_storage!(get_session_activity_summary(&self, session_id: &str) -> Result<codemem_core::SessionActivitySummary, CodememError>);
+    delegate_storage!(get_session_hot_directories(&self, session_id: &str, limit: usize) -> Result<Vec<(String, usize)>, CodememError>);
+    delegate_storage!(has_auto_insight(&self, session_id: &str, dedup_tag: &str) -> Result<bool, CodememError>);
+    delegate_storage!(count_directory_reads(&self, session_id: &str, directory: &str) -> Result<usize, CodememError>);
+    delegate_storage!(was_file_read_in_session(&self, session_id: &str, file_path: &str) -> Result<bool, CodememError>);
+    delegate_storage!(count_search_pattern_in_session(&self, session_id: &str, pattern: &str) -> Result<usize, CodememError>);
 
-    fn get_session_hot_directories(
-        &self,
-        session_id: &str,
-        limit: usize,
-    ) -> Result<Vec<(String, usize)>, CodememError> {
-        Storage::get_session_hot_directories(self, session_id, limit)
-    }
+    // ── Stats (delegated) ─────────────────────────────────────────────
 
-    fn has_auto_insight(&self, session_id: &str, dedup_tag: &str) -> Result<bool, CodememError> {
-        Storage::has_auto_insight(self, session_id, dedup_tag)
-    }
-
-    fn count_directory_reads(
-        &self,
-        session_id: &str,
-        directory: &str,
-    ) -> Result<usize, CodememError> {
-        Storage::count_directory_reads(self, session_id, directory)
-    }
-
-    fn was_file_read_in_session(
-        &self,
-        session_id: &str,
-        file_path: &str,
-    ) -> Result<bool, CodememError> {
-        Storage::was_file_read_in_session(self, session_id, file_path)
-    }
-
-    fn count_search_pattern_in_session(
-        &self,
-        session_id: &str,
-        pattern: &str,
-    ) -> Result<usize, CodememError> {
-        Storage::count_search_pattern_in_session(self, session_id, pattern)
-    }
-
-    fn stats(&self) -> Result<StorageStats, CodememError> {
-        Storage::stats(self)
-    }
+    delegate_storage!(stats(&self) -> Result<StorageStats, CodememError>);
 }
 
 #[cfg(test)]

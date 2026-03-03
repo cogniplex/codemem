@@ -1,8 +1,11 @@
 //! In-memory metrics collector for operational metrics.
 
 use codemem_core::{LatencyStats, Metrics, MetricsSnapshot};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
+
+/// Maximum number of latency samples to retain per operation.
+const MAX_SAMPLES: usize = 10_000;
 
 /// In-memory metrics collector.
 ///
@@ -13,8 +16,8 @@ pub struct InMemoryMetrics {
 }
 
 struct Inner {
-    /// Raw latency samples per operation (kept for percentile calculation).
-    latency_samples: HashMap<String, Vec<f64>>,
+    /// Raw latency samples per operation, capped at `MAX_SAMPLES` per key.
+    latency_samples: HashMap<String, VecDeque<f64>>,
     /// Cumulative counters.
     counters: HashMap<String, u64>,
     /// Point-in-time gauges.
@@ -68,11 +71,14 @@ impl Default for InMemoryMetrics {
 impl Metrics for InMemoryMetrics {
     fn record_latency(&self, operation: &str, duration_ms: f64) {
         if let Ok(mut inner) = self.inner.lock() {
-            inner
+            let samples = inner
                 .latency_samples
                 .entry(operation.to_string())
-                .or_default()
-                .push(duration_ms);
+                .or_default();
+            if samples.len() >= MAX_SAMPLES {
+                samples.pop_front();
+            }
+            samples.push_back(duration_ms);
         }
     }
 
@@ -89,13 +95,14 @@ impl Metrics for InMemoryMetrics {
     }
 }
 
-/// Compute percentile-based statistics from a slice of samples.
-fn compute_latency_stats(samples: &[f64]) -> LatencyStats {
+/// Compute percentile-based statistics from a deque of samples.
+/// The deque is capped at `MAX_SAMPLES`, so the sort is bounded.
+fn compute_latency_stats(samples: &VecDeque<f64>) -> LatencyStats {
     if samples.is_empty() {
         return LatencyStats::default();
     }
 
-    let mut sorted = samples.to_vec();
+    let mut sorted: Vec<f64> = samples.iter().copied().collect();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let count = sorted.len() as u64;

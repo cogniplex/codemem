@@ -18,7 +18,9 @@ fn record_and_snapshot() {
 
 #[test]
 fn percentile_calculation() {
-    let samples = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+    let samples: VecDeque<f64> = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+        .into_iter()
+        .collect();
     let stats = compute_latency_stats(&samples);
     assert_eq!(stats.count, 10);
     assert!((stats.min_ms - 1.0).abs() < f64::EPSILON);

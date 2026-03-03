@@ -59,12 +59,16 @@ impl CodeParser {
         let symbols = self.engine.extract_symbols(lang, source, path);
         let references = self.engine.extract_references(lang, source, path);
 
-        // Parse again for chunking (needs the tree root)
+        // TODO(L22): Source is parsed 3 times (symbols, references, chunking). Refactor
+        // extract_symbols/extract_references to accept a pre-parsed tree root, then
+        // parse once and share it across all three passes.
         let root = lang.lang.ast_grep(source);
         let chunks = chunk_file(&root, source, path, &symbols, &self.chunk_config);
 
         // Map internal language names to the canonical names used by consumers.
-        // tsx/javascript share rules with typescript, but consumers expect "typescript".
+        // tsx/javascript share TypeScript extraction rules (same grammar family).
+        // Consumers (graph nodes, MCP tools) treat them as "typescript" for uniformity,
+        // since JS/TS/TSX/JSX all use the same symbol/reference extraction logic.
         let language_name = match lang.name {
             "tsx" | "javascript" => "typescript",
             other => other,

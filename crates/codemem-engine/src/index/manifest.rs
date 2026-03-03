@@ -268,27 +268,24 @@ pub fn parse_package_json(path: &Path) -> Option<ManifestResult> {
 /// Scan a directory for all manifest files and parse them.
 ///
 /// Walks the directory tree looking for `Cargo.toml` and `package.json` files,
-/// skipping common ignore directories (node_modules, target, .git, etc.).
+/// respecting `.gitignore` rules (via the `ignore` crate) to match indexer behavior.
 pub fn scan_manifests(root: &Path) -> ManifestResult {
     let mut result = ManifestResult::new();
 
-    let walker = walkdir::WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            // Skip common directories that should be ignored
-            if entry.file_type().is_dir() {
-                return !matches!(
-                    name.as_ref(),
-                    "node_modules" | "target" | ".git" | ".hg" | "vendor" | "dist" | "build"
-                );
-            }
-            true
-        });
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(true) // skip hidden files/dirs
+        .git_ignore(true) // respect .gitignore
+        .git_global(true) // respect global gitignore
+        .git_exclude(true) // respect .git/info/exclude
+        .build();
 
-    for entry in walker.flatten() {
-        if !entry.file_type().is_file() {
+    for entry in walker {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
             continue;
         }
 

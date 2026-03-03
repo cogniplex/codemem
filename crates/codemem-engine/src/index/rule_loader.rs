@@ -116,11 +116,23 @@ impl LanguageRules {
         }
         // Symbol scope container index
         for (i, sc) in self.symbol_scope_containers.iter().enumerate() {
-            self.symbol_scope_index.insert(sc.kind.clone(), i);
+            if let Some(prev) = self.symbol_scope_index.insert(sc.kind.clone(), i) {
+                debug_assert!(
+                    false,
+                    "Duplicate symbol scope container kind '{}': index {} overwrites {}",
+                    sc.kind, i, prev
+                );
+            }
         }
         // Reference scope container index
         for (i, sc) in self.reference_scope_containers.iter().enumerate() {
-            self.reference_scope_index.insert(sc.kind.clone(), i);
+            if let Some(prev) = self.reference_scope_index.insert(sc.kind.clone(), i) {
+                debug_assert!(
+                    false,
+                    "Duplicate reference scope container kind '{}': index {} overwrites {}",
+                    sc.kind, i, prev
+                );
+            }
         }
         // Unwrap sets
         self.symbol_unwrap_set = self.symbol_unwrap_nodes.iter().cloned().collect();
@@ -265,6 +277,12 @@ static LANGUAGE_RULES: &[EmbeddedRules] = &[
 ];
 
 /// Load and deserialize all language rules.
+///
+/// # Panics
+///
+/// Panics if any embedded YAML rule file fails to deserialize. This is intentional:
+/// these files are compiled into the binary, so a parse failure indicates a build-time
+/// error that must be fixed before shipping.
 pub fn load_all_rules() -> Vec<LanguageRules> {
     LANGUAGE_RULES
         .iter()

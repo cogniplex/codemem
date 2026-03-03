@@ -219,19 +219,28 @@ impl GraphEngine {
             .collect();
 
         // Build undirected adjacency with weights.
-        // adj[i] contains (j, weight) for each undirected neighbor.
-        let mut adj: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
-        let mut total_weight = 0.0;
-
+        // Deduplicate bidirectional edges: for A->B and B->A, merge into one
+        // undirected edge with combined weight.
+        let mut undirected_weights: HashMap<(usize, usize), f64> = HashMap::new();
         for edge_ref in self.graph.edge_indices() {
             if let Some((src_idx, dst_idx)) = self.graph.edge_endpoints(edge_ref) {
                 let w = self.graph[edge_ref];
                 if let (Some(&si), Some(&di)) = (idx_pos.get(&src_idx), idx_pos.get(&dst_idx)) {
-                    adj[si].push((di, w));
-                    adj[di].push((si, w));
-                    total_weight += w; // Each undirected edge contributes w (counted once)
+                    let key = if si <= di { (si, di) } else { (di, si) };
+                    *undirected_weights.entry(key).or_insert(0.0) += w;
                 }
             }
+        }
+
+        let mut adj: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+        let mut total_weight = 0.0;
+
+        for (&(si, di), &w) in &undirected_weights {
+            adj[si].push((di, w));
+            if si != di {
+                adj[di].push((si, w));
+            }
+            total_weight += w;
         }
 
         if total_weight == 0.0 {
@@ -242,17 +251,21 @@ impl GraphEngine {
                 .collect();
         }
 
-        // m = total edge weight (for undirected: sum of all edge weights)
+        // m = total undirected edge weight
         let m = total_weight;
         let m2 = 2.0 * m;
 
-        // Weighted degree of each node (sum of incident edge weights, undirected)
+        // Weighted degree of each node (sum of incident undirected edge weights)
         let k: Vec<f64> = (0..n)
             .map(|i| adj[i].iter().map(|&(_, w)| w).sum())
             .collect();
 
         // Initial assignment: each node in its own community
         let mut community: Vec<usize> = (0..n).collect();
+
+        // sigma_tot[c] = sum of degrees of nodes in community c.
+        // Maintained incrementally to avoid O(n^2) per pass.
+        let mut sigma_tot: Vec<f64> = k.clone();
 
         // Iteratively move nodes to improve modularity
         let mut improved = true;
@@ -265,6 +278,7 @@ impl GraphEngine {
 
             for i in 0..n {
                 let current_comm = community[i];
+                let ki = k[i];
 
                 // Compute weights to each neighboring community
                 let mut comm_weights: HashMap<usize, f64> = HashMap::new();
@@ -272,18 +286,13 @@ impl GraphEngine {
                     *comm_weights.entry(community[j]).or_insert(0.0) += w;
                 }
 
-                // Sum of degrees in each community (excluding node i for its own community)
-                let mut comm_degree_sum: HashMap<usize, f64> = HashMap::new();
-                for j in 0..n {
-                    *comm_degree_sum.entry(community[j]).or_insert(0.0) += k[j];
-                }
-
-                let ki = k[i];
-
-                // Modularity gain for removing i from its current community
+                // Standard Louvain delta-Q formula:
+                // delta_Q = [w_in_new/m - resolution * ki * sigma_new / m2]
+                //         - [w_in_current/m - resolution * ki * (sigma_current - ki) / m2]
                 let w_in_current = comm_weights.get(&current_comm).copied().unwrap_or(0.0);
-                let sigma_current = comm_degree_sum.get(&current_comm).copied().unwrap_or(0.0);
-                let remove_cost = w_in_current - resolution * ki * (sigma_current - ki) / m2;
+                let sigma_current = sigma_tot[current_comm];
+                let remove_cost =
+                    w_in_current / m - resolution * ki * (sigma_current - ki) / (m2 * m);
 
                 // Find best community to move to
                 let mut best_comm = current_comm;
@@ -293,8 +302,9 @@ impl GraphEngine {
                     if comm == current_comm {
                         continue;
                     }
-                    let sigma_comm = comm_degree_sum.get(&comm).copied().unwrap_or(0.0);
-                    let gain = w_in_comm - resolution * ki * sigma_comm / m2 - remove_cost;
+                    let sigma_comm = sigma_tot[comm];
+                    let gain =
+                        w_in_comm / m - resolution * ki * sigma_comm / (m2 * m) - remove_cost;
                     if gain > best_gain {
                         best_gain = gain;
                         best_comm = comm;
@@ -302,6 +312,9 @@ impl GraphEngine {
                 }
 
                 if best_comm != current_comm {
+                    // Update sigma_tot incrementally
+                    sigma_tot[current_comm] -= ki;
+                    sigma_tot[best_comm] += ki;
                     community[i] = best_comm;
                     improved = true;
                 }

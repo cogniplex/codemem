@@ -107,14 +107,14 @@ impl CodememEngine {
                 let pagerank = graph.get_pagerank(memory_id);
                 let centrality = graph.get_betweenness(memory_id);
 
-                let connected_decisions: Vec<String> = graph
-                    .get_edges(memory_id)
-                    .unwrap_or_default()
+                let edges = graph.get_edges(memory_id).unwrap_or_default();
+
+                let connected_decisions: Vec<String> = edges
                     .iter()
                     .filter_map(|e| {
                         let other_id = if e.src == *memory_id { &e.dst } else { &e.src };
                         self.storage
-                            .get_memory(other_id)
+                            .get_memory_no_touch(other_id)
                             .ok()
                             .flatten()
                             .and_then(|m| {
@@ -127,9 +127,7 @@ impl CodememEngine {
                     })
                     .collect();
 
-                let dependent_files: Vec<String> = graph
-                    .get_edges(memory_id)
-                    .unwrap_or_default()
+                let dependent_files: Vec<String> = edges
                     .iter()
                     .filter_map(|e| {
                         let other_id = if e.src == *memory_id { &e.dst } else { &e.src };
@@ -173,44 +171,44 @@ impl CodememEngine {
 
         let graph = self.lock_graph()?;
 
-        let ids = self.storage.list_memory_ids()?;
-
         let decision_edge_types = [
             RelationshipType::EvolvedInto,
             RelationshipType::LeadsTo,
             RelationshipType::DerivedFrom,
         ];
 
-        // Collect all Decision memories matching the filter
+        // Batch-load all Decision memories in one query
+        let all_decisions = self
+            .storage
+            .list_memories_filtered(None, Some("decision"))?;
+
+        // Hoist lowercased filter values outside the loop
+        let filter_lower = file_path.map(|f| f.to_lowercase());
+        let topic_lower = topic.map(|t| t.to_lowercase());
+
+        // Collect Decision memories matching the filter
         let mut decision_memories: Vec<MemoryNode> = Vec::new();
-        for id in &ids {
-            if let Ok(Some(memory)) = self.storage.get_memory(id) {
-                if memory.memory_type != MemoryType::Decision {
-                    continue;
-                }
+        for memory in all_decisions {
+            let content_lower = memory.content.to_lowercase();
+            let tags_lower: String = memory.tags.join(" ").to_lowercase();
 
-                let content_lower = memory.content.to_lowercase();
-                let tags_lower: String = memory.tags.join(" ").to_lowercase();
+            let matches = if let Some(ref fp) = filter_lower {
+                content_lower.contains(fp)
+                    || tags_lower.contains(fp)
+                    || memory
+                        .metadata
+                        .get("file_path")
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.to_lowercase().contains(fp))
+                        .unwrap_or(false)
+            } else if let Some(ref tl) = topic_lower {
+                content_lower.contains(tl) || tags_lower.contains(tl)
+            } else {
+                false
+            };
 
-                let matches = if let Some(fp) = file_path {
-                    content_lower.contains(&fp.to_lowercase())
-                        || tags_lower.contains(&fp.to_lowercase())
-                        || memory
-                            .metadata
-                            .get("file_path")
-                            .and_then(|v| v.as_str())
-                            .map(|v| v.to_lowercase().contains(&fp.to_lowercase()))
-                            .unwrap_or(false)
-                } else if let Some(t) = topic {
-                    let t_lower = t.to_lowercase();
-                    content_lower.contains(&t_lower) || tags_lower.contains(&t_lower)
-                } else {
-                    false
-                };
-
-                if matches {
-                    decision_memories.push(memory);
-                }
+            if matches {
+                decision_memories.push(memory);
             }
         }
 
@@ -242,7 +240,7 @@ impl CodememEngine {
                         };
                         if !chain_ids.contains(other_id) {
                             // Only follow to other Decision memories
-                            if let Ok(Some(m)) = self.storage.get_memory(other_id) {
+                            if let Ok(Some(m)) = self.storage.get_memory_no_touch(other_id) {
                                 if m.memory_type == MemoryType::Decision {
                                     to_explore.push(other_id.clone());
                                 }
@@ -256,7 +254,7 @@ impl CodememEngine {
         // Collect all chain memories and sort by created_at (temporal order)
         let mut chain: Vec<DecisionEntry> = Vec::new();
         for id in &chain_ids {
-            if let Ok(Some(memory)) = self.storage.get_memory(id) {
+            if let Ok(Some(memory)) = self.storage.get_memory_no_touch(id) {
                 let connections: Vec<DecisionConnection> = graph
                     .get_edges(id)
                     .unwrap_or_default()
@@ -385,6 +383,35 @@ impl CodememEngine {
             .collect();
 
         // 6. Build markdown report
+        let report = Self::format_checkpoint_report(
+            &activity,
+            &hot_dirs,
+            &session_patterns,
+            &unique_cross,
+            stored_patterns,
+        );
+
+        Ok(SessionCheckpointReport {
+            files_read: activity.files_read,
+            files_edited: activity.files_edited,
+            searches: activity.searches,
+            total_actions: activity.total_actions,
+            hot_dirs,
+            session_patterns,
+            cross_patterns: unique_cross,
+            stored_pattern_count: stored_patterns,
+            report,
+        })
+    }
+
+    /// Format the checkpoint data into a markdown report string.
+    fn format_checkpoint_report(
+        activity: &codemem_core::SessionActivitySummary,
+        hot_dirs: &[(String, usize)],
+        session_patterns: &[DetectedPattern],
+        cross_patterns: &[DetectedPattern],
+        stored_patterns: usize,
+    ) -> String {
         let mut report = String::from("## Session Checkpoint\n\n");
 
         // Activity summary
@@ -402,7 +429,7 @@ impl CodememEngine {
         if !hot_dirs.is_empty() {
             report.push_str("### Focus Areas\n\n");
             report.push_str("Directories with most activity in this session:\n\n");
-            for (dir, count) in &hot_dirs {
+            for (dir, count) in hot_dirs {
                 report.push_str(&format!("- `{}` ({} actions)\n", dir, count));
             }
             report.push('\n');
@@ -423,9 +450,9 @@ impl CodememEngine {
         }
 
         // Cross-session patterns
-        if !unique_cross.is_empty() {
+        if !cross_patterns.is_empty() {
             report.push_str("### Cross-Session Patterns\n\n");
-            for p in &unique_cross {
+            for p in cross_patterns {
                 report.push_str(&format!(
                     "- [{}] {} (confidence: {:.0}%)\n",
                     p.pattern_type,
@@ -460,16 +487,6 @@ impl CodememEngine {
             report.push_str("- No activity recorded yet for this session.\n");
         }
 
-        Ok(SessionCheckpointReport {
-            files_read: activity.files_read,
-            files_edited: activity.files_edited,
-            searches: activity.searches,
-            total_actions: activity.total_actions,
-            hot_dirs,
-            session_patterns,
-            cross_patterns: unique_cross,
-            stored_pattern_count: stored_patterns,
-            report,
-        })
+        report
     }
 }

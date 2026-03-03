@@ -1,7 +1,7 @@
 //! codemem-graph: Graph engine with petgraph algorithms and SQLite persistence.
 //!
 //! Provides BFS, DFS, shortest path, and connected components over
-//! a knowledge graph with 6 node types and 15 relationship types.
+//! a knowledge graph with 13 node kinds and 24 relationship types.
 
 mod algorithms;
 mod traversal;
@@ -38,6 +38,9 @@ pub struct GraphEngine {
     pub(crate) nodes: HashMap<String, GraphNode>,
     /// Edge data by ID.
     pub(crate) edges: HashMap<String, Edge>,
+    /// Edge adjacency index: maps node IDs to the IDs of edges incident on that node.
+    /// Maintained alongside `edges` to allow O(degree) edge lookups instead of O(E).
+    pub(crate) edge_adj: HashMap<String, Vec<String>>,
     /// Cached PageRank scores (populated by `recompute_centrality()`).
     pub(crate) cached_pagerank: HashMap<String, f64>,
     /// Cached betweenness centrality scores (populated by `recompute_centrality()`).
@@ -52,6 +55,7 @@ impl GraphEngine {
             id_to_index: HashMap::new(),
             nodes: HashMap::new(),
             edges: HashMap::new(),
+            edge_adj: HashMap::new(),
             cached_pagerank: HashMap::new(),
             cached_betweenness: HashMap::new(),
         }
@@ -282,13 +286,17 @@ impl GraphEngine {
                         max_pagerank = max_pagerank.max(pr);
                         max_betweenness = max_betweenness.max(bt);
 
-                        // Collect edge weight from our edge metadata
-                        for edge in self.edges.values() {
-                            if (edge.src == memory_id && edge.dst == *neighbor_id)
-                                || (edge.dst == memory_id && edge.src == *neighbor_id)
-                            {
-                                total_edge_weight += edge.weight;
-                                break;
+                        // Collect edge weight from our edge adjacency index
+                        if let Some(edge_ids) = self.edge_adj.get(memory_id) {
+                            for eid in edge_ids {
+                                if let Some(edge) = self.edges.get(eid) {
+                                    if (edge.src == memory_id && edge.dst == *neighbor_id)
+                                        || (edge.dst == memory_id && edge.src == *neighbor_id)
+                                    {
+                                        total_edge_weight += edge.weight;
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }

@@ -180,18 +180,17 @@ fn merge_small_chunks(chunks: Vec<RawChunk>, source: &str, config: &ChunkConfig)
             if last.non_ws_chars < config.min_chunk_size
                 || chunk.non_ws_chars < config.min_chunk_size
             {
-                let combined_nws = last.non_ws_chars + chunk.non_ws_chars;
-                if combined_nws <= config.max_chunk_size {
-                    // Merge: extract text from byte range covering both
-                    let merged_start = last.byte_start;
-                    let merged_end = chunk.byte_end;
-                    let merged_text = if merged_end <= source.len() {
-                        source[merged_start..merged_end].to_string()
-                    } else {
-                        format!("{}\n{}", last.text, chunk.text)
-                    };
-                    let merged_nws = count_non_ws(&merged_text);
+                // Compute actual merged non-whitespace count before deciding to merge
+                let merged_start = last.byte_start;
+                let merged_end = chunk.byte_end;
+                let merged_text = if merged_end <= source.len() {
+                    source[merged_start..merged_end].to_string()
+                } else {
+                    format!("{}\n{}", last.text, chunk.text)
+                };
+                let merged_nws = count_non_ws(&merged_text);
 
+                if merged_nws <= config.max_chunk_size {
                     last.text = merged_text;
                     last.node_kind = "merged".to_string();
                     last.line_end = chunk.line_end;

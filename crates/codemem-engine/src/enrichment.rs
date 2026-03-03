@@ -7,7 +7,7 @@ use codemem_core::{
     RelationshipType, VectorBackend,
 };
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Result from an enrichment operation.
 pub struct EnrichResult {
@@ -20,6 +20,10 @@ impl CodememEngine {
     /// node, RELATES_TO edges to linked nodes, and vector embedding.
     /// Returns the memory ID if inserted, or None if it was a duplicate.
     /// Does NOT call `save_index()` -- callers should batch that at the end.
+    ///
+    // TODO: Steps 1/2/3/5 duplicate `persist_memory_inner`. Refactor to call
+    // `persist_memory_no_save` for the core pipeline, then add the semantic dedup
+    // pre-check (step 1b) and RELATES_TO edges (step 4) as pre/post steps.
     pub fn store_insight(
         &self,
         content: &str,
@@ -60,10 +64,18 @@ impl CodememEngine {
             return None; // duplicate or error -- skip silently
         }
 
-        // 1b. Semantic dedup: check top-3 nearest embeddings for near-duplicates
-        if let Ok(Some(emb_guard)) = self.lock_embeddings() {
-            if let Ok(embedding) = emb_guard.embed(content) {
+        // 1b. Compute enriched embedding once (used for both dedup check and vector insert)
+        let enriched = self.enrich_memory_text(
+            content,
+            MemoryType::Insight,
+            &all_tags,
+            namespace,
+            Some(&id),
+        );
+        let stored_embedding = if let Ok(Some(emb_guard)) = self.lock_embeddings() {
+            if let Ok(embedding) = emb_guard.embed(&enriched) {
                 drop(emb_guard);
+                // Semantic dedup: check top-3 nearest embeddings for near-duplicates
                 if let Ok(vec) = self.lock_vector() {
                     let neighbors = vec.search(&embedding, 3).unwrap_or_default();
                     for (neighbor_id, similarity) in &neighbors {
@@ -78,8 +90,13 @@ impl CodememEngine {
                         }
                     }
                 }
+                Some(embedding)
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
         // 2. BM25 index
         if let Ok(mut bm25) = self.lock_bm25() {
@@ -94,7 +111,7 @@ impl CodememEngine {
             payload: HashMap::new(),
             centrality: 0.0,
             memory_id: Some(id.clone()),
-            namespace: None,
+            namespace: namespace.map(String::from),
         };
         let _ = self.storage.insert_graph_node(&graph_node);
         if let Ok(mut graph) = self.lock_graph() {
@@ -125,21 +142,11 @@ impl CodememEngine {
         // 4b. Auto-link to code nodes mentioned in content
         self.auto_link_to_code_nodes(&id, content, links);
 
-        // 5. Vector embedding
-        if let Ok(Some(emb_guard)) = self.lock_embeddings() {
-            let enriched = self.enrich_memory_text(
-                content,
-                MemoryType::Insight,
-                &all_tags,
-                namespace,
-                Some(&id),
-            );
-            if let Ok(embedding) = emb_guard.embed(&enriched) {
-                drop(emb_guard);
-                let _ = self.storage.store_embedding(&id, &embedding);
-                if let Ok(mut vec) = self.lock_vector() {
-                    let _ = vec.insert(&id, &embedding);
-                }
+        // 5. Vector embedding (reuse embedding from step 1b)
+        if let Some(ref embedding) = stored_embedding {
+            let _ = self.storage.store_embedding(&id, embedding);
+            if let Ok(mut vec) = self.lock_vector() {
+                let _ = vec.insert(&id, embedding);
             }
         }
 
@@ -211,7 +218,7 @@ impl CodememEngine {
         // Aggregate per-file stats
         struct FileStats {
             commit_count: usize,
-            authors: Vec<String>,
+            authors: HashSet<String>,
         }
 
         let mut file_stats: HashMap<String, FileStats> = HashMap::new();
@@ -234,17 +241,19 @@ impl CodememEngine {
             for file in &commit.files {
                 let stats = file_stats.entry(file.clone()).or_insert(FileStats {
                     commit_count: 0,
-                    authors: Vec::new(),
+                    authors: HashSet::new(),
                 });
                 stats.commit_count += 1;
-                if !stats.authors.contains(&commit.author) {
-                    stats.authors.push(commit.author.clone());
-                }
+                stats.authors.insert(commit.author.clone());
                 *author_file_count.entry(commit.author.clone()).or_default() += 1;
             }
 
             // Track co-changes (pairs of files in same commit)
+            // Skip bulk refactor commits (>50 files) to avoid O(N^2) explosion
             let mut sorted_files: Vec<&String> = commit.files.iter().collect();
+            if sorted_files.len() > 50 {
+                continue;
+            }
             sorted_files.sort();
             for i in 0..sorted_files.len() {
                 for j in (i + 1)..sorted_files.len() {
@@ -339,7 +348,13 @@ impl CodememEngine {
         // High-activity files
         for (file_path, stats) in &file_stats {
             if stats.commit_count > self.config.enrichment.git_min_commit_count {
-                let authors_str = stats.authors.join(", ");
+                let mut sorted_authors: Vec<_> = stats.authors.iter().collect();
+                sorted_authors.sort();
+                let authors_str = sorted_authors
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let content = format!(
                     "High activity: {} — {} commits in the last {} days by {}",
                     file_path, stats.commit_count, days, authors_str
@@ -574,65 +589,44 @@ impl CodememEngine {
         top: usize,
         namespace: Option<&str>,
     ) -> Result<EnrichResult, CodememError> {
-        let mut graph = self.lock_graph()?;
-        let all_nodes = graph.get_all_nodes();
-
-        // 1. Compute coupling (in-degree + out-degree) for each node via get_edges
-        let mut high_coupling_count = 0;
+        // Collect data from graph into local variables, then drop lock
+        let all_nodes;
         let mut coupling_data: Vec<(String, String, usize)> = Vec::new();
-
-        for node in &all_nodes {
-            let degree = graph.get_edges(&node.id).map(|e| e.len()).unwrap_or(0);
-            coupling_data.push((node.id.clone(), node.label.clone(), degree));
-
-            if degree > self.config.enrichment.perf_min_coupling_degree {
-                high_coupling_count += 1;
-            }
-        }
-
-        // Annotate nodes with coupling scores
-        for (node_id, _label, degree) in &coupling_data {
-            if let Ok(Some(mut node)) = graph.get_node(node_id) {
-                node.payload.insert("coupling_score".into(), json!(degree));
-                let _ = graph.add_node(node);
-            }
-        }
-
-        // 2. Compute dependency depth via topological layers
-        let layers = graph.topological_layers();
-        let max_depth = layers.len();
-
-        for (layer_idx, layer) in layers.iter().enumerate() {
-            for node_id in layer {
-                if let Ok(Some(mut node)) = graph.get_node(node_id) {
-                    node.payload
-                        .insert("dependency_layer".into(), json!(layer_idx));
-                    let _ = graph.add_node(node);
-                }
-            }
-        }
-
-        // 3. PageRank for critical path (File nodes only)
+        let mut high_coupling_count = 0;
+        let layers: Vec<Vec<String>>;
         let mut file_pagerank: Vec<(String, String, f64)> = Vec::new();
-        for node in &all_nodes {
-            if node.kind == NodeKind::File {
-                let pr = graph.get_pagerank(&node.id);
-                if pr > 0.0 {
-                    file_pagerank.push((node.id.clone(), node.label.clone(), pr));
+        {
+            let graph = self.lock_graph()?;
+            all_nodes = graph.get_all_nodes();
+
+            // 1. Compute coupling (in-degree + out-degree) for each node
+            for node in &all_nodes {
+                let degree = graph.get_edges(&node.id).map(|e| e.len()).unwrap_or(0);
+                coupling_data.push((node.id.clone(), node.label.clone(), degree));
+                if degree > self.config.enrichment.perf_min_coupling_degree {
+                    high_coupling_count += 1;
+                }
+            }
+
+            // 2. Compute dependency depth via topological layers
+            layers = graph.topological_layers();
+
+            // 3. PageRank for critical path (File nodes only)
+            for node in &all_nodes {
+                if node.kind == NodeKind::File {
+                    let pr = graph.get_pagerank(&node.id);
+                    if pr > 0.0 {
+                        file_pagerank.push((node.id.clone(), node.label.clone(), pr));
+                    }
                 }
             }
         }
+        // Graph lock released here
+
+        let max_depth = layers.len();
         file_pagerank.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
-        for (node_id, _label, rank) in file_pagerank.iter().take(top) {
-            if let Ok(Some(mut node)) = graph.get_node(node_id) {
-                node.payload
-                    .insert("critical_path_rank".into(), json!(rank));
-                let _ = graph.add_node(node);
-            }
-        }
-
-        // 4. File complexity from symbol counts
+        // 4. File complexity from symbol counts (computed from local all_nodes)
         let mut file_symbol_counts: HashMap<String, usize> = HashMap::new();
         for node in &all_nodes {
             match node.kind {
@@ -650,15 +644,43 @@ impl CodememEngine {
             }
         }
 
-        for (file_path, sym_count) in &file_symbol_counts {
-            let node_id = format!("file:{file_path}");
-            if let Ok(Some(mut node)) = graph.get_node(&node_id) {
-                node.payload.insert("symbol_count".into(), json!(sym_count));
-                let _ = graph.add_node(node);
+        // Annotate graph nodes (short lock scope for writes only)
+        {
+            let mut graph = self.lock_graph()?;
+
+            for (node_id, _label, degree) in &coupling_data {
+                if let Ok(Some(mut node)) = graph.get_node(node_id) {
+                    node.payload.insert("coupling_score".into(), json!(degree));
+                    let _ = graph.add_node(node);
+                }
+            }
+
+            for (layer_idx, layer) in layers.iter().enumerate() {
+                for node_id in layer {
+                    if let Ok(Some(mut node)) = graph.get_node(node_id) {
+                        node.payload
+                            .insert("dependency_layer".into(), json!(layer_idx));
+                        let _ = graph.add_node(node);
+                    }
+                }
+            }
+
+            for (node_id, _label, rank) in file_pagerank.iter().take(top) {
+                if let Ok(Some(mut node)) = graph.get_node(node_id) {
+                    node.payload
+                        .insert("critical_path_rank".into(), json!(rank));
+                    let _ = graph.add_node(node);
+                }
+            }
+
+            for (file_path, sym_count) in &file_symbol_counts {
+                let node_id = format!("file:{file_path}");
+                if let Ok(Some(mut node)) = graph.get_node(&node_id) {
+                    node.payload.insert("symbol_count".into(), json!(sym_count));
+                    let _ = graph.add_node(node);
+                }
             }
         }
-
-        drop(graph);
 
         // Store insights
         let mut insights_stored = 0;

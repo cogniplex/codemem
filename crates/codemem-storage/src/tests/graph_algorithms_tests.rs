@@ -590,6 +590,81 @@ fn louvain_with_assignment_two_cliques() {
 }
 
 #[test]
+fn louvain_barbell_graph() {
+    // Barbell graph: two cliques connected by a single edge (bridge).
+    // Clique 1: a <-> b <-> c <-> a (fully connected)
+    // Clique 2: d <-> e <-> f <-> d (fully connected)
+    // Bridge: c -> d, d -> c
+    // Louvain should detect 2 communities.
+    let mut graph = GraphEngine::new();
+    for id in &["a", "b", "c", "d", "e", "f"] {
+        graph.add_node(file_node(id, &format!("{id}.rs"))).unwrap();
+    }
+    // Clique 1
+    graph.add_edge(test_edge("a", "b")).unwrap();
+    graph.add_edge(test_edge("b", "a")).unwrap();
+    graph.add_edge(test_edge("b", "c")).unwrap();
+    graph.add_edge(test_edge("c", "b")).unwrap();
+    graph.add_edge(test_edge("a", "c")).unwrap();
+    graph.add_edge(test_edge("c", "a")).unwrap();
+    // Clique 2
+    graph.add_edge(test_edge("d", "e")).unwrap();
+    graph.add_edge(test_edge("e", "d")).unwrap();
+    graph.add_edge(test_edge("e", "f")).unwrap();
+    graph.add_edge(test_edge("f", "e")).unwrap();
+    graph.add_edge(test_edge("d", "f")).unwrap();
+    graph.add_edge(test_edge("f", "d")).unwrap();
+    // Bridge between cliques (single bidirectional edge)
+    let bridge1 = Edge {
+        id: "bridge_c_d".to_string(),
+        src: "c".to_string(),
+        dst: "d".to_string(),
+        relationship: RelationshipType::Contains,
+        weight: 1.0,
+        properties: HashMap::new(),
+        created_at: chrono::Utc::now(),
+        valid_from: None,
+        valid_to: None,
+    };
+    let bridge2 = Edge {
+        id: "bridge_d_c".to_string(),
+        src: "d".to_string(),
+        dst: "c".to_string(),
+        relationship: RelationshipType::Contains,
+        weight: 1.0,
+        properties: HashMap::new(),
+        created_at: chrono::Utc::now(),
+        valid_from: None,
+        valid_to: None,
+    };
+    graph.add_edge(bridge1).unwrap();
+    graph.add_edge(bridge2).unwrap();
+
+    let communities = graph.louvain_communities(1.0);
+    assert_eq!(
+        communities.len(),
+        2,
+        "Barbell graph should have 2 communities, got {}: {:?}",
+        communities.len(),
+        communities
+    );
+
+    // Each community should have 3 nodes
+    assert_eq!(communities[0].len(), 3);
+    assert_eq!(communities[1].len(), 3);
+
+    // Check that a,b,c are in one community and d,e,f in another
+    let comm0_set: HashSet<&str> = communities[0].iter().map(|s| s.as_str()).collect();
+    let has_abc = comm0_set.contains("a") && comm0_set.contains("b") && comm0_set.contains("c");
+    let has_def = comm0_set.contains("d") && comm0_set.contains("e") && comm0_set.contains("f");
+    assert!(
+        has_abc || has_def,
+        "Communities should split at the bridge: {:?}",
+        communities
+    );
+}
+
+#[test]
 fn louvain_with_assignment_empty_graph() {
     let graph = GraphEngine::new();
     let assignment = graph.louvain_with_assignment(1.0);

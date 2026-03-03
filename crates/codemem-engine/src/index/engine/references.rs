@@ -357,8 +357,21 @@ impl super::AstGrepEngine {
                 );
             }
             "kotlin_call" | "kotlin_delegation" => {
-                let text = node.text().to_string();
-                let name = text.split('(').next().unwrap_or(&text).trim();
+                // Try tree-sitter "function" field first, then fall back to text splitting.
+                // Strip generics (e.g. "Foo<Bar>" -> "Foo") from the extracted name.
+                let name = if let Some(func_node) = node.field("function") {
+                    func_node.text().to_string()
+                } else {
+                    let text = node.text().to_string();
+                    // Split on '(' to strip arguments, then '<' to strip generics
+                    let before_paren = text.split('(').next().unwrap_or(&text);
+                    before_paren
+                        .split('<')
+                        .next()
+                        .unwrap_or(before_paren)
+                        .trim()
+                        .to_string()
+                };
                 let ref_kind = if special == "kotlin_delegation" {
                     ReferenceKind::Inherits
                 } else {
@@ -367,7 +380,7 @@ impl super::AstGrepEngine {
                 push_ref(
                     references,
                     &source_qn,
-                    name.to_string(),
+                    name,
                     ref_kind,
                     file_path,
                     node.start_pos().line(),

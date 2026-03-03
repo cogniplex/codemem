@@ -497,11 +497,29 @@ impl super::AstGrepEngine {
     where
         D::Lang: ast_grep_core::Language,
     {
-        let text = node.text().to_string();
-        if !(text.contains("static") && text.contains("final")) {
+        // Walk modifiers children for static/final tokens instead of substring matching
+        let mut has_static = false;
+        let mut has_final = false;
+        for child in node.children() {
+            let ck = child.kind();
+            if ck.as_ref() == "modifiers" || ck.as_ref() == "modifier" {
+                for modifier_child in child.children() {
+                    let mk = modifier_child.kind();
+                    let mt = modifier_child.text();
+                    if mk.as_ref() == "static" || mt.as_ref() == "static" {
+                        has_static = true;
+                    }
+                    if mk.as_ref() == "final" || mt.as_ref() == "final" {
+                        has_final = true;
+                    }
+                }
+            }
+        }
+        if !(has_static && has_final) {
             return None;
         }
         // Find the variable declarator to get the name
+        let text = node.text().to_string();
         for child in node.children() {
             if child.kind().as_ref() == "variable_declarator" {
                 let name = self.get_node_field_text(&child, "name")?;

@@ -347,30 +347,65 @@ impl super::CodememEngine {
         drop(graph);
 
         // ── Embed symbols and chunks ────────────────────────────────────────
+        // Phase 1: Collect enriched texts without holding the vector lock.
+        // enrich_symbol_text / enrich_chunk_text only read from the passed-in
+        // Symbol/CodeChunk and edges slice, so no lock is required.
         let mut symbols_embedded = 0usize;
         let mut chunks_embedded = 0usize;
         if let Some(emb) = self.lock_embeddings()? {
+            let sym_texts: Vec<(String, String)> = all_symbols
+                .iter()
+                .map(|sym| {
+                    let id = format!("sym:{}", sym.qualified_name);
+                    let text = self.enrich_symbol_text(sym, edges);
+                    (id, text)
+                })
+                .collect();
+            let chunk_texts: Vec<(String, String)> = all_chunks
+                .iter()
+                .map(|chunk| {
+                    let id = format!("chunk:{}:{}", chunk.file_path, chunk.index);
+                    let text = self.enrich_chunk_text(chunk);
+                    (id, text)
+                })
+                .collect();
+
+            // Phase 2: Embed all texts (embedding provider lock only, no vector lock).
+            let all_texts: Vec<&str> = sym_texts
+                .iter()
+                .map(|(_, t)| t.as_str())
+                .chain(chunk_texts.iter().map(|(_, t)| t.as_str()))
+                .collect();
+            let all_embeddings = match emb.embed_batch(&all_texts) {
+                Ok(embeddings) => embeddings,
+                Err(e) => {
+                    tracing::warn!(
+                        "embed_batch failed for {} texts, symbols/chunks will be unembedded: {e}",
+                        all_texts.len()
+                    );
+                    vec![]
+                }
+            };
+            drop(emb);
+
+            // Phase 3: Insert into vector index + storage with a single lock acquisition.
             let mut vec = self.lock_vector()?;
-            for sym in all_symbols {
-                let embed_text = self.enrich_symbol_text(sym, edges);
-                let sym_id = format!("sym:{}", sym.qualified_name);
-                if let Ok(embedding) = emb.embed(&embed_text) {
-                    let _ = self.storage.store_embedding(&sym_id, &embedding);
-                    let _ = vec.insert(&sym_id, &embedding);
+            let sym_count = sym_texts.len();
+            for (i, (id, _)) in sym_texts.into_iter().enumerate() {
+                if let Some(embedding) = all_embeddings.get(i) {
+                    let _ = self.storage.store_embedding(&id, embedding);
+                    let _ = vec.insert(&id, embedding);
                     symbols_embedded += 1;
                 }
             }
-            for chunk in all_chunks {
-                let embed_text = self.enrich_chunk_text(chunk);
-                let chunk_id = format!("chunk:{}:{}", chunk.file_path, chunk.index);
-                if let Ok(embedding) = emb.embed(&embed_text) {
-                    let _ = self.storage.store_embedding(&chunk_id, &embedding);
-                    let _ = vec.insert(&chunk_id, &embedding);
+            for (i, (id, _)) in chunk_texts.into_iter().enumerate() {
+                if let Some(embedding) = all_embeddings.get(sym_count + i) {
+                    let _ = self.storage.store_embedding(&id, embedding);
+                    let _ = vec.insert(&id, embedding);
                     chunks_embedded += 1;
                 }
             }
             drop(vec);
-            drop(emb);
             self.save_index();
         }
 
@@ -404,10 +439,15 @@ impl super::CodememEngine {
             Err(_) => return (0, 0),
         };
 
-        let chunks_pruned = self.compact_chunks(seen_files, &mut graph);
-        let symbols_pruned = self.compact_symbols(seen_files, &mut graph);
+        // Fetch all nodes once and share between both compaction passes.
+        let all_nodes = graph.get_all_nodes();
+        let chunks_pruned = self.compact_chunks(seen_files, &mut graph, &all_nodes);
+        let symbols_pruned = self.compact_symbols(seen_files, &mut graph, &all_nodes);
 
         if chunks_pruned > 0 || symbols_pruned > 0 {
+            // compute_centrality: updates node.centrality with degree centrality.
+            // recompute_centrality: caches PageRank + betweenness for hybrid scoring.
+            // Both are needed — they populate different data used by different scoring paths.
             graph.compute_centrality();
             graph.recompute_centrality();
         }
@@ -420,6 +460,7 @@ impl super::CodememEngine {
         &self,
         seen_files: &HashSet<String>,
         graph: &mut std::sync::MutexGuard<'_, codemem_storage::graph::GraphEngine>,
+        all_nodes: &[GraphNode],
     ) -> usize {
         let max_chunks_per_file = self.config.chunking.max_retained_chunks_per_file;
         let chunk_score_threshold = self.config.chunking.min_chunk_score_threshold;
@@ -429,7 +470,6 @@ impl super::CodememEngine {
         let mut max_degree: f64 = 1.0;
         let mut max_non_ws: f64 = 1.0;
 
-        let all_nodes = graph.get_all_nodes();
         let chunk_nodes: Vec<&GraphNode> = all_nodes
             .iter()
             .filter(|n| n.kind == NodeKind::Chunk)
@@ -496,7 +536,7 @@ impl super::CodememEngine {
         }
 
         let mut symbol_count_by_file: HashMap<String, usize> = HashMap::new();
-        for node in &all_nodes {
+        for node in all_nodes {
             if matches!(
                 node.kind,
                 NodeKind::Function
@@ -521,6 +561,9 @@ impl super::CodememEngine {
             let k = max_chunks_per_file.min(chunks.len()).max(3.max(sym_count));
 
             for (i, (chunk_id, score)) in chunks.iter().enumerate() {
+                // Prune aggressively: remove if beyond the top-k slots OR below the
+                // quality threshold. Using || ensures both caps are enforced independently
+                // (keep at most k chunks, and never keep any chunk below threshold).
                 if i >= k || *score < chunk_score_threshold {
                     self.transfer_chunk_ranges_to_parent(graph, chunk_id);
 
@@ -585,11 +628,11 @@ impl super::CodememEngine {
         &self,
         seen_files: &HashSet<String>,
         graph: &mut std::sync::MutexGuard<'_, codemem_storage::graph::GraphEngine>,
+        all_nodes: &[GraphNode],
     ) -> usize {
         let max_syms_per_file = self.config.chunking.max_retained_symbols_per_file;
         let sym_score_threshold = self.config.chunking.min_symbol_score_threshold;
 
-        let all_nodes = graph.get_all_nodes();
         let sym_nodes: Vec<&GraphNode> = all_nodes
             .iter()
             .filter(|n| n.id.starts_with("sym:"))

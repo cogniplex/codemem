@@ -31,7 +31,10 @@ impl super::AstGrepEngine {
                 Visibility::Private
             }
             "python" => {
-                if (name.starts_with("__") && !name.ends_with("__")) || name.starts_with('_') {
+                if name.starts_with("__") && name.ends_with("__") {
+                    // Dunder methods (e.g. __init__, __str__) are public
+                    Visibility::Public
+                } else if name.starts_with('_') {
                     Visibility::Private
                 } else {
                     Visibility::Public
@@ -85,26 +88,58 @@ impl super::AstGrepEngine {
                 Visibility::Private
             }
             "kotlin" => {
-                let text = node.text();
-                let text_ref = text.as_ref();
-                if text_ref.contains("private ") || text_ref.contains("private\n") {
-                    Visibility::Private
-                } else if text_ref.contains("protected ") {
-                    Visibility::Protected
-                } else if text_ref.contains("internal ") {
-                    Visibility::Crate
-                } else {
-                    Visibility::Public
+                // Walk children for visibility_modifier node
+                for child in node.children() {
+                    let ck = child.kind();
+                    if ck.as_ref() == "visibility_modifier" || ck.as_ref() == "modifiers" {
+                        for modifier_child in child.children() {
+                            let mt = modifier_child.text();
+                            match mt.as_ref() {
+                                "private" => return Visibility::Private,
+                                "protected" => return Visibility::Protected,
+                                "internal" => return Visibility::Crate,
+                                "public" => return Visibility::Public,
+                                _ => {}
+                            }
+                        }
+                        // Single visibility_modifier node
+                        let text = child.text();
+                        match text.as_ref() {
+                            "private" => return Visibility::Private,
+                            "protected" => return Visibility::Protected,
+                            "internal" => return Visibility::Crate,
+                            "public" => return Visibility::Public,
+                            _ => {}
+                        }
+                    }
                 }
+                Visibility::Public
             }
             "swift" => {
-                let text = node.text();
-                let text_ref = text.as_ref();
-                if text_ref.starts_with("public ") || text_ref.starts_with("open ") {
-                    Visibility::Public
-                } else {
-                    Visibility::Private
+                // Walk children for modifier nodes instead of text matching
+                for child in node.children() {
+                    let ck = child.kind();
+                    if ck.as_ref() == "modifier" || ck.as_ref() == "modifiers" {
+                        for modifier_child in child.children() {
+                            let mt = modifier_child.text();
+                            match mt.as_ref() {
+                                "public" | "open" => return Visibility::Public,
+                                "private" | "fileprivate" => return Visibility::Private,
+                                "internal" => return Visibility::Crate,
+                                _ => {}
+                            }
+                        }
+                        let text = child.text();
+                        match text.as_ref() {
+                            "public" | "open" => return Visibility::Public,
+                            "private" | "fileprivate" => return Visibility::Private,
+                            "internal" => return Visibility::Crate,
+                            _ => {}
+                        }
+                    }
                 }
+                // Swift default access level is internal
+                Visibility::Private
             }
             "php" => {
                 for child in node.children() {

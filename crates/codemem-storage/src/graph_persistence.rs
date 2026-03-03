@@ -21,9 +21,20 @@ pub(crate) type EdgeRow = (
 );
 
 /// Deserialize an `Edge` from a raw database row tuple.
+/// Logs a warning if an edge is dropped due to an unrecognized relationship type.
 pub(crate) fn edge_from_row(row: EdgeRow) -> Option<Edge> {
     let (id, src, dst, rel_str, weight, props_str, created_ts, valid_from_ts, valid_to_ts) = row;
-    let relationship: RelationshipType = rel_str.parse().ok()?;
+    let relationship: RelationshipType = match rel_str.parse() {
+        Ok(r) => r,
+        Err(_) => {
+            tracing::warn!(
+                edge_id = %id,
+                relationship = %rel_str,
+                "Dropping edge with unrecognized relationship type"
+            );
+            return None;
+        }
+    };
     let properties: HashMap<String, serde_json::Value> =
         serde_json::from_str(&props_str).unwrap_or_default();
     let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?.with_timezone(&chrono::Utc);
@@ -182,14 +193,14 @@ impl Storage {
         Ok(rows > 0)
     }
 
-    /// Get all graph nodes.
+    /// Get all graph nodes. Logs warnings for rows with parse errors instead of silently dropping.
     pub fn all_graph_nodes(&self) -> Result<Vec<GraphNode>, CodememError> {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id, kind, label, payload, centrality, memory_id, namespace FROM graph_nodes")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
-        let nodes = stmt
+        let rows = stmt
             .query_map([], |row| {
                 let kind_str: String = row.get(1)?;
                 let payload_str: String = row.get(3)?;
@@ -203,25 +214,35 @@ impl Storage {
                     row.get::<_, Option<String>>(6)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
-            .filter_map(|r| r.ok())
-            .filter_map(
-                |(id, kind_str, label, payload_str, centrality, memory_id, namespace)| {
-                    let kind: NodeKind = kind_str.parse().ok()?;
-                    let payload: HashMap<String, serde_json::Value> =
-                        serde_json::from_str(&payload_str).unwrap_or_default();
-                    Some(GraphNode {
-                        id,
-                        kind,
-                        label,
-                        payload,
-                        centrality,
-                        memory_id,
-                        namespace,
-                    })
-                },
-            )
-            .collect();
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let mut nodes = Vec::new();
+        for row_result in rows {
+            let (id, kind_str, label, payload_str, centrality, memory_id, namespace) =
+                row_result.map_err(|e| CodememError::Storage(e.to_string()))?;
+            let kind: NodeKind = match kind_str.parse() {
+                Ok(k) => k,
+                Err(_) => {
+                    tracing::warn!(
+                        node_id = %id,
+                        kind = %kind_str,
+                        "Skipping graph node with unrecognized kind"
+                    );
+                    continue;
+                }
+            };
+            let payload: HashMap<String, serde_json::Value> =
+                serde_json::from_str(&payload_str).unwrap_or_default();
+            nodes.push(GraphNode {
+                id,
+                kind,
+                label,
+                payload,
+                centrality,
+                memory_id,
+                namespace,
+            });
+        }
 
         Ok(nodes)
     }

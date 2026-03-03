@@ -56,13 +56,20 @@ pub fn is_watchable(path: &Path) -> bool {
 /// Uses the provided `Gitignore` matcher first (checking the full path and
 /// each ancestor directory), then falls back to the hardcoded `IGNORE_DIRS`
 /// list for paths not covered by `.gitignore`.
-pub fn should_ignore(path: &Path, gitignore: Option<&Gitignore>) -> bool {
+///
+/// `is_dir` indicates whether the path is a directory. Pass `false` for file
+/// events from the watcher to avoid a redundant `stat` syscall per event.
+pub fn should_ignore(path: &Path, gitignore: Option<&Gitignore>, is_dir: bool) -> bool {
     if let Some(gi) = gitignore {
         // Check the file itself
-        if gi.matched(path, path.is_dir()).is_ignore() {
+        if gi.matched(path, is_dir).is_ignore() {
             return true;
         }
-        // Check each ancestor directory against the gitignore
+        // Check each ancestor directory against the gitignore.
+        // NOTE: This traverses all the way to the filesystem root. In practice
+        // this is harmless because gitignore patterns only match relative to the
+        // gitignore root, but a future improvement could accept the project root
+        // and stop traversal there.
         let mut current = path.to_path_buf();
         while current.pop() {
             if gi.matched(&current, true).is_ignore() {
@@ -155,7 +162,10 @@ impl FileWatcher {
                         if !seen.insert(path.clone()) {
                             continue;
                         }
-                        if should_ignore(&path, gi_clone.as_ref().as_ref()) || !is_watchable(&path)
+                        // Watcher events are always files, so pass is_dir=false
+                        // to avoid a stat syscall per event.
+                        if should_ignore(&path, gi_clone.as_ref().as_ref(), false)
+                            || !is_watchable(&path)
                         {
                             continue;
                         }
@@ -164,6 +174,12 @@ impl FileWatcher {
                         // across platforms (FSEvents on macOS vs inotify on Linux).
                         let watch_event = if path.exists() {
                             if let Ok(mut known) = known_files.lock() {
+                                // Prevent unbounded growth: clear when exceeding 50K entries.
+                                // After clearing, all subsequent files will appear as "created"
+                                // until the set repopulates, which is acceptable.
+                                if known.len() > 50_000 {
+                                    known.clear();
+                                }
                                 if known.insert(path.clone()) {
                                     WatchEvent::FileCreated(path)
                                 } else {

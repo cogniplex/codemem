@@ -212,8 +212,23 @@ fn extract_fn_name(line: &str) -> Option<String> {
 }
 
 fn extract_type_name(line: &str) -> Option<String> {
-    for prefix in &["struct ", "class ", "enum ", "trait ", "interface "] {
-        if let Some(rest) = line.split(prefix).nth(1) {
+    let trimmed = line.trim();
+    for prefix in &[
+        "pub struct ",
+        "pub(crate) struct ",
+        "struct ",
+        "pub class ",
+        "class ",
+        "pub enum ",
+        "pub(crate) enum ",
+        "enum ",
+        "pub trait ",
+        "pub(crate) trait ",
+        "trait ",
+        "pub interface ",
+        "interface ",
+    ] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
             let name: String = rest
                 .chars()
                 .take_while(|c| c.is_alphanumeric() || *c == '_')

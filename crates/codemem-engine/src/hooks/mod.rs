@@ -97,25 +97,15 @@ pub fn resolve_edges(
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    // Only Edit and Write events create edges back to previously-seen files
+    // Only Edit and Write events create edges back to previously-seen files.
+    // If the same file was previously Read, the file node already exists.
+    // An edit/write after a read represents an evolution of understanding.
     match tool {
-        "Edit" => {
-            // If the same file was previously Read, the file node already exists.
-            // An edit after a read represents an evolution of understanding.
+        "Edit" | "Write" => {
             if existing_node_ids.contains(&current_node_id) {
                 extracted.graph_edges.push(PendingEdge {
                     src_id: current_node_id,
-                    dst_id: String::new(), // self-edge marker; will be skipped
-                    relationship: RelationshipType::EvolvedInto,
-                });
-            }
-        }
-        "Write" => {
-            // A Write to a previously-seen file is also an evolution.
-            if existing_node_ids.contains(&current_node_id) {
-                extracted.graph_edges.push(PendingEdge {
-                    src_id: current_node_id,
-                    dst_id: String::new(),
+                    dst_id: String::new(), // self-edge marker
                     relationship: RelationshipType::EvolvedInto,
                 });
             }
@@ -134,7 +124,7 @@ pub fn materialize_edges(pending: &[PendingEdge], memory_id: &str) -> Vec<codeme
     pending
         .iter()
         .map(|pe| {
-            // Skip self-edge markers where src == dst would be meaningless
+            // Self-edge marker: dst_id is empty, so create a self-referencing edge.
             if pe.dst_id.is_empty() {
                 // For an EVOLVED_INTO self-reference, the src node already exists
                 // from the prior Read; we create an edge from the existing node
@@ -181,23 +171,15 @@ pub fn content_hash(content: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-/// Extract memory from a Read tool use.
-fn extract_read(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
-    let file_path = payload
-        .tool_input
-        .get("file_path")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-
-    // Create a summary of the file content
-    let content = format!(
-        "File read: {}\n\n{}",
-        file_path,
-        truncate(&payload.tool_response, 2000)
-    );
-
+/// Build an `ExtractedMemory` for file-based tools (Read, Edit, Write).
+fn build_file_extraction(
+    payload: &HookPayload,
+    file_path: &str,
+    content: String,
+    memory_type: MemoryType,
+    tool_name: &str,
+) -> ExtractedMemory {
     let tags = extract_tags_from_path(file_path);
-
     let graph_node = Some(GraphNode {
         id: format!("file:{file_path}"),
         kind: NodeKind::File,
@@ -207,27 +189,47 @@ fn extract_read(payload: &HookPayload) -> Result<Option<ExtractedMemory>, Codeme
         memory_id: None,
         namespace: None,
     });
-
-    Ok(Some(ExtractedMemory {
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "file_path".to_string(),
+        serde_json::Value::String(file_path.to_string()),
+    );
+    metadata.insert(
+        "tool".to_string(),
+        serde_json::Value::String(tool_name.to_string()),
+    );
+    ExtractedMemory {
         content,
-        memory_type: MemoryType::Context,
+        memory_type,
         tags,
-        metadata: {
-            let mut m = HashMap::new();
-            m.insert(
-                "file_path".to_string(),
-                serde_json::Value::String(file_path.to_string()),
-            );
-            m.insert(
-                "tool".to_string(),
-                serde_json::Value::String("Read".to_string()),
-            );
-            m
-        },
+        metadata,
         graph_node,
         graph_edges: vec![],
         session_id: payload.session_id.clone(),
-    }))
+    }
+}
+
+/// Extract memory from a Read tool use.
+fn extract_read(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
+    let file_path = payload
+        .tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    let content = format!(
+        "File read: {}\n\n{}",
+        file_path,
+        truncate(&payload.tool_response, 2000)
+    );
+
+    Ok(Some(build_file_extraction(
+        payload,
+        file_path,
+        content,
+        MemoryType::Context,
+        "Read",
+    )))
 }
 
 /// Extract memory from a Glob tool use.
@@ -333,38 +335,13 @@ fn extract_edit(payload: &HookPayload) -> Result<Option<ExtractedMemory>, Codeme
         truncate(new_string, 500)
     );
 
-    let tags = extract_tags_from_path(file_path);
-
-    let graph_node = Some(GraphNode {
-        id: format!("file:{file_path}"),
-        kind: NodeKind::File,
-        label: file_path.to_string(),
-        payload: HashMap::new(),
-        centrality: 0.0,
-        memory_id: None,
-        namespace: None,
-    });
-
-    Ok(Some(ExtractedMemory {
+    Ok(Some(build_file_extraction(
+        payload,
+        file_path,
         content,
-        memory_type: MemoryType::Decision,
-        tags,
-        metadata: {
-            let mut m = HashMap::new();
-            m.insert(
-                "file_path".to_string(),
-                serde_json::Value::String(file_path.to_string()),
-            );
-            m.insert(
-                "tool".to_string(),
-                serde_json::Value::String("Edit".to_string()),
-            );
-            m
-        },
-        graph_node,
-        graph_edges: vec![],
-        session_id: payload.session_id.clone(),
-    }))
+        MemoryType::Decision,
+        "Edit",
+    )))
 }
 
 /// Extract memory from a Write tool use.
@@ -381,38 +358,13 @@ fn extract_write(payload: &HookPayload) -> Result<Option<ExtractedMemory>, Codem
         truncate(&payload.tool_response, 2000)
     );
 
-    let tags = extract_tags_from_path(file_path);
-
-    let graph_node = Some(GraphNode {
-        id: format!("file:{file_path}"),
-        kind: NodeKind::File,
-        label: file_path.to_string(),
-        payload: HashMap::new(),
-        centrality: 0.0,
-        memory_id: None,
-        namespace: None,
-    });
-
-    Ok(Some(ExtractedMemory {
+    Ok(Some(build_file_extraction(
+        payload,
+        file_path,
         content,
-        memory_type: MemoryType::Decision,
-        tags,
-        metadata: {
-            let mut m = HashMap::new();
-            m.insert(
-                "file_path".to_string(),
-                serde_json::Value::String(file_path.to_string()),
-            );
-            m.insert(
-                "tool".to_string(),
-                serde_json::Value::String("Write".to_string()),
-            );
-            m
-        },
-        graph_node,
-        graph_edges: vec![],
-        session_id: payload.session_id.clone(),
-    }))
+        MemoryType::Decision,
+        "Write",
+    )))
 }
 
 /// Extract entity tags from a file path.
@@ -447,12 +399,16 @@ fn extract_tags_from_path(path: &str) -> Vec<String> {
     tags
 }
 
-/// Truncate string to max length.
+/// Truncate string to max length, respecting UTF-8 char boundaries.
 fn truncate(s: &str, max_len: usize) -> &str {
     if s.len() <= max_len {
         s
     } else {
-        &s[..max_len]
+        let mut end = max_len;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        &s[..end]
     }
 }
 

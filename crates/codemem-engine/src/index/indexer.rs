@@ -106,6 +106,27 @@ impl Indexer {
         &mut self,
         root: &Path,
     ) -> Result<IndexResult, codemem_core::CodememError> {
+        self.index_directory_inner(root, None)
+    }
+
+    /// Index a directory with optional progress reporting.
+    ///
+    /// If a broadcast sender is provided, progress events are sent as files
+    /// are processed. This is useful for SSE streaming to the frontend.
+    pub fn index_directory_with_progress(
+        &mut self,
+        root: &Path,
+        tx: Option<&tokio::sync::broadcast::Sender<IndexProgress>>,
+    ) -> Result<IndexResult, codemem_core::CodememError> {
+        self.index_directory_inner(root, tx)
+    }
+
+    /// Common implementation for directory indexing with optional progress callback.
+    fn index_directory_inner(
+        &mut self,
+        root: &Path,
+        tx: Option<&tokio::sync::broadcast::Sender<IndexProgress>>,
+    ) -> Result<IndexResult, codemem_core::CodememError> {
         let mut files_scanned = 0usize;
         let mut files_parsed = 0usize;
         let mut files_skipped = 0usize;
@@ -160,8 +181,9 @@ impl Indexer {
 
             let path_str = path.to_string_lossy().to_string();
 
-            // Check incremental state
-            if !self.change_detector.is_changed(&path_str, &content) {
+            // Check incremental state (returns pre-computed hash to avoid double-hashing)
+            let (changed, hash) = self.change_detector.check_changed(&path_str, &content);
+            if !changed {
                 files_skipped += 1;
                 continue;
             }
@@ -174,130 +196,18 @@ impl Indexer {
                     total_chunks += result.chunks.len();
                     files_parsed += 1;
 
-                    // Update the change detector hash
-                    self.change_detector.update_hash(&path_str, &content);
-
-                    parse_results.push(result);
-                }
-                None => {
-                    tracing::warn!("Failed to parse {}", path_str);
-                }
-            }
-        }
-
-        tracing::info!(
-            "Indexed {}: {} scanned, {} parsed, {} skipped, {} symbols, {} references, {} chunks",
-            root.display(),
-            files_scanned,
-            files_parsed,
-            files_skipped,
-            total_symbols,
-            total_references,
-            total_chunks,
-        );
-
-        Ok(IndexResult {
-            files_scanned,
-            files_parsed,
-            files_skipped,
-            total_symbols,
-            total_references,
-            total_chunks,
-            parse_results,
-        })
-    }
-
-    /// Index a directory with optional progress reporting.
-    ///
-    /// If a broadcast sender is provided, progress events are sent as files
-    /// are processed. This is useful for SSE streaming to the frontend.
-    pub fn index_directory_with_progress(
-        &mut self,
-        root: &Path,
-        tx: Option<&tokio::sync::broadcast::Sender<IndexProgress>>,
-    ) -> Result<IndexResult, codemem_core::CodememError> {
-        let mut files_scanned = 0usize;
-        let mut files_parsed = 0usize;
-        let mut files_skipped = 0usize;
-        let mut total_symbols = 0usize;
-        let mut total_references = 0usize;
-        let mut total_chunks = 0usize;
-        let mut parse_results = Vec::new();
-
-        let walker = WalkBuilder::new(root)
-            .hidden(true)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true)
-            .build();
-
-        for entry in walker {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(err) => {
-                    tracing::warn!("Walk error: {}", err);
-                    continue;
-                }
-            };
-
-            // Skip directories
-            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-                continue;
-            }
-
-            let path = entry.path();
-
-            // Check if the file extension is supported
-            let ext = match path.extension().and_then(|e| e.to_str()) {
-                Some(e) => e,
-                None => continue,
-            };
-
-            if !self.parser.supports_extension(ext) {
-                continue;
-            }
-
-            files_scanned += 1;
-
-            // Read file content
-            let content = match std::fs::read(path) {
-                Ok(c) => c,
-                Err(err) => {
-                    tracing::warn!("Failed to read {}: {}", path.display(), err);
-                    continue;
-                }
-            };
-
-            let path_str = path.to_string_lossy().to_string();
-
-            // Compute a relative path for progress reporting
-            let relative_path = path
-                .strip_prefix(root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .to_string();
-
-            // Check incremental state
-            if !self.change_detector.is_changed(&path_str, &content) {
-                files_skipped += 1;
-                continue;
-            }
-
-            // Parse the file
-            match self.parser.parse_file(&path_str, &content) {
-                Some(result) => {
-                    total_symbols += result.symbols.len();
-                    total_references += result.references.len();
-                    total_chunks += result.chunks.len();
-                    files_parsed += 1;
-
-                    // Update the change detector hash
-                    self.change_detector.update_hash(&path_str, &content);
+                    // Record the pre-computed hash (avoids re-hashing)
+                    self.change_detector.record_hash(&path_str, hash);
 
                     parse_results.push(result);
 
                     // Send progress event if a sender is provided
                     if let Some(tx) = tx {
+                        let relative_path = path
+                            .strip_prefix(root)
+                            .unwrap_or(path)
+                            .to_string_lossy()
+                            .to_string();
                         let _ = tx.send(IndexProgress {
                             files_scanned,
                             files_parsed,
@@ -333,6 +243,7 @@ impl Indexer {
             parse_results,
         })
     }
+
     /// Index a directory, collect all symbols/references/chunks, and resolve
     /// references into graph edges.
     ///
@@ -350,11 +261,22 @@ impl Indexer {
         let mut all_chunks = Vec::new();
         let mut file_paths = HashSet::new();
 
-        for pr in &result.parse_results {
-            all_symbols.extend(pr.symbols.clone());
-            all_references.extend(pr.references.clone());
-            all_chunks.extend(pr.chunks.clone());
-            file_paths.insert(pr.file_path.clone());
+        // Consume parse_results by value to avoid cloning symbols/references/chunks
+        let IndexResult {
+            files_scanned,
+            files_parsed,
+            files_skipped,
+            total_symbols,
+            total_references,
+            total_chunks,
+            parse_results,
+        } = result;
+
+        for pr in parse_results {
+            file_paths.insert(pr.file_path);
+            all_symbols.extend(pr.symbols);
+            all_references.extend(pr.references);
+            all_chunks.extend(pr.chunks);
         }
 
         let mut resolver = ReferenceResolver::new();
@@ -362,7 +284,15 @@ impl Indexer {
         let edges = resolver.resolve_all(&all_references);
 
         Ok(IndexAndResolveResult {
-            index: result,
+            index: IndexResult {
+                files_scanned,
+                files_parsed,
+                files_skipped,
+                total_symbols,
+                total_references,
+                total_chunks,
+                parse_results: Vec::new(),
+            },
             symbols: all_symbols,
             references: all_references,
             chunks: all_chunks,

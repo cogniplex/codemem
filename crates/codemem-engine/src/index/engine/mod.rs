@@ -15,32 +15,42 @@ use ast_grep_core::tree_sitter::StrDoc;
 use ast_grep_core::{Doc, Node};
 use ast_grep_language::SupportLang;
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::LazyLock;
 
 /// Type alias for ast-grep nodes parameterized on SupportLang.
 pub type SgNode<'r> = Node<'r, StrDoc<SupportLang>>;
 
+/// One-time deserialized language rules, shared across all AstGrepEngine instances.
+static LOADED_RULES: LazyLock<Vec<LanguageRules>> =
+    LazyLock::new(crate::index::rule_loader::load_all_rules);
+
 /// The unified extraction engine.
 pub struct AstGrepEngine {
-    languages: Vec<LanguageRules>,
+    /// L29: HashMap for O(1) extension lookup instead of linear scan.
+    extension_index: HashMap<&'static str, usize>,
 }
 
 impl AstGrepEngine {
-    /// Create a new engine with all language rules loaded.
+    /// Create a new engine referencing the globally cached language rules.
     pub fn new() -> Self {
-        let languages = crate::index::rule_loader::load_all_rules();
-        Self { languages }
+        let mut extension_index = HashMap::new();
+        for (i, lr) in LOADED_RULES.iter().enumerate() {
+            for &ext in lr.extensions {
+                extension_index.insert(ext, i);
+            }
+        }
+        Self { extension_index }
     }
 
     /// Look up the rules for a given file extension.
     pub fn find_language(&self, ext: &str) -> Option<&LanguageRules> {
-        self.languages
-            .iter()
-            .find(|lr| lr.extensions.contains(&ext))
+        self.extension_index.get(ext).map(|&idx| &LOADED_RULES[idx])
     }
 
     /// List all file extensions we can handle.
     pub fn supported_extensions(&self) -> Vec<&str> {
-        self.languages
+        LOADED_RULES
             .iter()
             .flat_map(|lr| lr.extensions.iter().copied())
             .collect()
@@ -48,7 +58,7 @@ impl AstGrepEngine {
 
     /// Check if a given extension is supported.
     pub fn supports_extension(&self, ext: &str) -> bool {
-        self.languages.iter().any(|lr| lr.extensions.contains(&ext))
+        self.extension_index.contains_key(ext)
     }
 
     /// Get the language name for a given extension.
@@ -65,12 +75,13 @@ impl AstGrepEngine {
         let root = lang.lang.ast_grep(source);
         let root_node = root.root();
         let mut symbols = Vec::new();
+        let mut scope = Vec::new();
         self.extract_symbols_recursive(
             lang,
             &root_node,
             source,
             file_path,
-            &[],
+            &mut scope,
             false,
             &mut symbols,
         );
@@ -87,12 +98,13 @@ impl AstGrepEngine {
         let root = lang.lang.ast_grep(source);
         let root_node = root.root();
         let mut references = Vec::new();
+        let mut scope = Vec::new();
         self.extract_references_recursive(
             lang,
             &root_node,
             source,
             file_path,
-            &[],
+            &mut scope,
             &mut references,
         );
         references
@@ -107,7 +119,7 @@ impl AstGrepEngine {
         node: &Node<'_, D>,
         source: &str,
         file_path: &str,
-        scope: &[String],
+        scope: &mut Vec<String>,
         in_method_scope: bool,
         symbols: &mut Vec<Symbol>,
     ) where
@@ -133,11 +145,11 @@ impl AstGrepEngine {
         }
 
         // Check if this is a scope container
+        let handled_as_scope_container = lang.symbol_scope_index.contains_key(kind_str);
         if let Some(&sc_idx) = lang.symbol_scope_index.get(kind_str) {
             let sc = &lang.symbol_scope_containers[sc_idx];
             if let Some(scope_name) = self.get_scope_name(lang, sc, node, source) {
-                let mut new_scope = scope.to_vec();
-                new_scope.push(scope_name);
+                scope.push(scope_name);
                 let new_method_scope = sc.is_method_scope;
 
                 // Recurse into the body
@@ -148,7 +160,7 @@ impl AstGrepEngine {
                             &child,
                             source,
                             file_path,
-                            &new_scope,
+                            scope,
                             new_method_scope,
                             symbols,
                         );
@@ -161,12 +173,13 @@ impl AstGrepEngine {
                             &child,
                             source,
                             file_path,
-                            &new_scope,
+                            scope,
                             new_method_scope,
                             symbols,
                         );
                     }
                 }
+                scope.pop();
                 // The scope container itself might also be a symbol
                 // (e.g., trait_item is both a scope container and an interface symbol)
             }
@@ -201,9 +214,9 @@ impl AstGrepEngine {
                     symbols.push(sym);
 
                     // If this symbol creates a scope, recurse into it
-                    if is_scope {
-                        let mut new_scope = scope.to_vec();
-                        new_scope.push(name);
+                    // Skip if already handled as a scope container above
+                    if is_scope && !handled_as_scope_container {
+                        scope.push(name);
                         if let Some(body) = node.field("body") {
                             for child in body.children() {
                                 self.extract_symbols_recursive(
@@ -211,12 +224,13 @@ impl AstGrepEngine {
                                     &child,
                                     source,
                                     file_path,
-                                    &new_scope,
+                                    scope,
                                     in_method_scope,
                                     symbols,
                                 );
                             }
                         }
+                        scope.pop();
                     }
                     return; // handled this node
                 }
@@ -226,7 +240,7 @@ impl AstGrepEngine {
         // If this node was already handled as a scope container (which recursed),
         // and it was also a symbol (handled above), we've already returned.
         // If it was only a scope container (not a symbol), we already recursed.
-        if lang.symbol_scope_index.contains_key(kind_str) {
+        if handled_as_scope_container {
             return; // already recursed above
         }
 
@@ -306,7 +320,7 @@ impl AstGrepEngine {
         node: &Node<'_, D>,
         source: &str,
         file_path: &str,
-        scope: &[String],
+        scope: &mut Vec<String>,
         references: &mut Vec<Reference>,
     ) where
         D::Lang: ast_grep_core::Language,
@@ -328,9 +342,6 @@ impl AstGrepEngine {
         if let Some(&sc_idx) = lang.reference_scope_index.get(kind_str) {
             let sc = &lang.reference_scope_containers[sc_idx];
             if let Some(scope_name) = self.get_scope_name(lang, sc, node, source) {
-                let mut new_scope = scope.to_vec();
-                new_scope.push(scope_name);
-
                 // Still extract references from this node itself before recursing
                 if let Some(rule_indices) = lang.reference_index.get(kind_str) {
                     for &rule_idx in rule_indices {
@@ -341,19 +352,22 @@ impl AstGrepEngine {
                     }
                 }
 
+                scope.push(scope_name);
+
                 if let Some(body) = self.get_scope_body(sc, node) {
                     for child in body.children() {
                         self.extract_references_recursive(
-                            lang, &child, source, file_path, &new_scope, references,
+                            lang, &child, source, file_path, scope, references,
                         );
                     }
                 } else {
                     for child in node.children() {
                         self.extract_references_recursive(
-                            lang, &child, source, file_path, &new_scope, references,
+                            lang, &child, source, file_path, scope, references,
                         );
                     }
                 }
+                scope.pop();
                 return;
             }
         }
@@ -657,11 +671,10 @@ fn clean_block_doc_comment(text: &str) -> String {
             .or_else(|| line.strip_prefix('*'))
             .unwrap_or(line);
         let line = line.trim_end();
-        if !line.is_empty() {
-            doc_lines.push(line.to_string());
-        }
+        // Preserve internal blank lines (paragraph breaks)
+        doc_lines.push(line.to_string());
     }
-    doc_lines.join("\n").trim_end().to_string()
+    doc_lines.join("\n").trim().to_string()
 }
 
 #[cfg(test)]

@@ -75,6 +75,48 @@ impl HnswIndex {
         self.next_key += 1;
         key
     }
+
+    /// Rebuild the index from scratch using the provided entries.
+    ///
+    /// This eliminates ghost entries left behind by `remove()` (usearch marks
+    /// removed keys but does not free their memory). The caller should collect
+    /// all live (id, embedding) pairs — typically from SQLite — and pass them
+    /// here.
+    pub fn rebuild_from_entries(
+        &mut self,
+        entries: &[(String, Vec<f32>)],
+    ) -> Result<(), CodememError> {
+        let new_index = Index::new(&IndexOptions {
+            dimensions: self.config.dimensions,
+            metric: match self.config.metric {
+                codemem_core::DistanceMetric::Cosine => MetricKind::Cos,
+                codemem_core::DistanceMetric::L2 => MetricKind::L2sq,
+                codemem_core::DistanceMetric::InnerProduct => MetricKind::IP,
+            },
+            quantization: ScalarKind::F32,
+            connectivity: self.config.m,
+            expansion_add: self.config.ef_construction,
+            expansion_search: self.config.ef_search,
+            multi: false,
+        })
+        .map_err(|e| CodememError::Vector(e.to_string()))?;
+
+        let capacity = entries.len().max(1024);
+        new_index
+            .reserve(capacity)
+            .map_err(|e| CodememError::Vector(e.to_string()))?;
+
+        self.index = new_index;
+        self.id_to_key.clear();
+        self.key_to_id.clear();
+        self.next_key = 0;
+
+        for (id, embedding) in entries {
+            self.insert(id, embedding)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl VectorBackend for HnswIndex {
@@ -97,9 +139,10 @@ impl VectorBackend for HnswIndex {
 
         let key = self.allocate_key();
 
-        // Grow capacity if needed
+        // Grow capacity if needed (gradual growth to avoid waste)
         if self.index.size() >= self.index.capacity() {
-            let new_cap = self.index.capacity() * 2;
+            let cap = self.index.capacity();
+            let new_cap = cap + 1024.max(cap / 4);
             self.index
                 .reserve(new_cap)
                 .map_err(|e| CodememError::Vector(e.to_string()))?;
@@ -116,6 +159,13 @@ impl VectorBackend for HnswIndex {
     }
 
     fn insert_batch(&mut self, items: &[(String, Vec<f32>)]) -> Result<(), CodememError> {
+        // Pre-allocate capacity for the entire batch
+        let needed = self.index.size() + items.len();
+        if needed > self.index.capacity() {
+            self.index
+                .reserve(needed)
+                .map_err(|e| CodememError::Vector(e.to_string()))?;
+        }
         for (id, embedding) in items {
             self.insert(id, embedding)?;
         }
@@ -157,25 +207,44 @@ impl VectorBackend for HnswIndex {
     }
 
     fn save(&self, path: &Path) -> Result<(), CodememError> {
-        self.index
-            .save(path.to_str().unwrap_or("hnsw.index"))
-            .map_err(|e| CodememError::Vector(e.to_string()))?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| CodememError::Vector("Path contains non-UTF-8 characters".into()))?;
 
-        // Save ID mappings alongside
-        let map_path = path.with_extension("idmap");
+        let idmap_path = path.with_extension("idmap");
+
+        // Serialize ID mappings
         let map_data = serde_json::to_string(&IdMapping {
             id_to_key: &self.id_to_key,
             next_key: self.next_key,
         })
         .map_err(|e| CodememError::Vector(e.to_string()))?;
 
-        std::fs::write(map_path, map_data)?;
+        // Write both to temp files first, then rename atomically
+        let tmp_idmap = path.with_extension("idmap.tmp");
+        std::fs::write(&tmp_idmap, map_data)?;
+
+        let tmp_idx = path.with_extension("idx.tmp");
+        let tmp_idx_str = tmp_idx.to_str().ok_or_else(|| {
+            CodememError::Vector("Temp path contains non-UTF-8 characters".into())
+        })?;
+        self.index
+            .save(tmp_idx_str)
+            .map_err(|e| CodememError::Vector(e.to_string()))?;
+
+        // Atomic renames
+        std::fs::rename(&tmp_idmap, &idmap_path)?;
+        std::fs::rename(&tmp_idx, path_str)?;
+
         Ok(())
     }
 
     fn load(&mut self, path: &Path) -> Result<(), CodememError> {
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| CodememError::Vector("Path contains non-UTF-8 characters".into()))?;
         self.index
-            .load(path.to_str().unwrap_or("hnsw.index"))
+            .load(path_str)
             .map_err(|e| CodememError::Vector(e.to_string()))?;
 
         // Load ID mappings

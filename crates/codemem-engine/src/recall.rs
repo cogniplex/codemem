@@ -70,22 +70,55 @@ impl CodememEngine {
         let bm25 = self.lock_bm25()?;
 
         let mut results: Vec<SearchResult> = Vec::new();
-
-        let candidate_ids: Vec<(String, f64)> = if vector_results.is_empty() {
-            // Fallback: text search over all memories
-            let ids = self.storage.list_memory_ids()?;
-            ids.into_iter().map(|id| (id, 0.0)).collect()
-        } else {
-            vector_results
-                .iter()
-                .map(|(id, similarity)| (id.clone(), *similarity as f64))
-                .collect()
-        };
-
         let weights = self.scoring_weights()?;
 
-        for (id, similarity) in &candidate_ids {
-            if let Ok(Some(memory)) = self.storage.get_memory(id) {
+        if vector_results.is_empty() {
+            // Fallback: batch-load all memories matching filters in one query
+            let type_str = memory_type_filter.as_ref().map(|t| t.to_string());
+            let all_memories = self
+                .storage
+                .list_memories_filtered(namespace_filter, type_str.as_deref())?;
+
+            for memory in all_memories {
+                // Apply quality filters
+                if !exclude_tags.is_empty() && memory.tags.iter().any(|t| exclude_tags.contains(t))
+                {
+                    continue;
+                }
+                if let Some(min) = min_importance {
+                    if memory.importance < min {
+                        continue;
+                    }
+                }
+                if let Some(min) = min_confidence {
+                    if memory.confidence < min {
+                        continue;
+                    }
+                }
+
+                let breakdown = compute_score(&memory, query, &query_tokens, 0.0, &graph, &bm25);
+                let score = breakdown.total_with_weights(&weights);
+                if score > 0.01 {
+                    results.push(SearchResult {
+                        memory,
+                        score,
+                        score_breakdown: breakdown,
+                    });
+                }
+            }
+        } else {
+            // Vector search path: batch-fetch all candidate memories
+            let candidate_ids: Vec<&str> =
+                vector_results.iter().map(|(id, _)| id.as_str()).collect();
+            let candidate_memories = self.storage.get_memories_batch(&candidate_ids)?;
+
+            // Build similarity lookup
+            let sim_map: HashMap<&str, f64> = vector_results
+                .iter()
+                .map(|(id, sim)| (id.as_str(), *sim as f64))
+                .collect();
+
+            for memory in candidate_memories {
                 // Apply memory_type filter
                 if let Some(ref filter_type) = memory_type_filter {
                     if memory.memory_type != *filter_type {
@@ -114,8 +147,9 @@ impl CodememEngine {
                     }
                 }
 
+                let similarity = sim_map.get(memory.id.as_str()).copied().unwrap_or(0.0);
                 let breakdown =
-                    compute_score(&memory, query, &query_tokens, *similarity, &graph, &bm25);
+                    compute_score(&memory, query, &query_tokens, similarity, &graph, &bm25);
                 let score = breakdown.total_with_weights(&weights);
                 if score > 0.01 {
                     results.push(SearchResult {
@@ -182,46 +216,48 @@ impl CodememEngine {
         let mut seen_ids: HashSet<String> = HashSet::new();
 
         if vector_results.is_empty() {
-            // Fallback: text search over all memories
-            let ids = self.storage.list_memory_ids()?;
+            // Fallback: batch-load all memories matching namespace in one query
+            let all = self
+                .storage
+                .list_memories_filtered(namespace_filter, None)?;
             let weights = self.scoring_weights()?;
 
-            for id in &ids {
-                if let Ok(Some(memory)) = self.storage.get_memory(id) {
-                    if let Some(ns) = namespace_filter {
-                        if memory.namespace.as_deref() != Some(ns) {
-                            continue;
-                        }
-                    }
-                    let breakdown =
-                        compute_score(&memory, query, &query_tokens, 0.0, &graph, &bm25);
-                    let score = breakdown.total_with_weights(&weights);
-                    if score > 0.01 {
-                        seen_ids.insert(memory.id.clone());
-                        all_memories.push(ScoredMemory {
-                            memory,
-                            vector_sim: 0.0,
-                            expansion_path: "direct".to_string(),
-                        });
-                    }
-                }
-            }
-        } else {
-            // Vector search path
-            for (id, similarity) in &vector_results {
-                if let Ok(Some(memory)) = self.storage.get_memory(id) {
-                    if let Some(ns) = namespace_filter {
-                        if memory.namespace.as_deref() != Some(ns) {
-                            continue;
-                        }
-                    }
+            for memory in all {
+                let breakdown = compute_score(&memory, query, &query_tokens, 0.0, &graph, &bm25);
+                let score = breakdown.total_with_weights(&weights);
+                if score > 0.01 {
                     seen_ids.insert(memory.id.clone());
                     all_memories.push(ScoredMemory {
                         memory,
-                        vector_sim: *similarity as f64,
+                        vector_sim: 0.0,
                         expansion_path: "direct".to_string(),
                     });
                 }
+            }
+        } else {
+            // Vector search path: batch-fetch all candidate memories
+            let candidate_ids: Vec<&str> =
+                vector_results.iter().map(|(id, _)| id.as_str()).collect();
+            let candidate_memories = self.storage.get_memories_batch(&candidate_ids)?;
+
+            let sim_map: HashMap<&str, f64> = vector_results
+                .iter()
+                .map(|(id, sim)| (id.as_str(), *sim as f64))
+                .collect();
+
+            for memory in candidate_memories {
+                if let Some(ns) = namespace_filter {
+                    if memory.namespace.as_deref() != Some(ns) {
+                        continue;
+                    }
+                }
+                let similarity = sim_map.get(memory.id.as_str()).copied().unwrap_or(0.0);
+                seen_ids.insert(memory.id.clone());
+                all_memories.push(ScoredMemory {
+                    memory,
+                    vector_sim: similarity,
+                    expansion_path: "direct".to_string(),
+                });
             }
         }
 
@@ -229,6 +265,9 @@ impl CodememEngine {
         let direct_ids: Vec<String> = all_memories.iter().map(|m| m.memory.id.clone()).collect();
 
         for direct_id in &direct_ids {
+            // Cache edges for this direct node outside the inner loop
+            let direct_edges = graph.get_edges(direct_id).unwrap_or_default();
+
             // Use BFS expansion from this memory's graph node
             if let Ok(expanded_nodes) =
                 graph.bfs_filtered(direct_id, expansion_depth, &[NodeKind::Chunk], None)
@@ -255,24 +294,20 @@ impl CodememEngine {
                         continue;
                     }
 
-                    // Fetch the memory
-                    if let Ok(Some(memory)) = self.storage.get_memory(memory_id) {
+                    // Fetch the memory (no-touch to avoid inflating access_count)
+                    if let Ok(Some(memory)) = self.storage.get_memory_no_touch(memory_id) {
                         if let Some(ns) = namespace_filter {
                             if memory.namespace.as_deref() != Some(ns) {
                                 continue;
                             }
                         }
 
-                        // Build expansion path description
-                        let expansion_path = if let Ok(edges) = graph.get_edges(direct_id) {
-                            edges
-                                .iter()
-                                .find(|e| e.dst == expanded_node.id || e.src == expanded_node.id)
-                                .map(|e| format!("via {} from {}", e.relationship, direct_id))
-                                .unwrap_or_else(|| format!("via graph from {direct_id}"))
-                        } else {
-                            format!("via graph from {direct_id}")
-                        };
+                        // Build expansion path description using cached edges
+                        let expansion_path = direct_edges
+                            .iter()
+                            .find(|e| e.dst == expanded_node.id || e.src == expanded_node.id)
+                            .map(|e| format!("via {} from {}", e.relationship, direct_id))
+                            .unwrap_or_else(|| format!("via graph from {direct_id}"));
 
                         seen_ids.insert(memory_id.to_string());
                         all_memories.push(ScoredMemory {
@@ -348,7 +383,7 @@ impl CodememEngine {
         let mut count = 0usize;
 
         for id in &ids {
-            if let Ok(Some(memory)) = self.storage.get_memory(id) {
+            if let Ok(Some(memory)) = self.storage.get_memory_no_touch(id) {
                 count += 1;
                 total_importance += memory.importance;
                 total_confidence += memory.confidence;

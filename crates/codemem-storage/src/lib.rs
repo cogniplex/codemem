@@ -126,18 +126,33 @@ pub(crate) struct MemoryRow {
 impl MemoryRow {
     pub(crate) fn into_memory_node(self) -> Result<MemoryNode, CodememError> {
         let memory_type: MemoryType = self.memory_type.parse()?;
-        let tags: Vec<String> = serde_json::from_str(&self.tags).unwrap_or_default();
-        let metadata: HashMap<String, serde_json::Value> =
-            serde_json::from_str(&self.metadata).unwrap_or_default();
+        let tags: Vec<String> = serde_json::from_str(&self.tags).unwrap_or_else(|e| {
+            tracing::warn!(id = %self.id, error = %e, "Malformed tags JSON for memory");
+            Vec::new()
+        });
+        let metadata: HashMap<String, serde_json::Value> = serde_json::from_str(&self.metadata)
+            .unwrap_or_else(|e| {
+                tracing::warn!(id = %self.id, error = %e, "Malformed metadata JSON for memory");
+                HashMap::new()
+            });
 
         let created_at = chrono::DateTime::from_timestamp(self.created_at, 0)
-            .unwrap_or_default()
+            .unwrap_or_else(|| {
+                tracing::warn!(id = %self.id, ts = self.created_at, "Invalid created_at timestamp");
+                chrono::DateTime::<chrono::Utc>::default()
+            })
             .with_timezone(&chrono::Utc);
         let updated_at = chrono::DateTime::from_timestamp(self.updated_at, 0)
-            .unwrap_or_default()
+            .unwrap_or_else(|| {
+                tracing::warn!(id = %self.id, ts = self.updated_at, "Invalid updated_at timestamp");
+                chrono::DateTime::<chrono::Utc>::default()
+            })
             .with_timezone(&chrono::Utc);
         let last_accessed_at = chrono::DateTime::from_timestamp(self.last_accessed_at, 0)
-            .unwrap_or_default()
+            .unwrap_or_else(|| {
+                tracing::warn!(id = %self.id, ts = self.last_accessed_at, "Invalid last_accessed_at timestamp");
+                chrono::DateTime::<chrono::Utc>::default()
+            })
             .with_timezone(&chrono::Utc);
 
         Ok(MemoryNode {
@@ -146,7 +161,7 @@ impl MemoryRow {
             memory_type,
             importance: self.importance,
             confidence: self.confidence,
-            access_count: self.access_count as u32,
+            access_count: u32::try_from(self.access_count).unwrap_or(u32::MAX),
             content_hash: self.content_hash,
             tags,
             metadata,

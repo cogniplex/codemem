@@ -87,9 +87,9 @@ impl ReferenceResolver {
                 }
             }
 
-            // Fall back to first candidate
-            if let Some(qn) = candidates.first() {
-                return self.symbol_index.get(qn);
+            // Fall back to alphabetically first candidate for deterministic resolution
+            if let Some(qn) = candidates.iter().min() {
+                return self.symbol_index.get(qn.as_str());
             }
         }
 

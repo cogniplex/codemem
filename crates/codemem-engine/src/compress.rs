@@ -55,6 +55,10 @@ pub enum CompressProvider {
 
 impl CompressProvider {
     /// Create a provider from environment variables.
+    ///
+    /// Note: each call constructs a new `reqwest::blocking::Client`. Callers
+    /// should invoke this once and cache the returned provider rather than
+    /// calling it repeatedly.
     pub fn from_env() -> Self {
         let provider = std::env::var("CODEMEM_COMPRESS_PROVIDER").unwrap_or_default();
 
@@ -272,7 +276,9 @@ impl CompressProvider {
                     .map(|s| s.trim().to_string())
                     .ok_or_else(|| anyhow::anyhow!("Unexpected Anthropic response format"))
             }
-            CompressProvider::None => unreachable!(),
+            CompressProvider::None => {
+                anyhow::bail!("No compression provider configured")
+            }
         }
     }
 }
@@ -281,9 +287,14 @@ pub(crate) fn build_user_prompt(content: &str, tool: &str, file_path: Option<&st
     let file_info = file_path
         .map(|p| format!("File: {p}\n"))
         .unwrap_or_default();
-    // Cap at 8KB to avoid excessive LLM input costs
+    // Cap at 8KB to avoid excessive LLM input costs.
+    // Find a valid char boundary to avoid panicking on multi-byte UTF-8.
     let truncated = if content.len() > 8000 {
-        &content[..8000]
+        let mut end = 8000;
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        &content[..end]
     } else {
         content
     };

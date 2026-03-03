@@ -2,6 +2,8 @@
 //!
 //! Contains all 5 consolidation cycles (decay, creative, cluster, forget, summarize),
 //! helper data structures (UnionFind), and consolidation status queries.
+//!
+//! Lock ordering: always graph -> vector -> bm25 (to prevent deadlocks).
 
 use crate::CodememEngine;
 use codemem_core::{
@@ -11,6 +13,7 @@ use codemem_core::{
 use codemem_storage::vector::cosine_similarity;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
+use std::iter;
 
 /// Union-Find (disjoint set) data structure for transitive clustering.
 pub struct UnionFind {
@@ -132,6 +135,9 @@ impl CodememEngine {
 
     /// Consolidate creative: O(n log n) semantic creative consolidation.
     /// Uses vector search to find cross-type neighbors and creates SHARES_THEME edges.
+    ///
+    /// NOTE: Loads entire memory DB and all embeddings into RAM. For large databases,
+    /// this may use significant memory proportional to the number of stored memories.
     pub fn consolidate_creative(&self) -> Result<ConsolidationResult, CodememError> {
         // Load all memories with their types
         let parsed = self.storage.list_memories_for_creative()?;
@@ -145,28 +151,29 @@ impl CodememEngine {
             .map(|m| (m.id.clone(), m.memory_type.to_string()))
             .collect();
 
-        // Load existing SHARES_THEME edges to avoid duplicates
+        // Load existing SHARES_THEME edges to avoid duplicates.
+        // Use a combined key string to allow borrowed lookups without cloning per check (L19).
         let all_edges = self.storage.all_graph_edges()?;
-        let existing_edges: HashSet<(String, String)> = all_edges
+        let existing_edges: HashSet<String> = all_edges
             .iter()
             .filter(|e| {
                 e.relationship == RelationshipType::SharesTheme
                     || e.relationship == RelationshipType::RelatesTo
             })
             .flat_map(|e| {
-                vec![
-                    (e.src.clone(), e.dst.clone()),
-                    (e.dst.clone(), e.src.clone()),
-                ]
+                // H6: Use iter::once chains instead of vec![] to avoid per-edge heap alloc
+                iter::once(format!("{}\0{}", e.src, e.dst))
+                    .chain(iter::once(format!("{}\0{}", e.dst, e.src)))
             })
             .collect();
 
-        // Load all embeddings
-        let all_embeddings = self.storage.list_all_embeddings()?;
-        let embedding_map: HashMap<String, Vec<f32>> = all_embeddings.into_iter().collect();
+        // H7: Load all embeddings directly into HashMap (needed for random access by ID)
+        let embedding_map: HashMap<String, Vec<f32>> =
+            self.storage.list_all_embeddings()?.into_iter().collect();
 
         let now = chrono::Utc::now();
         let mut new_connections = 0usize;
+        // C1: Lock ordering: graph first, then vector
         let mut graph = self.lock_graph()?;
         let vector = self.lock_vector()?;
 
@@ -194,7 +201,9 @@ impl CodememEngine {
                     continue;
                 }
 
-                if existing_edges.contains(&(id.clone(), neighbor_id.clone())) {
+                // L19: Use combined key to avoid cloning both ID strings per check
+                let edge_key = format!("{id}\0{neighbor_id}");
+                if existing_edges.contains(&edge_key) {
                     continue;
                 }
 
@@ -203,18 +212,31 @@ impl CodememEngine {
                     continue;
                 }
 
-                // Ensure both nodes exist
+                // M10: Ensure both nodes exist, using memory content as label when available
                 for nid in [id, neighbor_id] {
+                    if graph.get_node(nid).ok().flatten().is_some() {
+                        continue; // Node already exists, don't overwrite
+                    }
+                    let label = memories
+                        .iter()
+                        .find(|m| m.id == *nid)
+                        .map(|m| crate::scoring::truncate_content(&m.content, 80))
+                        .unwrap_or_else(|| nid.clone());
                     let node = GraphNode {
                         id: nid.clone(),
                         kind: NodeKind::Memory,
-                        label: nid.clone(),
+                        label,
                         payload: HashMap::new(),
                         centrality: 0.0,
                         memory_id: Some(nid.clone()),
                         namespace: None,
                     };
-                    let _ = self.storage.insert_graph_node(&node);
+                    if let Err(e) = self.storage.insert_graph_node(&node) {
+                        tracing::warn!(
+                            "Failed to insert graph node {nid} during creative consolidation: {e}"
+                        );
+                    }
+                    let _ = graph.add_node(node);
                 }
 
                 let edge_id = format!("{id}-SHARES_THEME-{neighbor_id}");
@@ -257,7 +279,7 @@ impl CodememEngine {
 
     /// Consolidate cluster: semantic deduplication using cosine similarity.
     ///
-    /// Groups memories by content_hash prefix (fast pre-filter), then uses
+    /// Groups memories by namespace and memory_type for candidate grouping, then uses
     /// pairwise cosine similarity + union-find to cluster transitively-similar
     /// memories. Keeps the highest-importance memory per cluster.
     pub fn consolidate_cluster(
@@ -270,20 +292,22 @@ impl CodememEngine {
         let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
         let memories = self.storage.get_memories_batch(&id_refs)?;
 
-        // Group by first 8 chars of content_hash (fast pre-filter)
+        // M11: Group by namespace+memory_type instead of hash prefix (SHA-256 prefix is
+        // uniformly distributed, making it a no-op as a pre-filter). Grouping by semantic
+        // attributes ensures we only compare memories that could plausibly be duplicates.
         let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, m) in memories.iter().enumerate() {
-            let prefix = if m.content_hash.len() >= 8 {
-                m.content_hash[..8].to_string()
-            } else {
-                m.content_hash.clone()
-            };
-            groups.entry(prefix).or_default().push(idx);
+            let key = format!(
+                "{}:{}",
+                m.namespace.as_deref().unwrap_or("default"),
+                m.memory_type
+            );
+            groups.entry(key).or_default().push(idx);
         }
 
         // Load all embeddings for semantic comparison
-        let all_embeddings = self.storage.list_all_embeddings()?;
-        let embedding_map: HashMap<String, Vec<f32>> = all_embeddings.into_iter().collect();
+        let embedding_map: HashMap<String, Vec<f32>> =
+            self.storage.list_all_embeddings()?.into_iter().collect();
 
         // Union-find for transitive clustering
         let n = memories.len();
@@ -345,9 +369,10 @@ impl CodememEngine {
             }
         }
 
-        // Delete the duplicates
-        let mut vector = self.lock_vector()?;
+        // C1: Lock ordering: graph first, then vector, then bm25
         let mut graph = self.lock_graph()?;
+        let mut vector = self.lock_vector()?;
+        let mut bm25 = self.lock_bm25()?;
         for id in &ids_to_delete {
             if let Err(e) = self.storage.delete_memory(id) {
                 tracing::warn!("Failed to delete memory {id} during cluster consolidation: {e}");
@@ -375,12 +400,15 @@ impl CodememEngine {
                     "Failed to remove {id} from graph during cluster consolidation: {e}"
                 );
             }
+            // M15: Clean up BM25 index for deleted memories (was missing)
+            bm25.remove_document(id);
         }
 
         // Rebuild vector index if we deleted anything
         if merged_count > 0 {
             self.rebuild_vector_index_internal(&mut vector);
         }
+        drop(bm25);
         drop(vector);
         drop(graph);
 
@@ -415,17 +443,30 @@ impl CodememEngine {
         let importance_threshold = importance_threshold.unwrap_or(0.1);
         let max_access_count = max_access_count.unwrap_or(0);
 
+        // M13: When max_access_count > 0 (non-default), filter in Rust since
+        // find_forgettable() hardcodes access_count = 0 in SQL.
         let ids = match target_tags {
             Some(tags) if !tags.is_empty() => {
                 self.find_forgettable_by_tags(importance_threshold, tags, max_access_count)?
+            }
+            _ if max_access_count > 0 => {
+                // find_forgettable only returns access_count=0; fall back to manual filtering
+                let all = self.storage.list_memories_filtered(None, None)?;
+                all.into_iter()
+                    .filter(|m| {
+                        m.importance < importance_threshold && m.access_count <= max_access_count
+                    })
+                    .map(|m| m.id)
+                    .collect()
             }
             _ => self.storage.find_forgettable(importance_threshold)?,
         };
 
         let deleted = ids.len();
 
-        let mut vector = self.lock_vector()?;
+        // C1: Lock ordering: graph first, then vector, then bm25
         let mut graph = self.lock_graph()?;
+        let mut vector = self.lock_vector()?;
         let mut bm25 = self.lock_bm25()?;
         for id in &ids {
             if let Err(e) = self.storage.delete_memory(id) {
@@ -442,13 +483,13 @@ impl CodememEngine {
             if let Err(e) = self.storage.delete_graph_node(id) {
                 tracing::warn!("Failed to delete graph node {id} during forget consolidation: {e}");
             }
+            if let Err(e) = graph.remove_node(id) {
+                tracing::warn!("Failed to remove {id} from graph during forget consolidation: {e}");
+            }
             if let Err(e) = vector.remove(id) {
                 tracing::warn!(
                     "Failed to remove {id} from vector index during forget consolidation: {e}"
                 );
-            }
-            if let Err(e) = graph.remove_node(id) {
-                tracing::warn!("Failed to remove {id} from graph during forget consolidation: {e}");
             }
             bm25.remove_document(id);
         }
@@ -457,9 +498,9 @@ impl CodememEngine {
         if deleted > 0 {
             self.rebuild_vector_index_internal(&mut vector);
         }
+        drop(bm25);
         drop(vector);
         drop(graph);
-        drop(bm25);
 
         self.save_index();
 
@@ -524,18 +565,27 @@ impl CodememEngine {
             let mut source_ids: Vec<String> = Vec::new();
             let mut all_tags: Vec<String> = Vec::new();
 
-            for node_id in *cluster {
+            // M12: Acquire graph lock once before the inner loop, collect all memory IDs,
+            // then drop the lock before batch-fetching memories from storage.
+            let memory_ids: Vec<String> = {
                 let graph = self.lock_graph()?;
-                if let Ok(Some(node)) = graph.get_node(node_id) {
-                    if let Some(mid) = &node.memory_id {
-                        let mid = mid.clone();
-                        drop(graph);
-                        if let Ok(Some(mem)) = self.storage.get_memory(&mid) {
-                            contents.push(mem.content.clone());
-                            source_ids.push(mid);
-                            all_tags.extend(mem.tags.clone());
-                        }
-                    }
+                cluster
+                    .iter()
+                    .filter_map(|node_id| {
+                        graph
+                            .get_node(node_id)
+                            .ok()
+                            .flatten()
+                            .and_then(|node| node.memory_id.clone())
+                    })
+                    .collect()
+            };
+
+            for mid in &memory_ids {
+                if let Ok(Some(mem)) = self.storage.get_memory_no_touch(mid) {
+                    contents.push(mem.content.clone());
+                    source_ids.push(mid.clone());
+                    all_tags.extend(mem.tags.clone());
                 }
             }
 
@@ -639,6 +689,10 @@ impl CodememEngine {
 
     /// Find memories matching any of the target tags below importance threshold
     /// and with access_count <= max_access_count.
+    ///
+    /// M14: Note — this loads all memories and filters in Rust. For large databases,
+    /// a storage method with SQL WHERE clauses for importance/access_count/tags would
+    /// be more efficient, but that requires adding a new StorageBackend trait method.
     pub fn find_forgettable_by_tags(
         &self,
         importance_threshold: f64,

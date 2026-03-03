@@ -226,6 +226,7 @@ impl CodememEngine {
         };
 
         let query_lower = query.to_lowercase();
+        let kind_lower = kind_filter.map(|k| k.to_lowercase());
 
         let matches: Vec<SymbolSearchResult> = symbols
             .iter()
@@ -235,9 +236,8 @@ impl CodememEngine {
                 if !name_match {
                     return false;
                 }
-                if let Some(kind_str) = kind_filter {
-                    let kind_lower = kind_str.to_lowercase();
-                    return sym.kind.to_string().to_lowercase() == kind_lower;
+                if let Some(ref kl) = kind_lower {
+                    return sym.kind.to_string().to_lowercase() == *kl;
                 }
                 true
             })

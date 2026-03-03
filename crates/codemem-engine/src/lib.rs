@@ -153,12 +153,13 @@ impl CodememEngine {
         // Recompute centrality metrics on startup
         engine.lock_graph()?.recompute_centrality();
 
-        // Populate BM25 index from all existing memories
+        // Populate BM25 index from all existing memories (batch load)
         if let Ok(ids) = engine.storage.list_memory_ids() {
-            let mut bm25 = engine.lock_bm25()?;
-            for id in &ids {
-                if let Ok(Some(memory)) = engine.storage.get_memory(id) {
-                    bm25.add_document(id, &memory.content);
+            let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+            if let Ok(memories) = engine.storage.get_memories_batch(&id_refs) {
+                let mut bm25 = engine.lock_bm25()?;
+                for memory in &memories {
+                    bm25.add_document(&memory.id, &memory.content);
                 }
             }
         }
@@ -247,6 +248,9 @@ impl CodememEngine {
     // ── Contextual Enrichment ────────────────────────────────────────────────
 
     /// Build contextual text for a memory node.
+    ///
+    /// NOTE: Acquires the graph lock on each call. For batch operations,
+    /// consider passing a pre-acquired guard or caching results.
     pub fn enrich_memory_text(
         &self,
         content: &str,
@@ -345,11 +349,7 @@ impl CodememEngine {
             ctx.push_str(&format!(" Parent: {}", parent));
         }
 
-        let body = if chunk.text.len() > 4000 {
-            &chunk.text[..4000]
-        } else {
-            &chunk.text
-        };
+        let body = scoring::truncate_content(&chunk.text, 4000);
 
         format!("{ctx}\n{body}")
     }
@@ -568,8 +568,6 @@ impl CodememEngine {
             tracing::warn!("Failed to add EVOLVED_INTO edge: {e}");
         }
 
-        self.save_index();
-
         Ok((memory, new_id))
     }
 
@@ -761,11 +759,12 @@ impl CodememEngine {
 
         // Re-embed with contextual enrichment
         if let Some(emb_guard) = self.lock_embeddings()? {
-            let (mem_type, tags, namespace) = if let Ok(Some(mem)) = self.storage.get_memory(id) {
-                (mem.memory_type, mem.tags, mem.namespace)
-            } else {
-                (MemoryType::Context, vec![], None)
-            };
+            let (mem_type, tags, namespace) =
+                if let Ok(Some(mem)) = self.storage.get_memory_no_touch(id) {
+                    (mem.memory_type, mem.tags, mem.namespace)
+                } else {
+                    (MemoryType::Context, vec![], None)
+                };
             let enriched =
                 self.enrich_memory_text(content, mem_type, &tags, namespace.as_deref(), Some(id));
             let emb_result = emb_guard.embed(&enriched);

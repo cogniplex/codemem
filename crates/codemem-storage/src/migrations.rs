@@ -33,6 +33,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Session activity tracking",
         sql: include_str!("migrations/005_session_activity.sql"),
     },
+    Migration {
+        version: 6,
+        description: "UNIQUE content_hash and session_activity tool index",
+        sql: include_str!("migrations/006_schema_fixes.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.
@@ -56,7 +61,8 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CodememError> {
         )
         .map_err(|e| CodememError::Storage(e.to_string()))?;
 
-    // Run unapplied migrations
+    // Run unapplied migrations, each wrapped in an EXCLUSIVE transaction
+    // so migration SQL + version INSERT are atomic.
     for migration in MIGRATIONS {
         if migration.version > current_version {
             tracing::info!(
@@ -64,13 +70,17 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CodememError> {
                 migration.version,
                 migration.description
             );
-            conn.execute_batch(migration.sql).map_err(|e| {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+            tx.execute_batch(migration.sql).map_err(|e| {
                 CodememError::Storage(format!(
                     "Migration {} ({}) failed: {}",
                     migration.version, migration.description, e
                 ))
             })?;
-            conn.execute(
+            tx.execute(
                 "INSERT INTO schema_version (version, description, applied_at) VALUES (?1, ?2, ?3)",
                 rusqlite::params![
                     migration.version,
@@ -79,6 +89,9 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CodememError> {
                 ],
             )
             .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+            tx.commit()
+                .map_err(|e| CodememError::Storage(e.to_string()))?;
         }
     }
 

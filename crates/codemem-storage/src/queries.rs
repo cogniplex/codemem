@@ -3,7 +3,6 @@
 use crate::Storage;
 use codemem_core::{CodememError, ConsolidationLogEntry, Session, StorageStats};
 use rusqlite::params;
-use std::collections::HashMap;
 
 impl Storage {
     // ── Health / Diagnostics ────────────────────────────────────────────
@@ -83,12 +82,9 @@ impl Storage {
         let mut stmt = conn
             .prepare(
                 "SELECT cycle_type, run_at, affected_count FROM consolidation_log
-                 WHERE id IN (
-                     SELECT id FROM consolidation_log c2
-                     WHERE c2.cycle_type = consolidation_log.cycle_type
-                     ORDER BY run_at DESC LIMIT 1
+                 WHERE (cycle_type, run_at) IN (
+                     SELECT cycle_type, MAX(run_at) FROM consolidation_log GROUP BY cycle_type
                  )
-                 GROUP BY cycle_type
                  ORDER BY cycle_type",
             )
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -245,10 +241,11 @@ impl Storage {
     }
 
     /// Get tool usage statistics from memory metadata.
+    /// Returns (tool_name, count) pairs sorted by count descending.
     pub fn get_tool_usage_stats(
         &self,
         namespace: Option<&str>,
-    ) -> Result<HashMap<String, usize>, CodememError> {
+    ) -> Result<Vec<(String, usize)>, CodememError> {
         let conn = self.conn()?;
         let sql = if namespace.is_some() {
             "SELECT json_extract(metadata, '$.tool') AS tool,
@@ -411,6 +408,7 @@ impl Storage {
     }
 
     /// List memories that contain a specific tag, optionally scoped to a namespace.
+    /// Uses `json_each` for proper JSON array querying instead of LIKE patterns.
     pub fn list_memories_by_tag(
         &self,
         tag: &str,
@@ -418,35 +416,36 @@ impl Storage {
         limit: usize,
     ) -> Result<Vec<codemem_core::MemoryNode>, CodememError> {
         let conn = self.conn()?;
-        let like_pattern = format!("%\"{tag}\"%");
 
         let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ns) =
             namespace
         {
             (
-                    "SELECT id, content, memory_type, importance, confidence, access_count, \
-                     content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at \
-                     FROM memories WHERE tags LIKE ?1 AND namespace = ?2 \
-                     ORDER BY created_at DESC LIMIT ?3"
-                        .to_string(),
-                    vec![
-                        Box::new(like_pattern) as Box<dyn rusqlite::types::ToSql>,
-                        Box::new(ns.to_string()),
-                        Box::new(limit as i64),
-                    ],
-                )
+                "SELECT m.id, m.content, m.memory_type, m.importance, m.confidence, m.access_count, \
+                 m.content_hash, m.tags, m.metadata, m.namespace, m.created_at, m.updated_at, m.last_accessed_at \
+                 FROM memories m, json_each(m.tags) AS jt \
+                 WHERE jt.value = ?1 AND m.namespace = ?2 \
+                 ORDER BY m.created_at DESC LIMIT ?3"
+                    .to_string(),
+                vec![
+                    Box::new(tag.to_string()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(ns.to_string()),
+                    Box::new(limit as i64),
+                ],
+            )
         } else {
             (
-                    "SELECT id, content, memory_type, importance, confidence, access_count, \
-                     content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at \
-                     FROM memories WHERE tags LIKE ?1 \
-                     ORDER BY created_at DESC LIMIT ?2"
-                        .to_string(),
-                    vec![
-                        Box::new(like_pattern) as Box<dyn rusqlite::types::ToSql>,
-                        Box::new(limit as i64),
-                    ],
-                )
+                "SELECT m.id, m.content, m.memory_type, m.importance, m.confidence, m.access_count, \
+                 m.content_hash, m.tags, m.metadata, m.namespace, m.created_at, m.updated_at, m.last_accessed_at \
+                 FROM memories m, json_each(m.tags) AS jt \
+                 WHERE jt.value = ?1 \
+                 ORDER BY m.created_at DESC LIMIT ?2"
+                    .to_string(),
+                vec![
+                    Box::new(tag.to_string()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(limit as i64),
+                ],
+            )
         };
 
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -549,45 +548,31 @@ impl Storage {
         Ok(())
     }
 
-    /// Get a summary of session activity counts.
+    /// Get a summary of session activity counts using a single query with conditional aggregation.
     pub fn get_session_activity_summary(
         &self,
         session_id: &str,
     ) -> Result<codemem_core::SessionActivitySummary, CodememError> {
         let conn = self.conn()?;
 
-        let files_read: i64 = conn
+        let (files_read, files_edited, searches, total_actions) = conn
             .query_row(
-                "SELECT COUNT(DISTINCT file_path) FROM session_activity
-                 WHERE session_id = ?1 AND tool_name = 'Read' AND file_path IS NOT NULL",
+                "SELECT
+                     COUNT(DISTINCT CASE WHEN tool_name = 'Read' AND file_path IS NOT NULL THEN file_path END),
+                     COUNT(DISTINCT CASE WHEN tool_name IN ('Edit', 'Write') AND file_path IS NOT NULL THEN file_path END),
+                     SUM(CASE WHEN tool_name IN ('Grep', 'Glob') THEN 1 ELSE 0 END),
+                     COUNT(*)
+                 FROM session_activity
+                 WHERE session_id = ?1",
                 params![session_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
-
-        let files_edited: i64 = conn
-            .query_row(
-                "SELECT COUNT(DISTINCT file_path) FROM session_activity
-                 WHERE session_id = ?1 AND tool_name IN ('Edit', 'Write') AND file_path IS NOT NULL",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
-
-        let searches: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM session_activity
-                 WHERE session_id = ?1 AND tool_name IN ('Grep', 'Glob')",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
-
-        let total_actions: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM session_activity WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get(0),
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
             )
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
@@ -629,19 +614,19 @@ impl Storage {
     }
 
     /// Check whether an auto-insight dedup tag exists for a session.
+    /// Uses `json_extract` with proper parameter binding instead of LIKE on JSON.
     pub fn has_auto_insight(
         &self,
         session_id: &str,
         dedup_tag: &str,
     ) -> Result<bool, CodememError> {
         let conn = self.conn()?;
-        let like_session = format!("%\"session_id\":\"{session_id}\"%");
-        let like_dedup = format!("%\"auto_insight_tag\":\"{dedup_tag}\"%");
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM memories
-                 WHERE metadata LIKE ?1 AND metadata LIKE ?2",
-                params![like_session, like_dedup],
+                 WHERE json_extract(metadata, '$.session_id') = ?1
+                   AND json_extract(metadata, '$.auto_insight_tag') = ?2",
+                params![session_id, dedup_tag],
                 |row| row.get(0),
             )
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -753,30 +738,38 @@ impl Storage {
 
     /// Delete all graph nodes, their edges, and their embeddings where the
     /// node ID starts with the given prefix. Returns count of nodes deleted.
+    /// Wrapped in a transaction so all three DELETEs are atomic.
     pub fn delete_graph_nodes_by_prefix(&self, prefix: &str) -> Result<usize, CodememError> {
         let conn = self.conn()?;
         let like_pattern = format!("{prefix}%");
 
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
         // Delete edges where src or dst matches prefix
-        conn.execute(
+        tx.execute(
             "DELETE FROM graph_edges WHERE src LIKE ?1 OR dst LIKE ?1",
             params![like_pattern],
         )
         .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         // Delete embeddings for matching nodes
-        conn.execute(
+        tx.execute(
             "DELETE FROM memory_embeddings WHERE memory_id LIKE ?1",
             params![like_pattern],
         )
         .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         // Delete the nodes themselves
-        let rows = conn
+        let rows = tx
             .execute(
                 "DELETE FROM graph_nodes WHERE id LIKE ?1",
                 params![like_pattern],
             )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        tx.commit()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         Ok(rows)

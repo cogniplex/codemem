@@ -168,6 +168,13 @@ pub trait StorageBackend: Send + Sync {
     /// Get a memory by ID. Updates access_count and last_accessed_at.
     fn get_memory(&self, id: &str) -> Result<Option<MemoryNode>, CodememError>;
 
+    /// Get a memory by ID without updating access_count or last_accessed_at.
+    /// Use this for internal/system reads (consolidation checks, stats, batch processing).
+    fn get_memory_no_touch(&self, id: &str) -> Result<Option<MemoryNode>, CodememError> {
+        // Default: falls back to get_memory for backwards compatibility.
+        self.get_memory(id)
+    }
+
     /// Get multiple memories by IDs in a single batch operation.
     fn get_memories_batch(&self, ids: &[&str]) -> Result<Vec<MemoryNode>, CodememError>;
 
@@ -309,9 +316,10 @@ pub trait StorageBackend: Send + Sync {
         &self,
     ) -> Result<Vec<(String, String, Vec<String>)>, CodememError>;
 
-    /// Find near-duplicate memories by content hash prefix similarity.
-    /// Returns (id1, id2, similarity) pairs.
-    fn find_cluster_duplicates(&self) -> Result<Vec<(String, String, f64)>, CodememError>;
+    /// Find near-duplicate memories by content hash prefix matching.
+    /// Returns (id1, id2, similarity) pairs. Only catches exact content matches
+    /// (hash prefix), not semantic near-duplicates.
+    fn find_hash_duplicates(&self) -> Result<Vec<(String, String, f64)>, CodememError>;
 
     /// Find memories eligible for forgetting (low importance).
     /// Returns list of memory IDs.

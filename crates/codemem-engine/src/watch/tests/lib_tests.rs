@@ -14,15 +14,17 @@ fn test_is_watchable() {
 fn test_should_ignore_without_gitignore() {
     assert!(should_ignore(
         Path::new("project/node_modules/foo/bar.js"),
-        None
+        None,
+        false,
     ));
     assert!(should_ignore(
         Path::new("project/target/debug/build.rs"),
-        None
+        None,
+        false,
     ));
-    assert!(should_ignore(Path::new(".git/config"), None));
-    assert!(!should_ignore(Path::new("src/main.rs"), None));
-    assert!(!should_ignore(Path::new("lib/utils.ts"), None));
+    assert!(should_ignore(Path::new(".git/config"), None, false));
+    assert!(!should_ignore(Path::new("src/main.rs"), None, false));
+    assert!(!should_ignore(Path::new("lib/utils.ts"), None, false));
 }
 
 #[test]
@@ -34,24 +36,34 @@ fn test_should_ignore_with_gitignore() {
     let gi = build_gitignore(dir.path()).unwrap();
 
     // Matches .gitignore pattern (*.log)
-    assert!(should_ignore(&dir.path().join("debug.log"), Some(&gi)));
+    assert!(should_ignore(
+        &dir.path().join("debug.log"),
+        Some(&gi),
+        false
+    ));
 
     // Matches .gitignore pattern (secrets/) -- also caught by hardcoded fallback check
     // The gitignore matcher matches against paths under the root.
     // For directory patterns, the path must be checked as a directory.
     assert!(should_ignore(
         &dir.path().join("secrets/key.txt"),
-        Some(&gi)
+        Some(&gi),
+        false,
     ));
 
     // Matches hardcoded IGNORE_DIRS via the fallback component check
     assert!(should_ignore(
         &dir.path().join("node_modules/foo.js"),
-        Some(&gi)
+        Some(&gi),
+        false,
     ));
 
     // Not ignored
-    assert!(!should_ignore(&dir.path().join("src/main.rs"), Some(&gi)));
+    assert!(!should_ignore(
+        &dir.path().join("src/main.rs"),
+        Some(&gi),
+        false
+    ));
 }
 
 #[test]
@@ -66,7 +78,8 @@ fn test_build_gitignore_without_file() {
     let gi = gi.unwrap();
     assert!(should_ignore(
         &dir.path().join("node_modules/foo.js"),
-        Some(&gi)
+        Some(&gi),
+        false,
     ));
 }
 

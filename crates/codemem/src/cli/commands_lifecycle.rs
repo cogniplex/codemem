@@ -150,7 +150,7 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
 
     let mut recent_memories: Vec<codemem_core::MemoryNode> = Vec::new();
     for id in memory_ids.iter().rev().take(200) {
-        if let Ok(Some(m)) = storage.get_memory(id) {
+        if let Ok(Some(m)) = storage.get_memory_no_touch(id) {
             if matches!(
                 m.memory_type,
                 codemem_core::MemoryType::Decision
@@ -235,7 +235,7 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
     };
     let mut pending_files: Vec<String> = Vec::new();
     for id in pending_ids.iter().rev().take(100) {
-        if let Ok(Some(m)) = storage.get_memory(id) {
+        if let Ok(Some(m)) = storage.get_memory_no_touch(id) {
             if m.tags.contains(&"pending-analysis".to_string()) {
                 if let Some(files) = m.metadata.get("files").and_then(|v| v.as_array()) {
                     for f in files {
@@ -473,7 +473,7 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
     let mut prompts: Vec<String> = Vec::new();
 
     for id in &all_ids {
-        if let Ok(Some(m)) = storage.get_memory(id) {
+        if let Ok(Some(m)) = storage.get_memory_no_touch(id) {
             // Filter to memories created during this session
             if m.created_at < session_start {
                 continue;

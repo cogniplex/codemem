@@ -152,7 +152,7 @@ fn detect_tool_preferences(
     Ok(tool_entries
         .into_iter()
         .map(|(tool, count)| {
-            let pct = (count as f64 / total as f64 * 100.0) as usize;
+            let pct = (count as f64 / total as f64 * 100.0).round() as usize;
             DetectedPattern {
                 pattern_type: PatternType::ToolPreference,
                 description: format!(
