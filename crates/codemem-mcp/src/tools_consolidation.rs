@@ -476,8 +476,11 @@ impl McpServer {
             }
         } else {
             // Tag-aware: scan memories matching tags below threshold
-            match self.find_forgettable_by_tags(importance_threshold, &target_tags, max_access_count)
-            {
+            match self.find_forgettable_by_tags(
+                importance_threshold,
+                &target_tags,
+                max_access_count,
+            ) {
                 Ok(ids) => ids,
                 Err(e) => return ToolResult::tool_error(format!("Forget cycle failed: {e}")),
             }

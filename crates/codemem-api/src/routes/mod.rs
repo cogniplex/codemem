@@ -9,3 +9,4 @@ pub mod repos;
 pub mod sessions;
 pub mod stats;
 pub mod timeline;
+pub mod vectors;

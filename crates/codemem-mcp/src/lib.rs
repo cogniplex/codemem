@@ -1,7 +1,8 @@
 //! codemem-mcp: MCP server for Codemem (JSON-RPC 2.0 over stdio).
 //!
-//! Implements 42 tools: store_memory, recall_memory, update_memory,
-//! delete_memory, associate_memories, graph_traverse, codemem_stats, codemem_health,
+//! Implements 43 tools: store_memory, recall_memory, update_memory,
+//! delete_memory, associate_memories, graph_traverse, summary_tree,
+//! codemem_stats, codemem_health,
 //! index_codebase, search_symbols, get_symbol_info, get_dependencies, get_impact,
 //! get_clusters, get_cross_repo, get_pagerank, search_code, set_scoring_weights,
 //! export_memories, import_memories, recall_with_expansion, list_namespaces,
@@ -9,7 +10,8 @@
 //! consolidate_cluster, consolidate_forget, consolidation_status,
 //! recall_with_impact, get_decision_chain, detect_patterns, pattern_insights,
 //! refine_memory, split_memory, merge_memories, consolidate_summarize,
-//! codemem_metrics, session_checkpoint.
+//! codemem_metrics, session_checkpoint,
+//! enrich_git_history, enrich_security, enrich_performance.
 //!
 //! Transport: Newline-delimited JSON-RPC messages over stdio.
 //! All logging goes to stderr; stdout is reserved for JSON-RPC only.
@@ -369,7 +371,9 @@ impl McpServer {
 
         // Look for file paths: word tokens containing '/' or ending in common extensions
         for word in content.split_whitespace() {
-            let cleaned = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-' && c != ':');
+            let cleaned = word.trim_matches(|c: char| {
+                !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-' && c != ':'
+            });
             if cleaned.is_empty() {
                 continue;
             }
@@ -415,9 +419,7 @@ impl McpServer {
                 valid_from: None,
                 valid_to: None,
             };
-            if self.storage.insert_graph_edge(&edge).is_ok()
-                && graph.add_edge(edge).is_ok()
-            {
+            if self.storage.insert_graph_edge(&edge).is_ok() && graph.add_edge(edge).is_ok() {
                 created += 1;
             }
         }

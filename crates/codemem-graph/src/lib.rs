@@ -255,7 +255,11 @@ impl GraphEngine {
                         || neighbor_id.starts_with("pkg:")
                     {
                         code_neighbor_count += 1;
-                        let pr = self.cached_pagerank.get(neighbor_id).copied().unwrap_or(0.0);
+                        let pr = self
+                            .cached_pagerank
+                            .get(neighbor_id)
+                            .copied()
+                            .unwrap_or(0.0);
                         let bt = self
                             .cached_betweenness
                             .get(neighbor_id)
@@ -285,7 +289,11 @@ impl GraphEngine {
         let connectivity_bonus = (code_neighbor_count as f64 / 5.0).min(1.0);
         let edge_weight_bonus = (total_edge_weight / code_neighbor_count as f64).min(1.0);
 
-        (0.4 * max_pagerank + 0.3 * max_betweenness + 0.2 * connectivity_bonus + 0.1 * edge_weight_bonus).min(1.0)
+        (0.4 * max_pagerank
+            + 0.3 * max_betweenness
+            + 0.2 * connectivity_bonus
+            + 0.1 * edge_weight_bonus)
+            .min(1.0)
     }
 
     /// Get the maximum degree (in + out) across all nodes in the graph.

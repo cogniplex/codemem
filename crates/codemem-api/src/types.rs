@@ -195,6 +195,50 @@ pub struct ShortestPathQuery {
     pub to: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BrowseQuery {
+    pub namespace: Option<String>,
+    pub kind: Option<String>,
+    pub q: Option<String>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BrowseNodeItem {
+    pub id: String,
+    pub kind: String,
+    pub label: String,
+    pub centrality: f64,
+    pub namespace: Option<String>,
+    pub degree: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BrowseResponse {
+    pub nodes: Vec<BrowseNodeItem>,
+    pub total: usize,
+    pub kinds: HashMap<String, usize>,
+    pub edge_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VectorQuery {
+    pub namespace: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VectorPoint {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub memory_type: String,
+    pub importance: f64,
+    pub namespace: Option<String>,
+    pub label: String,
+}
+
 // ── Namespaces ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]

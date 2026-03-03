@@ -1,5 +1,7 @@
 use crate::GraphEngine;
-use codemem_core::{CodememError, Edge, GraphBackend, GraphNode, GraphStats, NodeKind, RelationshipType};
+use codemem_core::{
+    CodememError, Edge, GraphBackend, GraphNode, GraphStats, NodeKind, RelationshipType,
+};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
 use petgraph::Direction;
@@ -198,8 +200,16 @@ impl GraphBackend for GraphEngine {
 
                 // Check relationship filter if set
                 if let Some(allowed_rels) = include_relationships {
-                    let src_id = self.graph.node_weight(node_idx).cloned().unwrap_or_default();
-                    let dst_id = self.graph.node_weight(neighbor_idx).cloned().unwrap_or_default();
+                    let src_id = self
+                        .graph
+                        .node_weight(node_idx)
+                        .cloned()
+                        .unwrap_or_default();
+                    let dst_id = self
+                        .graph
+                        .node_weight(neighbor_idx)
+                        .cloned()
+                        .unwrap_or_default();
                     let edge_matches = self.edges.values().any(|e| {
                         e.src == src_id && e.dst == dst_id && allowed_rels.contains(&e.relationship)
                     });
@@ -267,8 +277,16 @@ impl GraphBackend for GraphEngine {
 
                 // Check relationship filter if set
                 if let Some(allowed_rels) = include_relationships {
-                    let src_id = self.graph.node_weight(node_idx).cloned().unwrap_or_default();
-                    let dst_id = self.graph.node_weight(neighbor_idx).cloned().unwrap_or_default();
+                    let src_id = self
+                        .graph
+                        .node_weight(node_idx)
+                        .cloned()
+                        .unwrap_or_default();
+                    let dst_id = self
+                        .graph
+                        .node_weight(neighbor_idx)
+                        .cloned()
+                        .unwrap_or_default();
                     let edge_matches = self.edges.values().any(|e| {
                         e.src == src_id && e.dst == dst_id && allowed_rels.contains(&e.relationship)
                     });

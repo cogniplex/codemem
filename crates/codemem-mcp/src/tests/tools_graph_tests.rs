@@ -691,11 +691,7 @@ fn compaction_creates_package_nodes() {
     let mut graph = server.graph.lock().unwrap();
 
     // Simulate file nodes for a directory tree: src/auth/middleware.rs, src/api/handler.rs
-    let files = vec![
-        "src/auth/middleware.rs",
-        "src/api/handler.rs",
-        "src/lib.rs",
-    ];
+    let files = vec!["src/auth/middleware.rs", "src/api/handler.rs", "src/lib.rs"];
     let now = chrono::Utc::now();
     let mut seen_files = std::collections::HashSet::new();
 
@@ -847,7 +843,10 @@ fn compaction_prunes_low_score_chunks() {
     let (chunks_pruned, _symbols_pruned) = server.compact_graph(&seen);
 
     // With 15 chunks and max_retained_chunks_per_file=10, at least some should be pruned
-    assert!(chunks_pruned > 0, "Expected some chunks to be pruned, got 0");
+    assert!(
+        chunks_pruned > 0,
+        "Expected some chunks to be pruned, got 0"
+    );
 
     // Remaining chunk nodes should be <= max_retained_chunks_per_file
     let graph = server.graph.lock().unwrap();
@@ -956,7 +955,10 @@ fn compaction_preserves_memory_linked_chunks() {
     // The memory-linked chunk (chunk:0) should survive compaction
     let graph = server.graph.lock().unwrap();
     let chunk0 = graph.get_node(&format!("chunk:{file_path}:0")).unwrap();
-    assert!(chunk0.is_some(), "Memory-linked chunk should survive compaction");
+    assert!(
+        chunk0.is_some(),
+        "Memory-linked chunk should survive compaction"
+    );
 }
 
 #[test]

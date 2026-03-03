@@ -1,6 +1,6 @@
 # codemem-mcp
 
-MCP server exposing 42 tools over JSON-RPC 2.0 (stdio transport).
+MCP server exposing 43 tools over JSON-RPC 2.0 (stdio transport).
 
 ## Overview
 

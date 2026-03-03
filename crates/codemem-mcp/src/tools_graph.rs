@@ -285,13 +285,21 @@ impl McpServer {
                 if i > 0 {
                     let parent_pkg_id = format!("pkg:{}/", ancestors[i - 1]);
                     let edge_id = format!("contains:{parent_pkg_id}->{pkg_id}");
-                    if !graph.get_edges(&parent_pkg_id).unwrap_or_default().iter().any(|e| e.id == edge_id) {
+                    if !graph
+                        .get_edges(&parent_pkg_id)
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|e| e.id == edge_id)
+                    {
                         let edge = Edge {
                             id: edge_id,
                             src: parent_pkg_id,
                             dst: pkg_id.clone(),
                             relationship: codemem_core::RelationshipType::Contains,
-                            weight: edge_weight_for(&RelationshipType::Contains, &self.config.graph),
+                            weight: edge_weight_for(
+                                &RelationshipType::Contains,
+                                &self.config.graph,
+                            ),
                             valid_from: None,
                             valid_to: None,
                             properties: HashMap::new(),
@@ -1102,10 +1110,7 @@ impl McpServer {
     /// in the vector index for semantic search).
     ///
     /// Returns the number of chunks pruned.
-    fn compact_graph(
-        &self,
-        seen_files: &std::collections::HashSet<String>,
-    ) -> (usize, usize) {
+    fn compact_graph(&self, seen_files: &std::collections::HashSet<String>) -> (usize, usize) {
         let mut graph = match self.lock_graph() {
             Ok(g) => g,
             Err(_) => return (0, 0),
@@ -1225,8 +1230,10 @@ impl McpServer {
             for (i, (chunk_id, score)) in chunks.iter().enumerate() {
                 if i >= k || *score < chunk_score_threshold {
                     if let Ok(Some(chunk_node)) = graph.get_node(chunk_id) {
-                        if let Some(parent_sym) =
-                            chunk_node.payload.get("parent_symbol").and_then(|v| v.as_str())
+                        if let Some(parent_sym) = chunk_node
+                            .payload
+                            .get("parent_symbol")
+                            .and_then(|v| v.as_str())
                         {
                             let parent_id = format!("sym:{parent_sym}");
                             if let Ok(Some(mut parent_node)) = graph.get_node(&parent_id) {
@@ -1404,10 +1411,12 @@ impl McpServer {
                 NodeKind::Class | NodeKind::Interface | NodeKind::Module
             );
 
-            syms_by_file
-                .entry(file_path)
-                .or_default()
-                .push((node.id.clone(), symbol_score, is_structural, mem_linked));
+            syms_by_file.entry(file_path).or_default().push((
+                node.id.clone(),
+                symbol_score,
+                is_structural,
+                mem_linked,
+            ));
         }
 
         let mut symbols_pruned = 0usize;
@@ -1499,10 +1508,7 @@ impl McpServer {
             Some(s) => s,
             None => return ToolResult::tool_error("Missing 'start_id' parameter"),
         };
-        let max_depth = args
-            .get("max_depth")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(3) as usize;
+        let max_depth = args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
         let include_chunks = args
             .get("include_chunks")
             .and_then(|v| v.as_bool())
@@ -1535,8 +1541,7 @@ impl McpServer {
                     let mut child_ids: Vec<String> = edges
                         .iter()
                         .filter(|e| {
-                            e.src == node_id
-                                && e.relationship == RelationshipType::Contains
+                            e.src == node_id && e.relationship == RelationshipType::Contains
                         })
                         .map(|e| e.dst.clone())
                         .collect();
@@ -1592,9 +1597,9 @@ impl McpServer {
         }
 
         match build_tree(&*graph, start_id, 0, max_depth, include_chunks) {
-            Some(tree) => ToolResult::text(
-                serde_json::to_string_pretty(&tree).expect("JSON serialization"),
-            ),
+            Some(tree) => {
+                ToolResult::text(serde_json::to_string_pretty(&tree).expect("JSON serialization"))
+            }
             None => ToolResult::tool_error(format!("Node not found: {start_id}")),
         }
     }

@@ -4,11 +4,15 @@
 //! and optional embedded frontend. Can optionally mount the MCP HTTP
 //! transport for remote MCP clients.
 
+mod pca;
 pub mod routes;
 pub mod sse;
 pub mod types;
 
-use axum::{routing::{get, post}, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use codemem_index::IndexProgress;
 use codemem_mcp::McpServer;
 use std::sync::Arc;
@@ -105,6 +109,9 @@ impl ApiServer {
             )
             .route("/api/graph/impact/{id}", get(routes::graph::get_impact))
             .route("/api/graph/reload", post(routes::graph::reload_graph))
+            .route("/api/graph/browse", get(routes::graph::get_graph_browse))
+            // Vectors
+            .route("/api/vectors", get(routes::vectors::get_vectors))
             // Namespaces
             .route("/api/namespaces", get(routes::namespaces::list_namespaces))
             .route(

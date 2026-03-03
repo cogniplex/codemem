@@ -210,12 +210,7 @@ fn bfs_filtered_includes_only_specified_relationships() {
 
     // Only follow CALLS edges
     let filtered = graph
-        .bfs_filtered(
-            "sym:a",
-            3,
-            &[],
-            Some(&[RelationshipType::Calls]),
-        )
+        .bfs_filtered("sym:a", 3, &[], Some(&[RelationshipType::Calls]))
         .unwrap();
     let ids: Vec<&str> = filtered.iter().map(|n| n.id.as_str()).collect();
     assert!(ids.contains(&"sym:a"));
@@ -248,12 +243,7 @@ fn dfs_filtered_includes_only_specified_relationships() {
 
     // Only follow IMPORTS
     let filtered = graph
-        .dfs_filtered(
-            "sym:x",
-            3,
-            &[],
-            Some(&[RelationshipType::Imports]),
-        )
+        .dfs_filtered("sym:x", 3, &[], Some(&[RelationshipType::Imports]))
         .unwrap();
     let ids: Vec<&str> = filtered.iter().map(|n| n.id.as_str()).collect();
     assert!(ids.contains(&"sym:x"));

@@ -1,9 +1,9 @@
 //! Graph exploration routes.
 
 use crate::types::{
-    CommunitiesQuery, CommunitiesResponse, GraphEdgeResponse, GraphNodeResponse, NeighborsQuery,
-    PagerankEntry, PagerankQuery, PagerankResponse, ShortestPathQuery, SubgraphQuery,
-    SubgraphResponse,
+    BrowseNodeItem, BrowseQuery, BrowseResponse, CommunitiesQuery, CommunitiesResponse,
+    GraphEdgeResponse, GraphNodeResponse, NeighborsQuery, PagerankEntry, PagerankQuery,
+    PagerankResponse, ShortestPathQuery, SubgraphQuery, SubgraphResponse,
 };
 use crate::AppState;
 use axum::{
@@ -255,4 +255,99 @@ pub async fn get_impact(
         nodes,
         edges: Vec::new(),
     }))
+}
+
+pub async fn get_graph_browse(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BrowseQuery>,
+) -> Json<BrowseResponse> {
+    let limit = query.limit.unwrap_or(50).min(200);
+    let offset = query.offset.unwrap_or(0);
+
+    let storage = state.server.storage();
+
+    let mut all_nodes = storage.all_graph_nodes().unwrap_or_default();
+    let all_edges = storage.all_graph_edges().unwrap_or_default();
+
+    // Apply filters
+    if let Some(ref ns) = query.namespace {
+        all_nodes.retain(|n| n.namespace.as_deref() == Some(ns.as_str()));
+    }
+    if let Some(ref kind) = query.kind {
+        all_nodes.retain(|n| n.kind.to_string() == *kind);
+    }
+    if let Some(ref q) = query.q {
+        if !q.is_empty() {
+            let q_lower = q.to_lowercase();
+            all_nodes.retain(|n| n.label.to_lowercase().contains(&q_lower));
+        }
+    }
+
+    // Sort by centrality descending
+    all_nodes.sort_by(|a, b| {
+        b.centrality
+            .partial_cmp(&a.centrality)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let total = all_nodes.len();
+
+    // Kind counts (only filtered by namespace + search, not kind)
+    let mut kind_filtered_nodes = storage.all_graph_nodes().unwrap_or_default();
+    if let Some(ref ns) = query.namespace {
+        kind_filtered_nodes.retain(|n| n.namespace.as_deref() == Some(ns.as_str()));
+    }
+    if let Some(ref q) = query.q {
+        if !q.is_empty() {
+            let q_lower = q.to_lowercase();
+            kind_filtered_nodes.retain(|n| n.label.to_lowercase().contains(&q_lower));
+        }
+    }
+    let mut kinds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for node in &kind_filtered_nodes {
+        *kinds.entry(node.kind.to_string()).or_insert(0) += 1;
+    }
+
+    // Compute degree for each node
+    let mut degree_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for edge in &all_edges {
+        *degree_map.entry(edge.src.clone()).or_insert(0) += 1;
+        *degree_map.entry(edge.dst.clone()).or_insert(0) += 1;
+    }
+
+    // Paginate
+    let nodes: Vec<BrowseNodeItem> = all_nodes
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(|n| BrowseNodeItem {
+            id: n.id.clone(),
+            kind: n.kind.to_string(),
+            label: n.label.clone(),
+            centrality: n.centrality,
+            namespace: n.namespace.clone(),
+            degree: *degree_map.get(&n.id).unwrap_or(&0),
+        })
+        .collect();
+
+    // Edge count
+    let edge_count = if query.namespace.is_some() {
+        let ns_node_ids: std::collections::HashSet<&str> =
+            kind_filtered_nodes.iter().map(|n| n.id.as_str()).collect();
+        all_edges
+            .iter()
+            .filter(|e| {
+                ns_node_ids.contains(e.src.as_str()) && ns_node_ids.contains(e.dst.as_str())
+            })
+            .count()
+    } else {
+        all_edges.len()
+    };
+
+    Json(BrowseResponse {
+        nodes,
+        total,
+        kinds,
+        edge_count,
+    })
 }

@@ -563,7 +563,11 @@ fn recall_with_exclude_tags_filters_out() {
         last_accessed_at: now,
     };
     server.storage.insert_memory(&memory).unwrap();
-    server.bm25_index.lock().unwrap().add_document(&id, "rust auto-generated analysis");
+    server
+        .bm25_index
+        .lock()
+        .unwrap()
+        .add_document(&id, "rust auto-generated analysis");
 
     // Recall without filter — both should appear
     let params = json!({
@@ -586,7 +590,10 @@ fn recall_with_exclude_tags_filters_out() {
     let text = result["content"][0]["text"].as_str().unwrap();
     let results: Vec<Value> = serde_json::from_str(text).unwrap();
     assert_eq!(results.len(), 1);
-    assert!(results[0]["content"].as_str().unwrap().contains("ownership"));
+    assert!(results[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("ownership"));
 }
 
 #[test]
