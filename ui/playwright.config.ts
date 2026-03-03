@@ -11,7 +11,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: '../target/release/codemem serve --api --port 4242',
+      command: './target/release/codemem serve --api --port 4242',
       port: 4242,
       timeout: 30000,
       reuseExistingServer: true,

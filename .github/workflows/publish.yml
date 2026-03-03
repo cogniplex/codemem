@@ -39,8 +39,9 @@ jobs:
 
           publish() {
             local crate=$1
+            local extra_flags="${2:-}"
             echo "Publishing $crate..."
-            cargo publish -p "$crate" --no-verify
+            cargo publish -p "$crate" --no-verify $extra_flags
             echo "Waiting for crates.io to index $crate..."
             sleep 30
           }
@@ -61,7 +62,7 @@ jobs:
           # Layer 4: depends on layers 1-3
           publish codemem-hooks
           publish codemem-mcp
-          publish codemem-api
+          publish codemem-api --allow-dirty  # ui-dist/ is built in CI, not committed
 
           # Layer 5: depends on everything
           publish codemem-cli
