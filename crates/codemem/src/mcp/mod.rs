@@ -136,40 +136,28 @@ impl McpServer {
         self.engine.scoring_weights_mut()
     }
 
-    // ── Delegate Domain Methods ─────────────────────────────────────────────
-
-    pub(crate) fn enrich_memory_text(
+    /// Core recall logic: delegates to `CodememEngine::recall()`.
+    /// Used by the REST API layer and consolidation tools.
+    #[allow(clippy::too_many_arguments)]
+    pub fn recall(
         &self,
-        content: &str,
-        memory_type: MemoryType,
-        tags: &[String],
-        namespace: Option<&str>,
-        node_id: Option<&str>,
-    ) -> String {
-        self.engine
-            .enrich_memory_text(content, memory_type, tags, namespace, node_id)
-    }
-
-    pub(crate) fn enrich_symbol_text(
-        &self,
-        sym: &codemem_engine::Symbol,
-        edges: &[codemem_engine::ResolvedEdge],
-    ) -> String {
-        self.engine.enrich_symbol_text(sym, edges)
-    }
-
-    pub(crate) fn enrich_chunk_text(&self, chunk: &codemem_engine::CodeChunk) -> String {
-        self.engine.enrich_chunk_text(chunk)
-    }
-
-    pub(crate) fn auto_link_to_code_nodes(
-        &self,
-        memory_id: &str,
-        content: &str,
-        existing_links: &[String],
-    ) -> usize {
-        self.engine
-            .auto_link_to_code_nodes(memory_id, content, existing_links)
+        query: &str,
+        k: usize,
+        memory_type_filter: Option<MemoryType>,
+        namespace_filter: Option<&str>,
+        exclude_tags: &[String],
+        min_importance: Option<f64>,
+        min_confidence: Option<f64>,
+    ) -> Result<Vec<codemem_core::SearchResult>, CodememError> {
+        self.engine.recall(
+            query,
+            k,
+            memory_type_filter,
+            namespace_filter,
+            exclude_tags,
+            min_importance,
+            min_confidence,
+        )
     }
 
     // ── Public Accessors (for REST API layer) ─────────────────────────────

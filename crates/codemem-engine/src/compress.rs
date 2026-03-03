@@ -145,6 +145,36 @@ impl CompressProvider {
         }
     }
 
+    /// Summarize a batch of file changes into a one-sentence developer intent summary.
+    ///
+    /// Returns `None` if compression is disabled or the LLM call fails.
+    pub fn summarize_batch(&self, raw_summary: &str) -> Option<String> {
+        if !self.is_enabled() {
+            return None;
+        }
+
+        let prompt = format!(
+            "Summarize this batch of file changes in one sentence describing the likely developer intent \
+             (e.g. 'Refactoring auth module error handling', 'Adding new API endpoints for user management'). \
+             Be specific about what was changed. Output only the summary sentence, nothing else.\n\n{raw_summary}"
+        );
+
+        match self.call_llm(&prompt) {
+            Ok(summary) if summary.trim().is_empty() => {
+                tracing::warn!("Batch summarization returned empty output");
+                None
+            }
+            Ok(summary) => {
+                tracing::info!("Batch summary: {}", summary.trim());
+                Some(summary.trim().to_string())
+            }
+            Err(e) => {
+                tracing::warn!("Batch summarization failed, using raw summary: {e}");
+                None
+            }
+        }
+    }
+
     fn call_llm(&self, user_prompt: &str) -> anyhow::Result<String> {
         match self {
             CompressProvider::Ollama {
@@ -247,7 +277,7 @@ impl CompressProvider {
     }
 }
 
-fn build_user_prompt(content: &str, tool: &str, file_path: Option<&str>) -> String {
+pub(crate) fn build_user_prompt(content: &str, tool: &str, file_path: Option<&str>) -> String {
     let file_info = file_path
         .map(|p| format!("File: {p}\n"))
         .unwrap_or_default();
@@ -258,4 +288,54 @@ fn build_user_prompt(content: &str, tool: &str, file_path: Option<&str>) -> Stri
         content
     };
     format!("Tool: {tool}\n{file_info}\nObservation:\n{truncated}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn none_provider_returns_none() {
+        let provider = CompressProvider::None;
+        assert!(!provider.is_enabled());
+        assert!(provider.compress("some content here that is long enough to compress blah blah blah blah blah blah blah blah blah blah blah blah blah blah blah blah blah blah blah blah", "Read", Some("src/main.rs")).is_none());
+    }
+
+    #[test]
+    fn short_content_skips_compression() {
+        let provider = CompressProvider::Ollama {
+            base_url: "http://localhost:99999".to_string(),
+            model: "test".to_string(),
+            client: reqwest::blocking::Client::new(),
+        };
+        assert!(provider.compress("short", "Read", None).is_none());
+    }
+
+    #[test]
+    fn build_user_prompt_with_file() {
+        let prompt = build_user_prompt("content here", "Read", Some("src/lib.rs"));
+        assert!(prompt.contains("Tool: Read"));
+        assert!(prompt.contains("File: src/lib.rs"));
+        assert!(prompt.contains("content here"));
+    }
+
+    #[test]
+    fn build_user_prompt_without_file() {
+        let prompt = build_user_prompt("content here", "Grep", None);
+        assert!(prompt.contains("Tool: Grep"));
+        assert!(!prompt.contains("File:"));
+    }
+
+    #[test]
+    fn build_user_prompt_truncates_long_content() {
+        let long = "x".repeat(10000);
+        let prompt = build_user_prompt(&long, "Read", None);
+        assert!(prompt.len() < 8200);
+    }
+
+    #[test]
+    fn from_env_defaults_to_none() {
+        let provider = CompressProvider::from_env();
+        assert!(!provider.is_enabled());
+    }
 }

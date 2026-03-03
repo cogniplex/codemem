@@ -13,6 +13,22 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::Direction;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// Raw graph metrics for a memory node, collected from its code-graph neighbors.
+///
+/// Returned by `GraphEngine::raw_graph_metrics_for_memory()` so that the
+/// scoring formula can live in the engine crate.
+#[derive(Debug, Clone)]
+pub struct RawGraphMetrics {
+    /// Highest PageRank score among code-graph neighbors.
+    pub max_pagerank: f64,
+    /// Highest betweenness centrality among code-graph neighbors.
+    pub max_betweenness: f64,
+    /// Number of code-graph neighbors (sym:, file:, chunk:, pkg:).
+    pub code_neighbor_count: usize,
+    /// Sum of edge weights connecting this memory to code-graph neighbors.
+    pub total_edge_weight: f64,
+}
+
 /// In-memory graph backed by petgraph, synced to SQLite via codemem-storage.
 pub struct GraphEngine {
     pub(crate) graph: DiGraph<String, f64>,
@@ -227,17 +243,15 @@ impl GraphEngine {
         self.cached_betweenness.get(node_id).copied().unwrap_or(0.0)
     }
 
-    /// Compute graph strength for a memory node by bridging to code-graph centrality.
+    /// Collect raw graph metrics for a memory node by bridging to code-graph neighbors.
     ///
     /// Memory nodes (UUIDs) and code nodes (`sym:`, `file:`) exist in disconnected
     /// ID spaces. This method looks up a memory node's neighbors and collects
-    /// centrality data from any connected code-graph nodes to produce a meaningful
-    /// graph_strength score.
-    pub fn graph_strength_for_memory(&self, memory_id: &str) -> f64 {
-        let idx = match self.id_to_index.get(memory_id) {
-            Some(idx) => *idx,
-            None => return 0.0,
-        };
+    /// centrality data from any connected code-graph nodes.
+    ///
+    /// Returns `None` if the memory node is not in the graph or has no code neighbors.
+    pub fn raw_graph_metrics_for_memory(&self, memory_id: &str) -> Option<RawGraphMetrics> {
+        let idx = *self.id_to_index.get(memory_id)?;
 
         let mut max_pagerank = 0.0_f64;
         let mut max_betweenness = 0.0_f64;
@@ -283,17 +297,15 @@ impl GraphEngine {
         }
 
         if code_neighbor_count == 0 {
-            return 0.0;
+            return None;
         }
 
-        let connectivity_bonus = (code_neighbor_count as f64 / 5.0).min(1.0);
-        let edge_weight_bonus = (total_edge_weight / code_neighbor_count as f64).min(1.0);
-
-        (0.4 * max_pagerank
-            + 0.3 * max_betweenness
-            + 0.2 * connectivity_bonus
-            + 0.1 * edge_weight_bonus)
-            .min(1.0)
+        Some(RawGraphMetrics {
+            max_pagerank,
+            max_betweenness,
+            code_neighbor_count,
+            total_edge_weight,
+        })
     }
 
     /// Get the maximum degree (in + out) across all nodes in the graph.

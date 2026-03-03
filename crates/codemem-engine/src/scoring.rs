@@ -4,12 +4,39 @@ use crate::bm25;
 use codemem_core::{MemoryNode, ScoreBreakdown};
 use codemem_storage::graph::GraphEngine;
 
-/// Truncate a string to `max` characters, appending "..." if truncated.
+/// Compute graph strength for a memory node by combining raw graph metrics.
+///
+/// Uses PageRank, betweenness centrality, connectivity, and edge weights
+/// from the memory's code-graph neighbors to produce a 0.0-1.0 score.
+/// Weights: PageRank 40%, betweenness 30%, connectivity 20%, edge weight 10%.
+pub fn graph_strength_for_memory(graph: &GraphEngine, memory_id: &str) -> f64 {
+    let metrics = match graph.raw_graph_metrics_for_memory(memory_id) {
+        Some(m) => m,
+        None => return 0.0,
+    };
+
+    let connectivity_bonus = (metrics.code_neighbor_count as f64 / 5.0).min(1.0);
+    let edge_weight_bonus =
+        (metrics.total_edge_weight / metrics.code_neighbor_count as f64).min(1.0);
+
+    (0.4 * metrics.max_pagerank
+        + 0.3 * metrics.max_betweenness
+        + 0.2 * connectivity_bonus
+        + 0.1 * edge_weight_bonus)
+        .min(1.0)
+}
+
+/// Truncate a string to `max` bytes, appending "..." if truncated.
+/// Handles multi-byte UTF-8 safely by finding the nearest char boundary.
 pub fn truncate_content(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max])
+        let mut end = max;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &s[..end])
     }
 }
 
@@ -63,9 +90,9 @@ pub fn compute_score(
 
     // Enhanced graph scoring: bridge memory UUIDs to code-graph centrality.
     // Memory nodes live in a separate ID space from code nodes (sym:, file:),
-    // so we use graph_strength_for_memory() which traverses neighbors to find
-    // connected code nodes and aggregates their PageRank/betweenness.
-    let graph_strength = graph.graph_strength_for_memory(&memory.id);
+    // so we collect raw metrics from code-graph neighbors and apply the
+    // scoring formula here in the engine.
+    let graph_strength = graph_strength_for_memory(graph, &memory.id);
 
     ScoreBreakdown {
         vector_similarity,

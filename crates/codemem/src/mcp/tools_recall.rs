@@ -572,7 +572,7 @@ impl McpServer {
                 last_accessed_at: now,
             };
 
-            match self.persist_memory(&memory) {
+            match self.engine.persist_memory(&memory) {
                 Ok(()) => {
                     ids.push(id);
                     imported += 1;

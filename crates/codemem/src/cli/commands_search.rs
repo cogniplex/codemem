@@ -1,24 +1,21 @@
 //! Search & stats commands.
 
-use codemem_core::{StorageBackend, VectorBackend};
+use codemem_core::VectorBackend;
 
 pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyhow::Result<()> {
     let db_path = super::codemem_db_path();
-    let storage = codemem_storage::Storage::open(&db_path)?;
-
-    // Try loading embeddings for vector search
-    let emb_service = codemem_embeddings::from_env().ok();
-
-    let mut vector = codemem_storage::HnswIndex::with_defaults()?;
-    let index_path = db_path.with_extension("idx");
-    if index_path.exists() {
-        vector.load(&index_path)?;
-    }
+    let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
 
     // Try vector search first
-    let vector_results: Vec<(String, f32)> = if let Some(ref emb) = emb_service {
+    let vector_results: Vec<(String, f32)> = if let Ok(Some(emb)) = engine.lock_embeddings() {
         match emb.embed(query) {
-            Ok(query_embedding) => vector.search(&query_embedding, k * 2).unwrap_or_default(),
+            Ok(query_embedding) => {
+                drop(emb);
+                engine
+                    .lock_vector()?
+                    .search(&query_embedding, k * 2)
+                    .unwrap_or_default()
+            }
             Err(_) => vec![],
         }
     } else {
@@ -33,7 +30,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
                 break;
             }
             let similarity = 1.0 - *distance as f64;
-            if let Some(memory) = storage.get_memory(id)? {
+            if let Some(memory) = engine.storage.get_memory(id)? {
                 // Apply namespace filter
                 if let Some(ns) = namespace {
                     if memory.namespace.as_deref() != Some(ns) {
@@ -50,7 +47,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
                 }
                 println!();
                 shown += 1;
-            } else if let Some(node) = storage.get_graph_node(id)? {
+            } else if let Some(node) = engine.storage.get_graph_node(id)? {
                 // Fallback: symbol/graph node (e.g. sym:* IDs from code indexing)
                 if let Some(ns) = namespace {
                     if node.namespace.as_deref() != Some(ns) {
@@ -68,9 +65,9 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
 
     // Fallback: text search
     let ids = if let Some(ns) = namespace {
-        storage.list_memory_ids_for_namespace(ns)?
+        engine.storage.list_memory_ids_for_namespace(ns)?
     } else {
-        storage.list_memory_ids()?
+        engine.storage.list_memory_ids()?
     };
 
     if ids.is_empty() {
@@ -90,7 +87,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
         if found >= k {
             break;
         }
-        if let Some(memory) = storage.get_memory(id)? {
+        if let Some(memory) = engine.storage.get_memory(id)? {
             if memory.content.to_lowercase().contains(&query_lower) {
                 println!(
                     "  [{}] {} (importance: {:.1})",
@@ -104,7 +101,9 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
     }
 
     // Also search graph nodes by label
-    let gn_results = storage.search_graph_nodes(&query_lower, namespace, k)?;
+    let gn_results = engine
+        .storage
+        .search_graph_nodes(&query_lower, namespace, k)?;
     for node in &gn_results {
         if found >= k {
             break;
@@ -129,8 +128,8 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
 
 pub(crate) fn cmd_stats() -> anyhow::Result<()> {
     let db_path = super::codemem_db_path();
-    let storage = codemem_storage::Storage::open(&db_path)?;
-    let stats = storage.stats()?;
+    let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
+    let stats = engine.storage.stats()?;
 
     println!("Codemem Statistics");
     println!("  Memories:    {}", stats.memory_count);
@@ -139,24 +138,20 @@ pub(crate) fn cmd_stats() -> anyhow::Result<()> {
     println!("  Graph edges: {}", stats.edge_count);
 
     // Vector index
-    let index_path = db_path.with_extension("idx");
-    if index_path.exists() {
-        if let Ok(mut vector) = codemem_storage::HnswIndex::with_defaults() {
-            if vector.load(&index_path).is_ok() {
-                let vstats = vector.stats();
-                println!("  Vector indexed: {}", vstats.count);
-            }
-        }
+    {
+        let vector = engine.lock_vector()?;
+        let vstats = vector.stats();
+        println!("  Vector indexed: {}", vstats.count);
     }
 
     // Embedding provider
-    match codemem_embeddings::from_env() {
-        Ok(provider) => println!(
+    match engine.lock_embeddings()? {
+        Some(emb) => println!(
             "  Embedding provider: {} ({}d)",
-            provider.name(),
-            provider.dimensions()
+            emb.name(),
+            emb.dimensions()
         ),
-        Err(_) => println!("  Embedding provider: not configured"),
+        None => println!("  Embedding provider: not configured"),
     }
 
     Ok(())

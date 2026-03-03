@@ -1,5 +1,6 @@
 use super::*;
 use crate::mcp::test_helpers::*;
+use codemem_core::VectorBackend;
 use codemem_storage::Storage;
 
 /// Helper: call a tool and return the result Value.

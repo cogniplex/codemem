@@ -1,4 +1,4 @@
-//! In-memory metrics collector for MCP tool calls.
+//! In-memory metrics collector for operational metrics.
 
 use codemem_core::{LatencyStats, Metrics, MetricsSnapshot};
 use std::collections::HashMap;

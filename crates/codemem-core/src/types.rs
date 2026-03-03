@@ -59,7 +59,7 @@ impl std::str::FromStr for MemoryType {
 
 // ── Relationship Types ──────────────────────────────────────────────────────
 
-/// 15 relationship types for the knowledge graph.
+/// 24 relationship types for the knowledge graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RelationshipType {

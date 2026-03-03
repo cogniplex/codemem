@@ -1,6 +1,6 @@
 //! Export, import, and index commands.
 
-use codemem_core::{StorageBackend, VectorBackend};
+use codemem_core::VectorBackend;
 use std::io::Write;
 
 pub(crate) fn cmd_export(
@@ -187,16 +187,7 @@ pub(crate) fn cmd_import(
     use std::io::BufRead;
 
     let db_path = super::codemem_db_path();
-    let storage = codemem_storage::Storage::open(&db_path)?;
-
-    // Try loading embeddings for auto-embedding
-    let emb_service = codemem_embeddings::from_env().ok();
-
-    let mut vector = codemem_storage::HnswIndex::with_defaults()?;
-    let index_path = db_path.with_extension("idx");
-    if index_path.exists() {
-        let _ = vector.load(&index_path);
-    }
+    let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
 
     let reader: Box<dyn BufRead> = match input {
         Some(path) => Box::new(std::io::BufReader::new(std::fs::File::open(path)?)),
@@ -271,8 +262,8 @@ pub(crate) fn cmd_import(
         let hash = codemem_storage::Storage::content_hash(&content);
 
         let memory = codemem_core::MemoryNode {
-            id: id.clone(),
-            content: content.clone(),
+            id,
+            content,
             memory_type,
             importance,
             confidence,
@@ -286,15 +277,8 @@ pub(crate) fn cmd_import(
             last_accessed_at: now,
         };
 
-        match storage.insert_memory(&memory) {
+        match engine.persist_memory(&memory) {
             Ok(()) => {
-                // Auto-embed if available
-                if let Some(ref emb) = emb_service {
-                    if let Ok(embedding) = emb.embed(&content) {
-                        let _ = storage.store_embedding(&id, &embedding);
-                        let _ = vector.insert(&id, &embedding);
-                    }
-                }
                 imported += 1;
             }
             Err(codemem_core::CodememError::Duplicate(_)) => {
@@ -312,22 +296,17 @@ pub(crate) fn cmd_import(
         }
     }
 
-    // Save vector index if we embedded anything
-    if imported > 0 && emb_service.is_some() {
-        let _ = vector.save(&index_path);
-    }
-
     eprintln!("Imported: {imported}, Skipped: {skipped}");
     Ok(())
 }
 
 pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result<()> {
     let db_path = super::codemem_db_path();
-    let storage = codemem_storage::Storage::open(&db_path)?;
+    let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
 
     // Load incremental state
     let mut change_detector = codemem_engine::index::incremental::ChangeDetector::new();
-    change_detector.load_from_storage(&storage);
+    change_detector.load_from_storage(&*engine.storage);
 
     let mut indexer = codemem_engine::Indexer::with_change_detector(change_detector);
 
@@ -382,7 +361,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
         .collect();
 
     let nodes_stored = graph_nodes.len();
-    storage.insert_graph_nodes_batch(&graph_nodes)?;
+    engine.storage.insert_graph_nodes_batch(&graph_nodes)?;
 
     // Collect all edges, filtering out edges that reference nodes not in the graph
     // (e.g., external stdlib symbols that weren't indexed)
@@ -412,7 +391,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
         .collect();
 
     let edges_stored = graph_edges.len();
-    storage.insert_graph_edges_batch(&graph_edges)?;
+    engine.storage.insert_graph_edges_batch(&graph_edges)?;
 
     println!(" done");
     println!("  Graph nodes:    {}", nodes_stored);
@@ -420,13 +399,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
 
     // Embed symbol signatures for semantic code search
     let mut symbols_embedded = 0usize;
-    if let Ok(emb_service) = codemem_embeddings::from_env() {
-        let index_path = db_path.with_extension("idx");
-        let mut vector = codemem_storage::HnswIndex::with_defaults()?;
-        if index_path.exists() {
-            let _ = vector.load(&index_path);
-        }
-
+    if let Ok(Some(emb_guard)) = engine.lock_embeddings() {
         let total = all_symbols.len();
         println!("  Embedding {} symbols...", total);
 
@@ -446,9 +419,11 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
         let mut all_sym_pairs: Vec<(String, Vec<f32>)> = Vec::new();
         for (batch_idx, chunk) in embed_data.chunks(32).enumerate() {
             let texts: Vec<&str> = chunk.iter().map(|(_, t)| t.as_str()).collect();
-            if let Ok(embeddings) = emb_service.embed_batch(&texts) {
+            if let Ok(embeddings) = emb_guard.embed_batch(&texts) {
                 for ((sym_id, _), embedding) in chunk.iter().zip(embeddings) {
-                    let _ = vector.insert(sym_id, &embedding);
+                    if let Ok(mut vec) = engine.lock_vector() {
+                        let _ = vec.insert(sym_id, &embedding);
+                    }
                     all_sym_pairs.push((sym_id.clone(), embedding));
                     symbols_embedded += 1;
                 }
@@ -457,23 +432,26 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
             print!("\r  Embedding symbols: {}/{}", done.min(total), total);
             std::io::Write::flush(&mut std::io::stdout()).ok();
         }
+        drop(emb_guard);
 
         // Batch store all symbol embeddings
         let sym_batch_refs: Vec<(&str, &[f32])> = all_sym_pairs
             .iter()
             .map(|(id, emb)| (id.as_str(), emb.as_slice()))
             .collect();
-        let _ = storage.store_embeddings_batch(&sym_batch_refs);
+        let _ = engine.storage.store_embeddings_batch(&sym_batch_refs);
 
         println!(); // newline after progress
         if symbols_embedded > 0 {
-            let _ = vector.save(&index_path);
+            engine.save_index();
         }
         println!("  Symbols embedded: {}", symbols_embedded);
     }
 
     // Save incremental state
-    indexer.change_detector().save_to_storage(&storage)?;
+    indexer
+        .change_detector()
+        .save_to_storage(&*engine.storage)?;
 
     if verbose {
         println!("\nSymbols:");

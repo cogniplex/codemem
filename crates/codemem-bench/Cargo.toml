@@ -13,7 +13,6 @@ publish = false
 [dependencies]
 codemem-core = { workspace = true }
 codemem-storage = { workspace = true }
-codemem-embeddings = { workspace = true }
 criterion = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }

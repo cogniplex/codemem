@@ -18,6 +18,7 @@ mod queries;
 pub mod vector;
 
 pub use graph::GraphEngine;
+pub use graph::RawGraphMetrics;
 pub use vector::HnswIndex;
 
 /// SQLite-backed storage for Codemem memories, embeddings, and graph data.
@@ -30,8 +31,10 @@ pub struct Storage {
 
 impl Storage {
     /// Get a lock on the underlying connection.
-    pub(crate) fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().expect("Storage mutex poisoned")
+    pub(crate) fn conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, CodememError> {
+        self.conn
+            .lock()
+            .map_err(|e| CodememError::LockPoisoned(format!("Storage mutex: {e}")))
     }
 
     /// Apply standard pragmas to a connection.

@@ -5,12 +5,75 @@ use codemem_core::{CodememError, Edge, GraphNode, NodeKind, RelationshipType};
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
 
+/// Raw tuple type for an edge row from the database.
+///
+/// Fields: `(id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to)`.
+pub(crate) type EdgeRow = (
+    String,
+    String,
+    String,
+    String,
+    f64,
+    String,
+    i64,
+    Option<i64>,
+    Option<i64>,
+);
+
+/// Deserialize an `Edge` from a raw database row tuple.
+pub(crate) fn edge_from_row(row: EdgeRow) -> Option<Edge> {
+    let (id, src, dst, rel_str, weight, props_str, created_ts, valid_from_ts, valid_to_ts) = row;
+    let relationship: RelationshipType = rel_str.parse().ok()?;
+    let properties: HashMap<String, serde_json::Value> =
+        serde_json::from_str(&props_str).unwrap_or_default();
+    let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?.with_timezone(&chrono::Utc);
+    let valid_from = valid_from_ts
+        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+    let valid_to = valid_to_ts
+        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+    Some(Edge {
+        id,
+        src,
+        dst,
+        relationship,
+        weight,
+        properties,
+        created_at,
+        valid_from,
+        valid_to,
+    })
+}
+
+/// Extract the 9-column edge tuple from a database row.
+///
+/// Use with `query_map` to produce the tuple that `edge_from_row` consumes.
+pub(crate) fn extract_edge_tuple(row: &rusqlite::Row<'_>) -> rusqlite::Result<EdgeRow> {
+    let rel_str: String = row.get(3)?;
+    let props_str: String = row.get(5)?;
+    let created_ts: i64 = row.get(6)?;
+    let valid_from_ts: Option<i64> = row.get(7)?;
+    let valid_to_ts: Option<i64> = row.get(8)?;
+    Ok((
+        row.get::<_, String>(0)?,
+        row.get::<_, String>(1)?,
+        row.get::<_, String>(2)?,
+        rel_str,
+        row.get::<_, f64>(4)?,
+        props_str,
+        created_ts,
+        valid_from_ts,
+        valid_to_ts,
+    ))
+}
+
 impl Storage {
     // ── Embedding Storage ───────────────────────────────────────────────
 
     /// Store an embedding for a memory.
     pub fn store_embedding(&self, memory_id: &str, embedding: &[f32]) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
 
         conn.execute(
@@ -24,7 +87,7 @@ impl Storage {
 
     /// Get an embedding by memory ID.
     pub fn get_embedding(&self, memory_id: &str) -> Result<Option<Vec<f32>>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let blob: Option<Vec<u8>> = conn
             .query_row(
                 "SELECT embedding FROM memory_embeddings WHERE memory_id = ?1",
@@ -50,7 +113,7 @@ impl Storage {
 
     /// Insert a graph node.
     pub fn insert_graph_node(&self, node: &GraphNode) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let payload_json = serde_json::to_string(&node.payload)?;
 
         conn.execute(
@@ -73,7 +136,7 @@ impl Storage {
 
     /// Get a graph node by ID.
     pub fn get_graph_node(&self, id: &str) -> Result<Option<GraphNode>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         conn.query_row(
             "SELECT id, kind, label, payload, centrality, memory_id, namespace FROM graph_nodes WHERE id = ?1",
             params![id],
@@ -112,7 +175,7 @@ impl Storage {
 
     /// Delete a graph node by ID.
     pub fn delete_graph_node(&self, id: &str) -> Result<bool, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let rows = conn
             .execute("DELETE FROM graph_nodes WHERE id = ?1", params![id])
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -121,7 +184,7 @@ impl Storage {
 
     /// Get all graph nodes.
     pub fn all_graph_nodes(&self) -> Result<Vec<GraphNode>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id, kind, label, payload, centrality, memory_id, namespace FROM graph_nodes")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -167,7 +230,7 @@ impl Storage {
 
     /// Insert a graph edge.
     pub fn insert_graph_edge(&self, edge: &Edge) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let props_json = serde_json::to_string(&edge.properties)?;
 
         conn.execute(
@@ -192,7 +255,7 @@ impl Storage {
 
     /// Get all edges from or to a node.
     pub fn get_edges_for_node(&self, node_id: &str) -> Result<Vec<Edge>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to FROM graph_edges WHERE src = ?1 OR dst = ?1",
@@ -200,62 +263,10 @@ impl Storage {
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         let edges = stmt
-            .query_map(params![node_id], |row| {
-                let rel_str: String = row.get(3)?;
-                let props_str: String = row.get(5)?;
-                let created_ts: i64 = row.get(6)?;
-                let valid_from_ts: Option<i64> = row.get(7)?;
-                let valid_to_ts: Option<i64> = row.get(8)?;
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    rel_str,
-                    row.get::<_, f64>(4)?,
-                    props_str,
-                    created_ts,
-                    valid_from_ts,
-                    valid_to_ts,
-                ))
-            })
+            .query_map(params![node_id], extract_edge_tuple)
             .map_err(|e| CodememError::Storage(e.to_string()))?
             .filter_map(|r| r.ok())
-            .filter_map(
-                |(
-                    id,
-                    src,
-                    dst,
-                    rel_str,
-                    weight,
-                    props_str,
-                    created_ts,
-                    valid_from_ts,
-                    valid_to_ts,
-                )| {
-                    let relationship: RelationshipType = rel_str.parse().ok()?;
-                    let properties: HashMap<String, serde_json::Value> =
-                        serde_json::from_str(&props_str).unwrap_or_default();
-                    let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?
-                        .with_timezone(&chrono::Utc);
-                    let valid_from = valid_from_ts
-                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                        .map(|dt| dt.with_timezone(&chrono::Utc));
-                    let valid_to = valid_to_ts
-                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                        .map(|dt| dt.with_timezone(&chrono::Utc));
-                    Some(Edge {
-                        id,
-                        src,
-                        dst,
-                        relationship,
-                        weight,
-                        properties,
-                        created_at,
-                        valid_from,
-                        valid_to,
-                    })
-                },
-            )
+            .filter_map(edge_from_row)
             .collect();
 
         Ok(edges)
@@ -263,68 +274,16 @@ impl Storage {
 
     /// Get all graph edges.
     pub fn all_graph_edges(&self) -> Result<Vec<Edge>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to FROM graph_edges")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         let edges = stmt
-            .query_map([], |row| {
-                let rel_str: String = row.get(3)?;
-                let props_str: String = row.get(5)?;
-                let created_ts: i64 = row.get(6)?;
-                let valid_from_ts: Option<i64> = row.get(7)?;
-                let valid_to_ts: Option<i64> = row.get(8)?;
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    rel_str,
-                    row.get::<_, f64>(4)?,
-                    props_str,
-                    created_ts,
-                    valid_from_ts,
-                    valid_to_ts,
-                ))
-            })
+            .query_map([], extract_edge_tuple)
             .map_err(|e| CodememError::Storage(e.to_string()))?
             .filter_map(|r| r.ok())
-            .filter_map(
-                |(
-                    id,
-                    src,
-                    dst,
-                    rel_str,
-                    weight,
-                    props_str,
-                    created_ts,
-                    valid_from_ts,
-                    valid_to_ts,
-                )| {
-                    let relationship: RelationshipType = rel_str.parse().ok()?;
-                    let properties: HashMap<String, serde_json::Value> =
-                        serde_json::from_str(&props_str).unwrap_or_default();
-                    let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?
-                        .with_timezone(&chrono::Utc);
-                    let valid_from = valid_from_ts
-                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                        .map(|dt| dt.with_timezone(&chrono::Utc));
-                    let valid_to = valid_to_ts
-                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                        .map(|dt| dt.with_timezone(&chrono::Utc));
-                    Some(Edge {
-                        id,
-                        src,
-                        dst,
-                        relationship,
-                        weight,
-                        properties,
-                        created_at,
-                        valid_from,
-                        valid_to,
-                    })
-                },
-            )
+            .filter_map(edge_from_row)
             .collect();
 
         Ok(edges)
@@ -332,7 +291,7 @@ impl Storage {
 
     /// Delete all graph edges connected to a node (as src or dst).
     pub fn delete_graph_edges_for_node(&self, node_id: &str) -> Result<usize, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let rows = conn
             .execute(
                 "DELETE FROM graph_edges WHERE src = ?1 OR dst = ?1",
@@ -344,7 +303,7 @@ impl Storage {
 
     /// Get all graph edges where both src and dst nodes belong to the given namespace.
     pub fn graph_edges_for_namespace(&self, namespace: &str) -> Result<Vec<Edge>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT e.id, e.src, e.dst, e.relationship, e.weight, e.properties, e.created_at, e.valid_from, e.valid_to
@@ -356,62 +315,10 @@ impl Storage {
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         let edges = stmt
-            .query_map(params![namespace], |row| {
-                let rel_str: String = row.get(3)?;
-                let props_str: String = row.get(5)?;
-                let created_ts: i64 = row.get(6)?;
-                let valid_from_ts: Option<i64> = row.get(7)?;
-                let valid_to_ts: Option<i64> = row.get(8)?;
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    rel_str,
-                    row.get::<_, f64>(4)?,
-                    props_str,
-                    created_ts,
-                    valid_from_ts,
-                    valid_to_ts,
-                ))
-            })
+            .query_map(params![namespace], extract_edge_tuple)
             .map_err(|e| CodememError::Storage(e.to_string()))?
             .filter_map(|r| r.ok())
-            .filter_map(
-                |(
-                    id,
-                    src,
-                    dst,
-                    rel_str,
-                    weight,
-                    props_str,
-                    created_ts,
-                    valid_from_ts,
-                    valid_to_ts,
-                )| {
-                    let relationship: RelationshipType = rel_str.parse().ok()?;
-                    let properties: HashMap<String, serde_json::Value> =
-                        serde_json::from_str(&props_str).unwrap_or_default();
-                    let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?
-                        .with_timezone(&chrono::Utc);
-                    let valid_from = valid_from_ts
-                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                        .map(|dt| dt.with_timezone(&chrono::Utc));
-                    let valid_to = valid_to_ts
-                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                        .map(|dt| dt.with_timezone(&chrono::Utc));
-                    Some(Edge {
-                        id,
-                        src,
-                        dst,
-                        relationship,
-                        weight,
-                        properties,
-                        created_at,
-                        valid_from,
-                        valid_to,
-                    })
-                },
-            )
+            .filter_map(edge_from_row)
             .collect();
 
         Ok(edges)
@@ -419,7 +326,7 @@ impl Storage {
 
     /// Delete a graph edge by ID.
     pub fn delete_graph_edge(&self, id: &str) -> Result<bool, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let rows = conn
             .execute("DELETE FROM graph_edges WHERE id = ?1", params![id])
             .map_err(|e| CodememError::Storage(e.to_string()))?;

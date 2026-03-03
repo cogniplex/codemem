@@ -1,5 +1,7 @@
 use super::*;
 use crate::mcp::test_helpers::*;
+use codemem_core::{GraphNode, MemoryNode, NodeKind};
+use std::collections::HashMap;
 
 #[test]
 fn handle_tools_call_store() {

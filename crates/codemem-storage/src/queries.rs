@@ -10,7 +10,7 @@ impl Storage {
 
     /// Run SQLite `PRAGMA integrity_check`. Returns `true` if the database is OK.
     pub fn integrity_check(&self) -> Result<bool, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let result: String = conn
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -19,7 +19,7 @@ impl Storage {
 
     /// Return the current schema version (max applied migration number).
     pub fn schema_version(&self) -> Result<u32, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let version: u32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_version",
@@ -35,7 +35,7 @@ impl Storage {
     /// Get database statistics.
     pub fn stats(&self) -> Result<StorageStats, CodememError> {
         let memory_count = self.memory_count()?;
-        let conn = self.conn();
+        let conn = self.conn()?;
 
         let embedding_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM memory_embeddings", [], |row| {
@@ -67,7 +67,7 @@ impl Storage {
         cycle_type: &str,
         affected_count: usize,
     ) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let now = chrono::Utc::now().timestamp();
         conn.execute(
             "INSERT INTO consolidation_log (cycle_type, run_at, affected_count) VALUES (?1, ?2, ?3)",
@@ -79,7 +79,7 @@ impl Storage {
 
     /// Get the last consolidation run for each cycle type.
     pub fn last_consolidation_runs(&self) -> Result<Vec<ConsolidationLogEntry>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT cycle_type, run_at, affected_count FROM consolidation_log
@@ -118,7 +118,7 @@ impl Storage {
         min_count: usize,
         namespace: Option<&str>,
     ) -> Result<Vec<(String, usize, Vec<String>)>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let sql = if namespace.is_some() {
             "SELECT json_extract(metadata, '$.pattern') AS pat,
                     COUNT(*) AS cnt,
@@ -185,7 +185,7 @@ impl Storage {
         min_count: usize,
         namespace: Option<&str>,
     ) -> Result<Vec<(String, usize, Vec<String>)>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let sql = if namespace.is_some() {
             "SELECT json_extract(metadata, '$.file_path') AS fp,
                     COUNT(*) AS cnt,
@@ -249,7 +249,7 @@ impl Storage {
         &self,
         namespace: Option<&str>,
     ) -> Result<HashMap<String, usize>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let sql = if namespace.is_some() {
             "SELECT json_extract(metadata, '$.tool') AS tool,
                     COUNT(*) AS cnt
@@ -299,7 +299,7 @@ impl Storage {
         min_count: usize,
         namespace: Option<&str>,
     ) -> Result<Vec<(String, usize, Vec<String>)>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let sql = if namespace.is_some() {
             "SELECT json_extract(metadata, '$.file_path') AS fp,
                     COUNT(*) AS cnt,
@@ -371,7 +371,7 @@ impl Storage {
         if keywords.is_empty() {
             return Ok(0);
         }
-        let conn = self.conn();
+        let conn = self.conn()?;
         let like_clauses: Vec<String> = keywords
             .iter()
             .enumerate()
@@ -417,7 +417,7 @@ impl Storage {
         namespace: Option<&str>,
         limit: usize,
     ) -> Result<Vec<codemem_core::MemoryNode>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let like_pattern = format!("%\"{tag}\"%");
 
         let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ns) =
@@ -500,7 +500,7 @@ impl Storage {
 
     /// Start a new session.
     pub fn start_session(&self, id: &str, namespace: Option<&str>) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let now = chrono::Utc::now().timestamp();
         conn.execute(
             "INSERT OR IGNORE INTO sessions (id, namespace, started_at) VALUES (?1, ?2, ?3)",
@@ -512,7 +512,7 @@ impl Storage {
 
     /// End a session by setting ended_at and optionally a summary.
     pub fn end_session(&self, id: &str, summary: Option<&str>) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let now = chrono::Utc::now().timestamp();
         conn.execute(
             "UPDATE sessions SET ended_at = ?1, summary = ?2 WHERE id = ?3",
@@ -538,7 +538,7 @@ impl Storage {
         directory: Option<&str>,
         pattern: Option<&str>,
     ) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let now = chrono::Utc::now().timestamp();
         conn.execute(
             "INSERT INTO session_activity (session_id, tool_name, file_path, directory, pattern, created_at)
@@ -554,7 +554,7 @@ impl Storage {
         &self,
         session_id: &str,
     ) -> Result<codemem_core::SessionActivitySummary, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
 
         let files_read: i64 = conn
             .query_row(
@@ -605,7 +605,7 @@ impl Storage {
         session_id: &str,
         limit: usize,
     ) -> Result<Vec<(String, usize)>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT directory, COUNT(*) AS cnt FROM session_activity
@@ -634,7 +634,7 @@ impl Storage {
         session_id: &str,
         dedup_tag: &str,
     ) -> Result<bool, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let like_session = format!("%\"session_id\":\"{session_id}\"%");
         let like_dedup = format!("%\"auto_insight_tag\":\"{dedup_tag}\"%");
         let count: i64 = conn
@@ -654,7 +654,7 @@ impl Storage {
         session_id: &str,
         directory: &str,
     ) -> Result<usize, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM session_activity
@@ -672,7 +672,7 @@ impl Storage {
         session_id: &str,
         file_path: &str,
     ) -> Result<bool, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM session_activity
@@ -690,7 +690,7 @@ impl Storage {
         session_id: &str,
         pattern: &str,
     ) -> Result<usize, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM session_activity
@@ -708,7 +708,7 @@ impl Storage {
         namespace: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Session>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let sql_with_ns = "SELECT id, namespace, started_at, ended_at, memory_count, summary FROM sessions WHERE namespace = ?1 ORDER BY started_at DESC LIMIT ?2";
         let sql_all = "SELECT id, namespace, started_at, ended_at, memory_count, summary FROM sessions ORDER BY started_at DESC LIMIT ?1";
 
@@ -754,7 +754,7 @@ impl Storage {
     /// Delete all graph nodes, their edges, and their embeddings where the
     /// node ID starts with the given prefix. Returns count of nodes deleted.
     pub fn delete_graph_nodes_by_prefix(&self, prefix: &str) -> Result<usize, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let like_pattern = format!("{prefix}%");
 
         // Delete edges where src or dst matches prefix

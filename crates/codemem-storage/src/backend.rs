@@ -1,5 +1,6 @@
 //! `StorageBackend` trait implementation for Storage.
 
+use crate::graph_persistence::{edge_from_row, extract_edge_tuple};
 use crate::{MemoryRow, Storage};
 use codemem_core::{
     CodememError, ConsolidationLogEntry, Edge, GraphNode, MemoryNode, NodeKind, Session,
@@ -21,7 +22,7 @@ impl StorageBackend for Storage {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let conn = self.conn();
+        let conn = self.conn()?;
 
         let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
@@ -104,7 +105,7 @@ impl StorageBackend for Storage {
     }
 
     fn delete_embedding(&self, memory_id: &str) -> Result<bool, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let deleted = conn
             .execute(
                 "DELETE FROM memory_embeddings WHERE memory_id = ?1",
@@ -115,7 +116,7 @@ impl StorageBackend for Storage {
     }
 
     fn list_all_embeddings(&self) -> Result<Vec<(String, Vec<f32>)>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT memory_id, embedding FROM memory_embeddings")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -241,7 +242,7 @@ impl StorageBackend for Storage {
         threshold_ts: i64,
         decay_factor: f64,
     ) -> Result<usize, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let rows = conn
             .execute(
                 "UPDATE memories SET importance = importance * ?1 WHERE last_accessed_at < ?2",
@@ -254,7 +255,7 @@ impl StorageBackend for Storage {
     fn list_memories_for_creative(
         &self,
     ) -> Result<Vec<(String, String, Vec<String>)>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id, memory_type, tags FROM memories ORDER BY created_at DESC")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -281,7 +282,7 @@ impl StorageBackend for Storage {
     }
 
     fn find_cluster_duplicates(&self) -> Result<Vec<(String, String, f64)>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT a.id, b.id, 1.0 as similarity
@@ -307,7 +308,7 @@ impl StorageBackend for Storage {
     }
 
     fn find_forgettable(&self, importance_threshold: f64) -> Result<Vec<String>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id FROM memories WHERE importance < ?1 AND access_count = 0 ORDER BY importance ASC, last_accessed_at ASC",
@@ -324,7 +325,7 @@ impl StorageBackend for Storage {
     }
 
     fn insert_memories_batch(&self, memories: &[MemoryNode]) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -361,7 +362,7 @@ impl StorageBackend for Storage {
     }
 
     fn store_embeddings_batch(&self, items: &[(&str, &[f32])]) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -381,7 +382,7 @@ impl StorageBackend for Storage {
     }
 
     fn load_file_hashes(&self) -> Result<HashMap<String, String>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT file_path, content_hash FROM file_hashes")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -398,7 +399,7 @@ impl StorageBackend for Storage {
     }
 
     fn save_file_hashes(&self, hashes: &HashMap<String, String>) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -420,7 +421,7 @@ impl StorageBackend for Storage {
     }
 
     fn insert_graph_nodes_batch(&self, nodes: &[GraphNode]) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -450,7 +451,7 @@ impl StorageBackend for Storage {
     }
 
     fn insert_graph_edges_batch(&self, edges: &[Edge]) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -482,7 +483,7 @@ impl StorageBackend for Storage {
     }
 
     fn get_edges_at_time(&self, node_id: &str, timestamp: i64) -> Result<Vec<Edge>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to
@@ -494,62 +495,10 @@ impl StorageBackend for Storage {
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         let edges = stmt
-            .query_map(params![node_id, timestamp], |row| {
-                let rel_str: String = row.get(3)?;
-                let props_str: String = row.get(5)?;
-                let created_ts: i64 = row.get(6)?;
-                let valid_from_ts: Option<i64> = row.get(7)?;
-                let valid_to_ts: Option<i64> = row.get(8)?;
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    rel_str,
-                    row.get::<_, f64>(4)?,
-                    props_str,
-                    created_ts,
-                    valid_from_ts,
-                    valid_to_ts,
-                ))
-            })
+            .query_map(params![node_id, timestamp], extract_edge_tuple)
             .map_err(|e| CodememError::Storage(e.to_string()))?
             .filter_map(|r| r.ok())
-            .filter_map(
-                |(
-                    id,
-                    src,
-                    dst,
-                    rel_str,
-                    weight,
-                    props_str,
-                    created_ts,
-                    valid_from_ts,
-                    valid_to_ts,
-                )| {
-                    let relationship: codemem_core::RelationshipType = rel_str.parse().ok()?;
-                    let properties: std::collections::HashMap<String, serde_json::Value> =
-                        serde_json::from_str(&props_str).unwrap_or_default();
-                    let created_at = chrono::DateTime::from_timestamp(created_ts, 0)?
-                        .with_timezone(&chrono::Utc);
-                    let valid_from = valid_from_ts
-                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                        .map(|dt| dt.with_timezone(&chrono::Utc));
-                    let valid_to = valid_to_ts
-                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                        .map(|dt| dt.with_timezone(&chrono::Utc));
-                    Some(Edge {
-                        id,
-                        src,
-                        dst,
-                        relationship,
-                        weight,
-                        properties,
-                        created_at,
-                        valid_from,
-                        valid_to,
-                    })
-                },
-            )
+            .filter_map(edge_from_row)
             .collect();
 
         Ok(edges)
@@ -559,7 +508,7 @@ impl StorageBackend for Storage {
         &self,
         threshold_ts: i64,
     ) -> Result<Vec<(String, f64, u32, i64)>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, importance, access_count, last_accessed_at FROM memories WHERE last_accessed_at < ?1",
@@ -586,7 +535,7 @@ impl StorageBackend for Storage {
         if updates.is_empty() {
             return Ok(0);
         }
-        let conn = self.conn();
+        let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -608,7 +557,7 @@ impl StorageBackend for Storage {
     }
 
     fn session_count(&self, namespace: Option<&str>) -> Result<usize, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let count: i64 = if let Some(ns) = namespace {
             conn.query_row(
                 "SELECT COUNT(*) FROM sessions WHERE namespace = ?1",
@@ -624,7 +573,7 @@ impl StorageBackend for Storage {
     }
 
     fn find_unembedded_memories(&self) -> Result<Vec<(String, String)>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT m.id, m.content FROM memories m
@@ -650,7 +599,7 @@ impl StorageBackend for Storage {
         namespace: Option<&str>,
         limit: usize,
     ) -> Result<Vec<GraphNode>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let pattern = format!("%{}%", query.to_lowercase());
 
         let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
@@ -711,7 +660,7 @@ impl StorageBackend for Storage {
         namespace: Option<&str>,
         memory_type: Option<&str>,
     ) -> Result<Vec<MemoryNode>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut sql = "SELECT id, content, memory_type, importance, confidence, access_count, \
                         content_hash, tags, metadata, namespace, created_at, updated_at, \
                         last_accessed_at FROM memories WHERE 1=1"

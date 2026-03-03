@@ -698,7 +698,6 @@ version = "0.7.0"
 dependencies = [
  "chrono",
  "codemem-core",
- "codemem-embeddings",
  "codemem-storage",
  "criterion",
  "uuid",

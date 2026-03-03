@@ -1,6 +1,6 @@
 //! Serve, ingest, and watch commands.
 
-use codemem_core::{StorageBackend, VectorBackend};
+use codemem_core::{GraphBackend, StorageBackend, VectorBackend};
 use std::sync::Arc;
 
 /// Build the shared server components (storage, vector, graph, embeddings).
@@ -170,11 +170,12 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
 
     if let Some(mut extracted) = extracted {
         let db_path = super::codemem_db_path();
-        let storage = codemem_storage::Storage::open(&db_path)?;
+        let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
 
         // Build the set of existing graph node IDs so we can detect
         // Read-then-Edit/Write patterns and create edges.
-        let existing_node_ids: std::collections::HashSet<String> = storage
+        let existing_node_ids: std::collections::HashSet<String> = engine
+            .storage
             .all_graph_nodes()
             .unwrap_or_default()
             .into_iter()
@@ -190,7 +191,7 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
         let id = uuid::Uuid::new_v4().to_string();
 
         // Compress observation via LLM if configured
-        let compressor = super::compress::CompressProvider::from_env();
+        let compressor = codemem_engine::compress::CompressProvider::from_env();
         let tool_name = extracted
             .metadata
             .get("tool")
@@ -239,7 +240,8 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
             last_accessed_at: now,
         };
 
-        match storage.insert_memory(&memory) {
+        // Use engine.persist_memory() for the full pipeline (storage + BM25 + graph + embedding + vector)
+        match engine.persist_memory(&memory) {
             Ok(()) => {
                 tracing::info!(
                     "Stored memory {} ({}){}",
@@ -256,7 +258,7 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
                                 .parent()
                                 .map(|p| p.to_string_lossy().to_string())
                         });
-                        let _ = storage.record_session_activity(
+                        let _ = engine.storage.record_session_activity(
                             sid,
                             &tool_name,
                             file_path_owned.as_deref(),
@@ -266,7 +268,7 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
 
                         // Check triggers and store auto-insights
                         let auto_insights = codemem_engine::hooks::check_triggers(
-                            &storage,
+                            &*engine.storage,
                             sid,
                             &tool_name,
                             file_path_owned.as_deref(),
@@ -304,7 +306,7 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
                                 updated_at: insight_now,
                                 last_accessed_at: insight_now,
                             };
-                            match storage.insert_memory(&insight_memory) {
+                            match engine.persist_memory(&insight_memory) {
                                 Ok(()) => {
                                     tracing::info!("Auto-insight stored: {}", insight.dedup_tag);
                                 }
@@ -317,51 +319,29 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
                     }
                 }
 
-                // Auto-embed and index with error recovery (Task 5)
-                match codemem_embeddings::from_env() {
-                    Ok(emb_service) => {
-                        if let Ok(embedding) = emb_service.embed(&content) {
-                            let _ = storage.store_embedding(&id, &embedding);
-
-                            // Load and update vector index
-                            let index_path = db_path.with_extension("idx");
-                            let mut vector = codemem_storage::HnswIndex::with_defaults()?;
-                            if index_path.exists() {
-                                if let Err(e) = vector.load(&index_path) {
-                                    // Stale vector index: rebuild from stored embeddings
-                                    tracing::warn!(
-                                        "Stale vector index during ingest, rebuilding: {e}"
-                                    );
-                                    vector = super::rebuild_vector_index(&storage)?;
-                                }
-                            }
-                            if vector.insert(&id, &embedding).is_ok() {
-                                let _ = vector.save(&index_path);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Embedding model unavailable, skipping embedding: {e}");
-                    }
-                }
-
-                // Store graph node if present
+                // Store graph node if present (e.g., file nodes from hooks)
                 if let Some(ref node) = extracted.graph_node {
-                    let _ = storage.insert_graph_node(node);
+                    let _ = engine.storage.insert_graph_node(node);
+                    if let Ok(mut graph) = engine.lock_graph() {
+                        let _ = graph.add_node(node.clone());
+                    }
                 }
 
                 // Store any pending graph edges
                 let edges = codemem_engine::hooks::materialize_edges(&extracted.graph_edges, &id);
                 for edge in &edges {
-                    if let Err(e) = storage.insert_graph_edge(edge) {
-                        tracing::debug!("Failed to store graph edge {}: {e}", edge.id);
-                    } else {
-                        tracing::info!(
-                            "Stored graph edge {} ({} -> {})",
-                            edge.id,
-                            edge.src,
-                            edge.dst
-                        );
+                    match engine.add_edge(edge.clone()) {
+                        Err(e) => {
+                            tracing::debug!("Failed to store graph edge {}: {e}", edge.id);
+                        }
+                        Ok(()) => {
+                            tracing::info!(
+                                "Stored graph edge {} ({} -> {})",
+                                edge.id,
+                                edge.src,
+                                edge.dst
+                            );
+                        }
                     }
                 }
             }
@@ -408,23 +388,15 @@ const BATCH_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
 /// Consolidates file change events within a 5-second window into a single
 /// rich context memory instead of creating one memory per file.
 ///
-/// Opens its own `Storage`, `HnswIndex`, and embedding provider so it can run
-/// independently from the MCP server without lock contention.
+/// Opens its own `CodememEngine` so it can run independently from the MCP
+/// server without lock contention.
 /// When `quiet` is true, uses `tracing::info!` instead of `println!`.
 pub(crate) fn run_watcher_loop(
     db_path: &std::path::Path,
     watch_dir: &std::path::Path,
     quiet: bool,
 ) -> anyhow::Result<()> {
-    let storage = codemem_storage::Storage::open(db_path)?;
-
-    let emb_service = codemem_embeddings::from_env().ok();
-
-    let index_path = db_path.with_extension("idx");
-    let mut vector = codemem_storage::HnswIndex::with_defaults()?;
-    if index_path.exists() {
-        let _ = vector.load(&index_path);
-    }
+    let engine = codemem_engine::CodememEngine::from_db_path(db_path)?;
 
     let watcher = codemem_engine::watch::FileWatcher::new(watch_dir)?;
 
@@ -495,14 +467,7 @@ pub(crate) fn run_watcher_loop(
 
             // If batch is getting large, flush early
             if batch.len() >= 50 {
-                changes_since_save += flush_batch(
-                    &batch,
-                    watch_dir,
-                    &storage,
-                    &emb_service,
-                    &mut vector,
-                    quiet,
-                );
+                changes_since_save += flush_batch(&batch, watch_dir, &engine, quiet);
                 batch.clear();
             }
 
@@ -511,39 +476,25 @@ pub(crate) fn run_watcher_loop(
 
         // Timeout reached — flush the batch
         if !batch.is_empty() {
-            changes_since_save += flush_batch(
-                &batch,
-                watch_dir,
-                &storage,
-                &emb_service,
-                &mut vector,
-                quiet,
-            );
+            changes_since_save += flush_batch(&batch, watch_dir, &engine, quiet);
             batch.clear();
         }
 
         // Periodically save vector index
         if changes_since_save >= 10 {
-            let _ = vector.save(&index_path);
+            engine.save_index();
             changes_since_save = 0;
         }
     }
 
     // Flush remaining batch
     if !batch.is_empty() {
-        flush_batch(
-            &batch,
-            watch_dir,
-            &storage,
-            &emb_service,
-            &mut vector,
-            quiet,
-        );
+        flush_batch(&batch, watch_dir, &engine, quiet);
     }
 
     // Final save
     if changes_since_save > 0 {
-        let _ = vector.save(&index_path);
+        engine.save_index();
     }
 
     Ok(())
@@ -553,9 +504,7 @@ pub(crate) fn run_watcher_loop(
 fn flush_batch(
     batch: &[FileChange],
     watch_dir: &std::path::Path,
-    storage: &codemem_storage::Storage,
-    emb_service: &Option<Box<dyn codemem_embeddings::EmbeddingProvider>>,
-    vector: &mut codemem_storage::HnswIndex,
+    engine: &codemem_engine::CodememEngine,
     quiet: bool,
 ) -> usize {
     if batch.is_empty() {
@@ -674,7 +623,7 @@ fn flush_batch(
     let raw_summary = summary_parts.join("\n");
 
     // Try LLM summarization for a more meaningful description
-    let compressor = super::compress::CompressProvider::from_env();
+    let compressor = codemem_engine::compress::CompressProvider::from_env();
     let file_list_brief: Vec<&str> = batch
         .iter()
         .take(10)
@@ -753,16 +702,8 @@ fn flush_batch(
         last_accessed_at: now,
     };
 
-    let mut embedded = 0usize;
-    match storage.insert_memory(&memory) {
+    match engine.persist_memory(&memory) {
         Ok(()) => {
-            if let Some(ref emb) = emb_service {
-                if let Ok(embedding) = emb.embed(&memory.content) {
-                    let _ = storage.store_embedding(&id, &embedding);
-                    let _ = vector.insert(&id, &embedding);
-                    embedded = 1;
-                }
-            }
             if quiet {
                 tracing::info!(
                     "[batch] {} files consolidated into memory {}",
@@ -776,12 +717,12 @@ fn flush_batch(
                     id
                 );
             }
+            1
         }
-        Err(codemem_core::CodememError::Duplicate(_)) => {}
+        Err(codemem_core::CodememError::Duplicate(_)) => 0,
         Err(e) => {
             tracing::warn!("Failed to store watch batch memory: {e}");
+            0
         }
     }
-
-    embedded
 }

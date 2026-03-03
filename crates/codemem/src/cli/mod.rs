@@ -9,7 +9,6 @@ mod commands_init;
 mod commands_lifecycle;
 mod commands_migrate;
 mod commands_search;
-pub(crate) mod compress;
 
 use clap::{Parser, Subcommand};
 use codemem_core::{StorageBackend, VectorBackend};

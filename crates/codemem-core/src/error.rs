@@ -31,6 +31,9 @@ pub enum CodememError {
     #[error("Not found: {0}")]
     NotFound(String),
 
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
     #[error("Duplicate content (hash: {0})")]
     Duplicate(String),
 

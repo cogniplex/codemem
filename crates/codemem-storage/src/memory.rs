@@ -7,7 +7,7 @@ use rusqlite::{params, OptionalExtension};
 impl Storage {
     /// Insert a new memory. Returns Err(Duplicate) if content hash already exists.
     pub fn insert_memory(&self, memory: &MemoryNode) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
 
         // Check dedup
         let existing: Option<String> = conn
@@ -52,7 +52,7 @@ impl Storage {
 
     /// Get a memory by ID. Updates access_count and last_accessed_at.
     pub fn get_memory(&self, id: &str) -> Result<Option<MemoryNode>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
 
         // Bump access count first
         let updated = conn
@@ -104,7 +104,7 @@ impl Storage {
         content: &str,
         importance: Option<f64>,
     ) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let hash = Self::content_hash(content);
         let now = chrono::Utc::now().timestamp();
 
@@ -127,7 +127,7 @@ impl Storage {
 
     /// Delete a memory by ID.
     pub fn delete_memory(&self, id: &str) -> Result<bool, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let rows = conn
             .execute("DELETE FROM memories WHERE id = ?1", params![id])
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -136,7 +136,7 @@ impl Storage {
 
     /// List all memory IDs.
     pub fn list_memory_ids(&self) -> Result<Vec<String>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id FROM memories ORDER BY created_at DESC")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -155,7 +155,7 @@ impl Storage {
         &self,
         namespace: &str,
     ) -> Result<Vec<String>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id FROM memories WHERE namespace = ?1 ORDER BY created_at DESC")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -171,7 +171,7 @@ impl Storage {
 
     /// List all distinct namespaces.
     pub fn list_namespaces(&self) -> Result<Vec<String>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT namespace FROM (
@@ -193,7 +193,7 @@ impl Storage {
 
     /// Get memory count.
     pub fn memory_count(&self) -> Result<usize, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -204,7 +204,7 @@ impl Storage {
 
     /// List all registered repositories.
     pub fn list_repos(&self) -> Result<Vec<Repository>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, path, name, namespace, created_at, last_indexed_at, status FROM repositories ORDER BY created_at DESC",
@@ -234,7 +234,7 @@ impl Storage {
 
     /// Add a new repository.
     pub fn add_repo(&self, repo: &Repository) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         conn.execute(
             "INSERT INTO repositories (id, path, name, namespace, created_at, last_indexed_at, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
@@ -253,7 +253,7 @@ impl Storage {
 
     /// Remove a repository by ID.
     pub fn remove_repo(&self, id: &str) -> Result<bool, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let rows = conn
             .execute("DELETE FROM repositories WHERE id = ?1", params![id])
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -262,7 +262,7 @@ impl Storage {
 
     /// Get a repository by ID.
     pub fn get_repo(&self, id: &str) -> Result<Option<Repository>, CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         let result = conn
             .query_row(
                 "SELECT id, path, name, namespace, created_at, last_indexed_at, status FROM repositories WHERE id = ?1",
@@ -291,7 +291,7 @@ impl Storage {
         status: &str,
         indexed_at: Option<&str>,
     ) -> Result<(), CodememError> {
-        let conn = self.conn();
+        let conn = self.conn()?;
         if let Some(ts) = indexed_at {
             conn.execute(
                 "UPDATE repositories SET status = ?1, last_indexed_at = ?2 WHERE id = ?3",

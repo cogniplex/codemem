@@ -1,4 +1,4 @@
-//! codemem-hooks: PostToolUse hook handler for passive capture from AI coding assistants.
+//! Hooks module: PostToolUse hook handler for passive capture from AI coding assistants.
 //!
 //! Parses PostToolUse JSON payloads from stdin, extracts relevant information
 //! based on tool type, and creates appropriate memories with auto-tagging.

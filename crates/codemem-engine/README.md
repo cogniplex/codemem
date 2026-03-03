@@ -1,4 +1,4 @@
-# codemem-index
+# codemem-engine
 
 ast-grep based code indexing for 14 languages with incremental change detection.
 

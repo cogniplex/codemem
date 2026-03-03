@@ -22,10 +22,14 @@ use std::sync::{Arc, Mutex, RwLock};
 
 pub mod bm25;
 pub mod compress;
+pub mod consolidation;
+pub mod enrichment;
 pub mod hooks;
 pub mod index;
 pub mod metrics;
 pub mod patterns;
+pub mod persistence;
+pub mod recall;
 pub mod scoring;
 pub mod watch;
 
@@ -39,6 +43,20 @@ pub use index::{
 // Re-export key domain types for convenience
 pub use bm25::Bm25Index;
 pub use metrics::InMemoryMetrics;
+
+// Re-export enrichment types
+pub use enrichment::EnrichResult;
+
+// Re-export persistence types
+pub use persistence::{edge_weight_for, IndexPersistResult};
+
+/// A part descriptor for `split_memory()`.
+#[derive(Debug, Clone)]
+pub struct SplitPart {
+    pub content: String,
+    pub tags: Option<Vec<String>>,
+    pub importance: Option<f64>,
+}
 
 // ── Index Cache ──────────────────────────────────────────────────────────────
 
@@ -401,53 +419,381 @@ impl CodememEngine {
 
     /// Persist a memory through the full pipeline: storage → BM25 → graph → embedding → vector.
     pub fn persist_memory(&self, memory: &MemoryNode) -> Result<(), CodememError> {
+        self.persist_memory_inner(memory, true)
+    }
+
+    /// Persist a memory without saving the vector index to disk.
+    /// Use this in batch operations, then call `save_index()` once at the end.
+    fn persist_memory_no_save(&self, memory: &MemoryNode) -> Result<(), CodememError> {
+        self.persist_memory_inner(memory, false)
+    }
+
+    /// Inner persist implementation with optional index save.
+    fn persist_memory_inner(&self, memory: &MemoryNode, save: bool) -> Result<(), CodememError> {
         // 1. Store in SQLite
         self.storage.insert_memory(memory)?;
 
         // 2. Update BM25 index
-        if let Ok(mut bm25) = self.lock_bm25() {
-            bm25.add_document(&memory.id, &memory.content);
+        match self.lock_bm25() {
+            Ok(mut bm25) => {
+                bm25.add_document(&memory.id, &memory.content);
+            }
+            Err(e) => tracing::warn!("BM25 lock failed during persist: {e}"),
         }
 
         // 3. Add memory node to graph
-        if let Ok(mut graph) = self.lock_graph() {
-            let node = codemem_core::GraphNode {
-                id: memory.id.clone(),
-                kind: codemem_core::NodeKind::Memory,
-                label: scoring::truncate_content(&memory.content, 80),
-                payload: std::collections::HashMap::new(),
-                centrality: 0.0,
-                memory_id: None,
-                namespace: memory.namespace.clone(),
-            };
-            let _ = graph.add_node(node.clone());
-            let _ = self.storage.insert_graph_node(&node);
+        match self.lock_graph() {
+            Ok(mut graph) => {
+                let node = codemem_core::GraphNode {
+                    id: memory.id.clone(),
+                    kind: codemem_core::NodeKind::Memory,
+                    label: scoring::truncate_content(&memory.content, 80),
+                    payload: std::collections::HashMap::new(),
+                    centrality: 0.0,
+                    memory_id: Some(memory.id.clone()),
+                    namespace: memory.namespace.clone(),
+                };
+                let _ = self.storage.insert_graph_node(&node);
+                let _ = graph.add_node(node);
+            }
+            Err(e) => tracing::warn!("Graph lock failed during persist: {e}"),
         }
 
         // 4. Embed and store in vector index
-        if let Ok(Some(emb)) = self.lock_embeddings() {
-            let enriched = self.enrich_memory_text(
-                &memory.content,
-                memory.memory_type,
-                &memory.tags,
-                memory.namespace.as_deref(),
-                Some(&memory.id),
-            );
-            if let Ok(vec) = emb.embed(&enriched) {
-                if let Ok(mut vi) = self.lock_vector() {
-                    let _ = vi.insert(&memory.id, &vec);
+        match self.lock_embeddings() {
+            Ok(Some(emb)) => {
+                let enriched = self.enrich_memory_text(
+                    &memory.content,
+                    memory.memory_type,
+                    &memory.tags,
+                    memory.namespace.as_deref(),
+                    Some(&memory.id),
+                );
+                if let Ok(vec) = emb.embed(&enriched) {
+                    if let Ok(mut vi) = self.lock_vector() {
+                        let _ = vi.insert(&memory.id, &vec);
+                    }
+                    let _ = self.storage.store_embedding(&memory.id, &vec);
                 }
-                let _ = self.storage.store_embedding(&memory.id, &vec);
+            }
+            Ok(None) => {} // No embeddings provider configured
+            Err(e) => tracing::warn!("Embeddings lock failed during persist: {e}"),
+        }
+
+        // 5. Save vector index to disk (if requested)
+        if save {
+            self.save_index();
+        }
+
+        Ok(())
+    }
+
+    // ── Edge Helpers ─────────────────────────────────────────────────────
+
+    /// Add an edge to both storage and in-memory graph.
+    pub fn add_edge(&self, edge: Edge) -> Result<(), CodememError> {
+        self.storage.insert_graph_edge(&edge)?;
+        let mut graph = self.lock_graph()?;
+        graph.add_edge(edge)?;
+        Ok(())
+    }
+
+    // ── Self-Editing ────────────────────────────────────────────────────
+
+    /// Refine a memory: create a new version with an EVOLVED_INTO edge from old to new.
+    pub fn refine_memory(
+        &self,
+        old_id: &str,
+        content: Option<&str>,
+        tags: Option<Vec<String>>,
+        importance: Option<f64>,
+    ) -> Result<(MemoryNode, String), CodememError> {
+        let old_memory = self
+            .storage
+            .get_memory(old_id)?
+            .ok_or_else(|| CodememError::NotFound(format!("Memory not found: {old_id}")))?;
+
+        let new_content = content.unwrap_or(&old_memory.content);
+        let new_tags = tags.unwrap_or_else(|| old_memory.tags.clone());
+        let new_importance = importance.unwrap_or(old_memory.importance);
+
+        let now = chrono::Utc::now();
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let hash = codemem_storage::Storage::content_hash(new_content);
+
+        let memory = MemoryNode {
+            id: new_id.clone(),
+            content: new_content.to_string(),
+            memory_type: old_memory.memory_type,
+            importance: new_importance,
+            confidence: old_memory.confidence,
+            access_count: 0,
+            content_hash: hash,
+            tags: new_tags,
+            metadata: old_memory.metadata.clone(),
+            namespace: old_memory.namespace.clone(),
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+        };
+
+        self.persist_memory(&memory)?;
+
+        // Create EVOLVED_INTO edge from old -> new
+        let edge = Edge {
+            id: format!("{old_id}-EVOLVED_INTO-{new_id}"),
+            src: old_id.to_string(),
+            dst: new_id.clone(),
+            relationship: RelationshipType::EvolvedInto,
+            weight: 1.0,
+            properties: std::collections::HashMap::new(),
+            created_at: now,
+            valid_from: Some(now),
+            valid_to: None,
+        };
+        if let Err(e) = self.add_edge(edge) {
+            tracing::warn!("Failed to add EVOLVED_INTO edge: {e}");
+        }
+
+        self.save_index();
+
+        Ok((memory, new_id))
+    }
+
+    /// Split a memory into multiple parts, each linked via PART_OF edges.
+    pub fn split_memory(
+        &self,
+        source_id: &str,
+        parts: &[SplitPart],
+    ) -> Result<Vec<String>, CodememError> {
+        let source_memory = self
+            .storage
+            .get_memory(source_id)?
+            .ok_or_else(|| CodememError::NotFound(format!("Memory not found: {source_id}")))?;
+
+        if parts.is_empty() {
+            return Err(CodememError::InvalidInput(
+                "'parts' array must not be empty".to_string(),
+            ));
+        }
+
+        // Validate all parts upfront before persisting anything
+        for part in parts {
+            if part.content.is_empty() {
+                return Err(CodememError::InvalidInput(
+                    "Each part must have a non-empty 'content' field".to_string(),
+                ));
             }
         }
 
-        // 5. Auto-link to code nodes
-        self.auto_link_to_code_nodes(&memory.id, &memory.content, &[]);
+        let now = chrono::Utc::now();
+        let mut child_ids: Vec<String> = Vec::new();
 
-        // 6. Save vector index to disk
+        for part in parts {
+            let tags = part
+                .tags
+                .clone()
+                .unwrap_or_else(|| source_memory.tags.clone());
+            let importance = part.importance.unwrap_or(source_memory.importance);
+
+            let child_id = uuid::Uuid::new_v4().to_string();
+            let hash = codemem_storage::Storage::content_hash(&part.content);
+
+            let memory = MemoryNode {
+                id: child_id.clone(),
+                content: part.content.clone(),
+                memory_type: source_memory.memory_type,
+                importance,
+                confidence: source_memory.confidence,
+                access_count: 0,
+                content_hash: hash,
+                tags,
+                metadata: std::collections::HashMap::new(),
+                namespace: source_memory.namespace.clone(),
+                created_at: now,
+                updated_at: now,
+                last_accessed_at: now,
+            };
+
+            if let Err(e) = self.persist_memory_no_save(&memory) {
+                // Clean up already-created child memories
+                for created_id in &child_ids {
+                    if let Err(del_err) = self.delete_memory(created_id) {
+                        tracing::warn!(
+                            "Failed to clean up child memory {created_id} after split failure: {del_err}"
+                        );
+                    }
+                }
+                return Err(e);
+            }
+
+            // Create PART_OF edge: child -> source
+            let edge = Edge {
+                id: format!("{child_id}-PART_OF-{source_id}"),
+                src: child_id.clone(),
+                dst: source_id.to_string(),
+                relationship: RelationshipType::PartOf,
+                weight: 1.0,
+                properties: std::collections::HashMap::new(),
+                created_at: now,
+                valid_from: Some(now),
+                valid_to: None,
+            };
+            if let Err(e) = self.add_edge(edge) {
+                tracing::warn!("Failed to add PART_OF edge: {e}");
+            }
+
+            child_ids.push(child_id);
+        }
+
         self.save_index();
+        Ok(child_ids)
+    }
 
+    /// Merge multiple memories into one, linked via SUMMARIZES edges.
+    pub fn merge_memories(
+        &self,
+        source_ids: &[String],
+        content: &str,
+        memory_type: MemoryType,
+        importance: f64,
+        tags: Vec<String>,
+    ) -> Result<String, CodememError> {
+        if source_ids.len() < 2 {
+            return Err(CodememError::InvalidInput(
+                "'source_ids' must contain at least 2 IDs".to_string(),
+            ));
+        }
+
+        // Verify all sources exist
+        let id_refs: Vec<&str> = source_ids.iter().map(|s| s.as_str()).collect();
+        let found = self.storage.get_memories_batch(&id_refs)?;
+        if found.len() != source_ids.len() {
+            let found_ids: std::collections::HashSet<&str> =
+                found.iter().map(|m| m.id.as_str()).collect();
+            let missing: Vec<&str> = id_refs
+                .iter()
+                .filter(|id| !found_ids.contains(**id))
+                .copied()
+                .collect();
+            return Err(CodememError::NotFound(format!(
+                "Source memories not found: {}",
+                missing.join(", ")
+            )));
+        }
+
+        let now = chrono::Utc::now();
+        let merged_id = uuid::Uuid::new_v4().to_string();
+        let hash = codemem_storage::Storage::content_hash(content);
+
+        let memory = MemoryNode {
+            id: merged_id.clone(),
+            content: content.to_string(),
+            memory_type,
+            importance,
+            confidence: found.iter().map(|m| m.confidence).sum::<f64>() / found.len() as f64,
+            access_count: 0,
+            content_hash: hash,
+            tags,
+            metadata: std::collections::HashMap::new(),
+            namespace: found.iter().find_map(|m| m.namespace.clone()),
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+        };
+
+        self.persist_memory_no_save(&memory)?;
+
+        // Create SUMMARIZES edges: merged -> each source
+        for source_id in source_ids {
+            let edge = Edge {
+                id: format!("{merged_id}-SUMMARIZES-{source_id}"),
+                src: merged_id.clone(),
+                dst: source_id.clone(),
+                relationship: RelationshipType::Summarizes,
+                weight: 1.0,
+                properties: std::collections::HashMap::new(),
+                created_at: now,
+                valid_from: Some(now),
+                valid_to: None,
+            };
+            if let Err(e) = self.add_edge(edge) {
+                tracing::warn!("Failed to add SUMMARIZES edge to {source_id}: {e}");
+            }
+        }
+
+        self.save_index();
+        Ok(merged_id)
+    }
+
+    /// Update a memory's content and/or importance, re-embedding if needed.
+    pub fn update_memory(
+        &self,
+        id: &str,
+        content: &str,
+        importance: Option<f64>,
+    ) -> Result<(), CodememError> {
+        self.storage.update_memory(id, content, importance)?;
+
+        // Update BM25 index
+        self.lock_bm25()?.add_document(id, content);
+
+        // Update graph node label
+        if let Ok(mut graph) = self.lock_graph() {
+            if let Ok(Some(mut node)) = graph.get_node(id) {
+                node.label = scoring::truncate_content(content, 80);
+                let _ = graph.add_node(node);
+            }
+        }
+
+        // Re-embed with contextual enrichment
+        if let Some(emb_guard) = self.lock_embeddings()? {
+            let (mem_type, tags, namespace) = if let Ok(Some(mem)) = self.storage.get_memory(id) {
+                (mem.memory_type, mem.tags, mem.namespace)
+            } else {
+                (MemoryType::Context, vec![], None)
+            };
+            let enriched =
+                self.enrich_memory_text(content, mem_type, &tags, namespace.as_deref(), Some(id));
+            let emb_result = emb_guard.embed(&enriched);
+            drop(emb_guard);
+            if let Ok(embedding) = emb_result {
+                let _ = self.storage.store_embedding(id, &embedding);
+                let mut vec = self.lock_vector()?;
+                let _ = vec.remove(id);
+                let _ = vec.insert(id, &embedding);
+            }
+        }
+
+        self.save_index();
         Ok(())
+    }
+
+    /// Delete a memory from all subsystems.
+    pub fn delete_memory(&self, id: &str) -> Result<bool, CodememError> {
+        match self.storage.delete_memory(id)? {
+            true => {
+                // Remove from vector index
+                let mut vec = self.lock_vector()?;
+                let _ = vec.remove(id);
+                drop(vec);
+                // Remove from in-memory graph
+                let mut graph = self.lock_graph()?;
+                let _ = graph.remove_node(id);
+                drop(graph);
+                // Remove graph node and edges from SQLite
+                let _ = self.storage.delete_graph_edges_for_node(id);
+                let _ = self.storage.delete_graph_node(id);
+                // Remove embedding from SQLite
+                let _ = self.storage.delete_embedding(id);
+                // Remove from BM25 index
+                self.lock_bm25()?.remove_document(id);
+                // Persist vector index to disk
+                self.save_index();
+                Ok(true)
+            }
+            false => Ok(false),
+        }
     }
 
     // ── Index Persistence ────────────────────────────────────────────────

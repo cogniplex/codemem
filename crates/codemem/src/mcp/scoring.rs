@@ -18,14 +18,6 @@ pub(crate) fn write_response(
     writer.flush()
 }
 
-pub(crate) fn truncate_str(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max])
-    }
-}
-
 /// Format search results into a ToolResult. If `_repo_label` is provided,
 /// a "repo" field is added to each result.
 pub(crate) fn format_recall_results(

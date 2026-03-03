@@ -1,4 +1,4 @@
-//! codemem-watch: Real-time file watcher for Codemem.
+//! Watch module: Real-time file watcher for Codemem.
 //!
 //! Uses `notify` with debouncing to detect file changes and trigger re-indexing.
 //! Respects `.gitignore` and common ignore patterns.
