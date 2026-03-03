@@ -1,0 +1,38 @@
+references:
+  - kind: "import_declaration"
+    reference_kind: "import"
+    name_field: null
+    special: "scala_import"
+
+  - kind: "call_expression"
+    reference_kind: "call"
+    name_field: "function"
+    special: null
+
+  - kind: "extends_clause"
+    reference_kind: "inherits"
+    name_field: null
+    special: "scala_extends"
+
+scope_containers:
+  - kind: "class_definition"
+    name_field: "name"
+    body_field: "body"
+
+  - kind: "trait_definition"
+    name_field: "name"
+    body_field: "body"
+
+  - kind: "object_definition"
+    name_field: "name"
+    body_field: "body"
+
+  - kind: "function_definition"
+    name_field: "name"
+    body_field: "body"
+
+  - kind: "function_declaration"
+    name_field: "name"
+    body_field: "body"
+
+unwrap_nodes: []

@@ -1,0 +1,40 @@
+[package]
+name = "codemem-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Domain logic engine for Codemem: indexing, hooks, watching, scoring, recall, consolidation"
+
+[dependencies]
+codemem-core = { workspace = true }
+codemem-storage = { workspace = true }
+codemem-embeddings = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+similar = { workspace = true }
+reqwest = { workspace = true }
+regex = "1"
+anyhow = { workspace = true }
+
+# Indexing
+walkdir = { workspace = true }
+ignore = { workspace = true }
+tokio = { workspace = true }
+toml = "1.0"
+ast-grep-core = "0.41"
+ast-grep-language = "0.41"
+serde_yaml = "0.9"
+
+# File watching
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+crossbeam-channel = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

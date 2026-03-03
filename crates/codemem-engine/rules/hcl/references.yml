@@ -1,0 +1,9 @@
+references:
+  - kind: "function_call"
+    reference_kind: "call"
+    name_field: null
+    special: "hcl_function_call"
+
+scope_containers: []
+
+unwrap_nodes: []

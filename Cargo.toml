@@ -2,16 +2,10 @@
 members = [
     "crates/codemem-core",
     "crates/codemem-storage",
-    "crates/codemem-vector",
-    "crates/codemem-graph",
     "crates/codemem-embeddings",
-    "crates/codemem-mcp",
-    "crates/codemem-hooks",
-    "crates/codemem-cli",
+    "crates/codemem-engine",
     "crates/codemem-bench",
-    "crates/codemem-index",
-    "crates/codemem-watch",
-    "crates/codemem-api",
+    "crates/codemem",
 ]
 resolver = "2"
 
@@ -31,15 +25,9 @@ rust-version = "1.75"
 # Internal crates
 codemem-core = { path = "crates/codemem-core", version = "0.7.0" }
 codemem-storage = { path = "crates/codemem-storage", version = "0.7.0" }
-codemem-vector = { path = "crates/codemem-vector", version = "0.7.0" }
-codemem-graph = { path = "crates/codemem-graph", version = "0.7.0" }
 codemem-embeddings = { path = "crates/codemem-embeddings", version = "0.7.0" }
-codemem-mcp = { path = "crates/codemem-mcp", version = "0.7.0" }
-codemem-hooks = { path = "crates/codemem-hooks", version = "0.7.0" }
-codemem-cli = { path = "crates/codemem-cli", version = "0.7.0" }
-codemem-index = { path = "crates/codemem-index", version = "0.7.0" }
-codemem-watch = { path = "crates/codemem-watch", version = "0.7.0" }
-codemem-api = { path = "crates/codemem-api", version = "0.7.0" }
+codemem-engine = { path = "crates/codemem-engine", version = "0.7.0" }
+codemem = { path = "crates/codemem", version = "0.7.0" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -93,7 +81,6 @@ notify-debouncer-mini = "0.7"
 crossbeam-channel = "0.5"
 
 # Indexing
-tree-sitter = "0.26"
 walkdir = "2"
 ignore = "0.4"
 

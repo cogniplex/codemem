@@ -1,0 +1,39 @@
+symbols:
+  - kind: "function_declaration"
+    symbol_kind: "function"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
+
+  - kind: "method_declaration"
+    symbol_kind: "method"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "go_method"
+
+  - kind: "type_declaration"
+    symbol_kind: "type"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "go_type_declaration"
+
+  - kind: "const_declaration"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "go_const_declaration"
+
+  - kind: "var_declaration"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "go_var_declaration"
+
+scope_containers: []
+
+unwrap_nodes: []

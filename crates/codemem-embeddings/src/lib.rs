@@ -33,29 +33,8 @@ const MAX_SEQ_LENGTH: usize = 512;
 /// Default LRU cache capacity.
 pub const CACHE_CAPACITY: usize = 10_000;
 
-// ── Embedding Provider Trait ────────────────────────────────────────────────
-
-/// Trait for pluggable embedding providers.
-pub trait EmbeddingProvider: Send + Sync {
-    /// Embedding vector dimensions.
-    fn dimensions(&self) -> usize;
-
-    /// Embed a single text string.
-    fn embed(&self, text: &str) -> Result<Vec<f32>, CodememError>;
-
-    /// Embed a batch of texts (default: sequential).
-    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CodememError> {
-        texts.iter().map(|t| self.embed(t)).collect()
-    }
-
-    /// Provider name for display.
-    fn name(&self) -> &str;
-
-    /// Cache statistics: (current_size, capacity). Returns (0, 0) if no cache.
-    fn cache_stats(&self) -> (usize, usize) {
-        (0, 0)
-    }
-}
+// Re-export EmbeddingProvider trait from core
+pub use codemem_core::EmbeddingProvider;
 
 // ── Candle Embedding Service ────────────────────────────────────────────────
 

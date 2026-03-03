@@ -1,0 +1,67 @@
+symbols:
+  - kind: "class_definition"
+    symbol_kind: "class"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "trait_definition"
+    symbol_kind: "interface"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "object_definition"
+    symbol_kind: "class"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "function_definition"
+    symbol_kind: "function"
+    name_field: "name"
+    method_when_scoped: true
+    is_scope: false
+    special: null
+
+  - kind: "function_declaration"
+    symbol_kind: "function"
+    name_field: "name"
+    method_when_scoped: true
+    is_scope: false
+    special: null
+
+  - kind: "val_definition"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "scala_final_val"
+
+  - kind: "val_declaration"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "scala_final_val"
+
+scope_containers:
+  - kind: "class_definition"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "trait_definition"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "object_definition"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+unwrap_nodes: []

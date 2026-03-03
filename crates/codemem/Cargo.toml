@@ -1,0 +1,81 @@
+[package]
+name = "codemem"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Persistent memory engine for AI coding assistants"
+publish = true
+include = ["src/**", "Cargo.toml", "ui-dist/**"]
+
+[features]
+default = []
+ui = ["include_dir", "mime_guess"]
+metal = ["codemem-embeddings/metal"]
+cuda = ["codemem-embeddings/cuda"]
+accelerate = ["codemem-embeddings/accelerate"]
+
+[[bin]]
+name = "codemem"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+codemem-core = { workspace = true }
+codemem-storage = { workspace = true }
+codemem-embeddings = { workspace = true }
+codemem-engine = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+
+# Web framework (MCP HTTP + API)
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
+
+# CLI
+clap = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Time & IDs
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# Networking
+reqwest = { workspace = true }
+openssl = { workspace = true }
+
+# Utilities
+dirs = { workspace = true }
+ndarray = { workspace = true }
+regex = "1"
+colored = "3"
+crossbeam-channel = { workspace = true }
+
+# SSE (API)
+tokio-stream = { version = "0.1", features = ["sync"] }
+async-stream = "0.3"
+
+# UI embedding (optional)
+include_dir = { version = "0.7", optional = true }
+mime_guess = { version = "2", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+codemem-embeddings = { workspace = true, features = ["metal", "accelerate"] }

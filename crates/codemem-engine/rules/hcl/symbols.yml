@@ -1,0 +1,23 @@
+symbols:
+  - kind: "block"
+    symbol_kind: "class"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "hcl_block"
+
+  - kind: "attribute"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "hcl_attribute"
+
+scope_containers:
+  - kind: "block"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: false
+    special: "hcl_scope"
+
+unwrap_nodes: []

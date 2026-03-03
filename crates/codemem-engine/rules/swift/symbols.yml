@@ -1,0 +1,59 @@
+symbols:
+  - kind: "class_declaration"
+    symbol_kind: "class"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "swift_class_declaration"
+
+  - kind: "struct_declaration"
+    symbol_kind: "struct"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "enum_declaration"
+    symbol_kind: "enum"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "protocol_declaration"
+    symbol_kind: "interface"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "function_declaration"
+    symbol_kind: "function"
+    name_field: "name"
+    method_when_scoped: true
+    is_scope: false
+    special: null
+
+scope_containers:
+  - kind: "class_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+    special: "swift_scope"
+
+  - kind: "struct_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "enum_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "protocol_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+unwrap_nodes: []

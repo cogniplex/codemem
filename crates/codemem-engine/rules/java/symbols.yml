@@ -1,0 +1,79 @@
+symbols:
+  - kind: "class_declaration"
+    symbol_kind: "class"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "interface_declaration"
+    symbol_kind: "interface"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "enum_declaration"
+    symbol_kind: "enum"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "annotation_type_declaration"
+    symbol_kind: "interface"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "method_declaration"
+    symbol_kind: "method"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
+
+  - kind: "constructor_declaration"
+    symbol_kind: "method"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
+
+  - kind: "field_declaration"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "java_static_final_field"
+
+  - kind: "field_declaration"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "java_field"
+
+scope_containers:
+  - kind: "class_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "interface_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "enum_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "annotation_type_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+unwrap_nodes: []

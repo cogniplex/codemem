@@ -1,0 +1,35 @@
+symbols:
+  - kind: "function_definition"
+    symbol_kind: "function"
+    name_field: "name"
+    method_when_scoped: true
+    is_scope: false
+    special: null
+
+  - kind: "class_definition"
+    symbol_kind: "class"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "expression_statement"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: "python_constant"
+
+scope_containers:
+  - kind: "class_definition"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "function_definition"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: false
+
+unwrap_nodes:
+  - "decorated_definition"

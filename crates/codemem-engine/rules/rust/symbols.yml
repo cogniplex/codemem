@@ -1,0 +1,74 @@
+symbols:
+  - kind: "function_item"
+    symbol_kind: "function"
+    name_field: "name"
+    method_when_scoped: true
+    is_scope: false
+    special: null
+
+  - kind: "struct_item"
+    symbol_kind: "struct"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "enum_item"
+    symbol_kind: "enum"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
+
+  - kind: "trait_item"
+    symbol_kind: "interface"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+  - kind: "type_item"
+    symbol_kind: "type"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
+
+  - kind: "const_item"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
+
+  - kind: "static_item"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
+
+  - kind: "mod_item"
+    symbol_kind: "module"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
+scope_containers:
+  - kind: "impl_item"
+    name_field: "type"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "trait_item"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "mod_item"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: false
+
+unwrap_nodes: []

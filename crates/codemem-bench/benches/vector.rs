@@ -1,5 +1,5 @@
 use codemem_core::VectorBackend;
-use codemem_vector::HnswIndex;
+use codemem_storage::HnswIndex;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 /// Deterministic pseudo-random vector generator.

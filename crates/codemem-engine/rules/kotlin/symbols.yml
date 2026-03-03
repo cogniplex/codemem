@@ -1,0 +1,34 @@
+symbols:
+  - kind: "class_declaration"
+    symbol_kind: "class"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: "kotlin_class"
+
+  - kind: "object_declaration"
+    symbol_kind: "class"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: "kotlin_object"
+
+  - kind: "function_declaration"
+    symbol_kind: "function"
+    name_field: "name"
+    method_when_scoped: true
+    is_scope: false
+    special: "kotlin_function"
+
+scope_containers:
+  - kind: "class_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "object_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+unwrap_nodes: []

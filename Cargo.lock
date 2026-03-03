@@ -134,6 +134,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "ast-grep-core"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbeacc5cd62efb6069281b8c9db9ecdbf45ce488cc20bde18fe3bc30a08bcf4c"
+dependencies = [
+ "bit-set",
+ "regex",
+ "thiserror 2.0.18",
+ "tree-sitter",
+]
+
+[[package]]
+name = "ast-grep-language"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d61ffb728d5d384b66ca9f6566d98d6bc217217dc063de5b918dde44c812939"
+dependencies = [
+ "ast-grep-core",
+ "ignore",
+ "serde",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-c",
+ "tree-sitter-c-sharp",
+ "tree-sitter-cpp",
+ "tree-sitter-css",
+ "tree-sitter-elixir",
+ "tree-sitter-go",
+ "tree-sitter-haskell",
+ "tree-sitter-hcl",
+ "tree-sitter-html",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-kotlin-sg",
+ "tree-sitter-lua",
+ "tree-sitter-nix",
+ "tree-sitter-php",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
+ "tree-sitter-rust",
+ "tree-sitter-scala",
+ "tree-sitter-solidity",
+ "tree-sitter-swift",
+ "tree-sitter-typescript",
+ "tree-sitter-yaml",
+]
+
+[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -610,29 +659,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "codemem-api"
+name = "codemem"
 version = "0.7.0"
 dependencies = [
+ "anyhow",
  "async-stream",
  "axum",
  "chrono",
+ "clap",
  "codemem-core",
  "codemem-embeddings",
- "codemem-graph",
- "codemem-index",
- "codemem-mcp",
+ "codemem-engine",
  "codemem-storage",
- "codemem-vector",
- "codemem-watch",
+ "colored",
+ "crossbeam-channel",
+ "dirs",
  "include_dir",
  "mime_guess",
  "ndarray",
+ "openssl",
+ "regex",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -643,39 +699,8 @@ dependencies = [
  "chrono",
  "codemem-core",
  "codemem-embeddings",
- "codemem-graph",
  "codemem-storage",
- "codemem-vector",
  "criterion",
- "uuid",
-]
-
-[[package]]
-name = "codemem-cli"
-version = "0.7.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "codemem-api",
- "codemem-core",
- "codemem-embeddings",
- "codemem-graph",
- "codemem-hooks",
- "codemem-index",
- "codemem-mcp",
- "codemem-storage",
- "codemem-vector",
- "codemem-watch",
- "colored",
- "crossbeam-channel",
- "dirs",
- "openssl",
- "reqwest 0.13.2",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -714,91 +739,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "codemem-graph"
-version = "0.7.0"
-dependencies = [
- "chrono",
- "codemem-core",
- "petgraph",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "codemem-hooks"
-version = "0.7.0"
-dependencies = [
- "chrono",
- "codemem-core",
- "codemem-embeddings",
- "codemem-storage",
- "codemem-vector",
- "serde",
- "serde_json",
- "sha2",
- "similar",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "codemem-index"
-version = "0.7.0"
-dependencies = [
- "chrono",
- "codemem-core",
- "ignore",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "toml 1.0.3+spec-1.1.0",
- "tracing",
- "tree-sitter",
- "tree-sitter-c-sharp",
- "tree-sitter-cpp",
- "tree-sitter-go",
- "tree-sitter-hcl",
- "tree-sitter-java",
- "tree-sitter-kotlin-ng",
- "tree-sitter-php",
- "tree-sitter-python",
- "tree-sitter-ruby",
- "tree-sitter-rust",
- "tree-sitter-scala",
- "tree-sitter-swift",
- "tree-sitter-typescript",
- "uuid",
- "walkdir",
-]
-
-[[package]]
-name = "codemem-mcp"
+name = "codemem-engine"
 version = "0.7.0"
 dependencies = [
  "anyhow",
- "axum",
+ "ast-grep-core",
+ "ast-grep-language",
  "chrono",
  "codemem-core",
  "codemem-embeddings",
- "codemem-graph",
- "codemem-index",
  "codemem-storage",
- "codemem-vector",
+ "crossbeam-channel",
+ "ignore",
+ "notify",
+ "notify-debouncer-mini",
  "regex",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "sha2",
+ "similar",
  "tempfile",
- "thiserror 2.0.18",
  "tokio",
- "tower-http",
+ "toml 1.0.3+spec-1.1.0",
  "tracing",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
@@ -807,38 +774,15 @@ version = "0.7.0"
 dependencies = [
  "chrono",
  "codemem-core",
+ "petgraph",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2",
  "thiserror 2.0.18",
  "tracing",
- "uuid",
-]
-
-[[package]]
-name = "codemem-vector"
-version = "0.7.0"
-dependencies = [
- "codemem-core",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
  "usearch",
-]
-
-[[package]]
-name = "codemem-watch"
-version = "0.7.0"
-dependencies = [
- "codemem-core",
- "crossbeam-channel",
- "ignore",
- "notify",
- "notify-debouncer-mini",
- "tempfile",
- "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4020,6 +3964,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4668,6 +4625,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-bash"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e5ec769279cc91b561d3df0d8a5deb26b0ad40d183127f409494d6d8fc53062"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-c"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a3aad8f0129083a59fe8596157552d2bb7148c492d44c21558d68ca1c722707"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-c-sharp"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4688,10 +4665,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-css"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5cbc5e18f29a2c6d6435891f42569525cf95435a3e01c2f1947abcde178686f"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-elixir"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66dd064a762ed95bfc29857fa3cb7403bb1e5cb88112de0f6341b7e47284ba40"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-go"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8560a4d2f835cc0d4d2c2e03cbd0dde2f6114b43bc491164238d333e28b16ea"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-haskell"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "977c51e504548cba13fc27cb5a2edab2124cf6716a1934915d07ab99523b05a4"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -4708,6 +4715,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-html"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "261b708e5d92061ede329babaaa427b819329a9d427a1d710abb0f67bbef63ee"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-java"
 version = "0.23.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4718,10 +4735,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "tree-sitter-kotlin-ng"
-version = "1.1.0"
+name = "tree-sitter-javascript"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e800ebbda938acfbf224f4d2c34947a31994b1295ee6e819b65226c7b51b4450"
+checksum = "68204f2abc0627a90bdf06e605f5c470aa26fdcb2081ea553a04bdad756693f5"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-json"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86a5d6b3ea17e06e7a34aabeadd68f5866c0d0f9359155d432095f8b751865e4"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-kotlin-sg"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0e175b7530765d1e36ad234a7acaa8b2a3316153f239d724376c7ee5e8d8e98"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -4732,6 +4769,26 @@ name = "tree-sitter-language"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-lua"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea992f4164d83f371ef1239ae178c4d4596c296c09055e9a48bb02a2760403af"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-nix"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4952a9733f3a98f6683a0ccd1035d84ab7a52f7e84eeed58548d86765ad92de3"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "tree-sitter-php"
@@ -4784,6 +4841,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-solidity"
+version = "1.2.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4eacf8875b70879f0cb670c60b233ad0b68752d9e1474e6c3ef168eea8a90b25"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-swift"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4798,6 +4865,16 @@ name = "tree-sitter-typescript"
 version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-yaml"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53c223db85f05e34794f065454843b0668ebc15d240ada63e2b5939f43ce7c97"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -4919,6 +4996,12 @@ name = "unit-prefix"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

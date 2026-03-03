@@ -1,5 +1,5 @@
 use codemem_core::{Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
-use codemem_graph::GraphEngine;
+use codemem_storage::GraphEngine;
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::collections::HashMap;
 
