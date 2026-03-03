@@ -4,7 +4,7 @@ build:
 	cargo build --workspace
 
 release: ui-build
-	cargo build --release
+	cargo build --release --features ui
 
 test:
 	cargo test --workspace
@@ -25,7 +25,7 @@ clean:
 	cargo clean
 
 install: ui-build
-	cargo install --path crates/codemem-cli
+	cargo install --path crates/codemem-cli --features ui
 
 serve:
 	cargo run -- serve
