@@ -8,7 +8,7 @@ pub mod routes;
 pub mod sse;
 pub mod types;
 
-use axum::{routing::get, Router};
+use axum::{routing::{get, post}, Router};
 use codemem_index::IndexProgress;
 use codemem_mcp::McpServer;
 use std::sync::Arc;
@@ -104,6 +104,7 @@ impl ApiServer {
                 get(routes::graph::get_shortest_path),
             )
             .route("/api/graph/impact/{id}", get(routes::graph::get_impact))
+            .route("/api/graph/reload", post(routes::graph::reload_graph))
             // Namespaces
             .route("/api/namespaces", get(routes::namespaces::list_namespaces))
             .route(

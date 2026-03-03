@@ -204,6 +204,29 @@ pub async fn get_shortest_path(
     }
 }
 
+pub async fn reload_graph(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.server.reload_graph() {
+        Ok(()) => {
+            let graph = state
+                .server
+                .graph()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            Ok(Json(serde_json::json!({
+                "status": "ok",
+                "node_count": graph.node_count(),
+                "edge_count": graph.edge_count(),
+            })))
+        }
+        Err(e) => {
+            tracing::error!("Failed to reload graph: {e}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 pub async fn get_impact(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

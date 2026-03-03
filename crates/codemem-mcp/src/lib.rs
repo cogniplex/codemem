@@ -452,6 +452,18 @@ impl McpServer {
         &self.bm25_index
     }
 
+    /// Reload the in-memory graph from the database.
+    ///
+    /// This is needed when the graph was modified by a separate process
+    /// (e.g., MCP stdio indexing while the API server is running).
+    pub fn reload_graph(&self) -> Result<(), CodememError> {
+        let new_graph = GraphEngine::from_storage(&*self.storage)?;
+        let mut graph = self.lock_graph()?;
+        *graph = new_graph;
+        graph.recompute_centrality();
+        Ok(())
+    }
+
     /// Access the database path.
     pub fn db_path(&self) -> Option<&Path> {
         self.db_path.as_deref()
