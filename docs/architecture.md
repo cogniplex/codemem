@@ -6,7 +6,7 @@ Codemem is a standalone Rust memory engine for AI coding assistants. A single bi
 
 `codemem init` registers 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop) and a stdio MCP server. The PostToolUse hook intercepts Read/Grep/Edit/Write tool calls, extracts structured observations (file paths, symbols, diff summaries), embeds them with BAAI/bge-base-en-v1.5 (768-dim, contextually enriched with metadata + graph neighbors), and stores them as typed memory nodes (Decision, Pattern, Insight, etc.) with graph edges (CALLS, IMPORTS, EVOLVED_INTO, etc.) in a single SQLite WAL database + usearch HNSW index. SessionStart injects prior context; Stop generates a structured session summary.
 
-Recall uses 9-component hybrid scoring: vector cosine (25%), graph strength via PageRank/betweenness/degree/cluster coefficient (25%), Okapi BM25 with camelCase/snake_case tokenization (15%), temporal alignment (10%), tag matching (10%), importance (5%), confidence (5%), recency (5%). The graph layer (petgraph) runs 25 algorithms — PageRank, Louvain community detection, betweenness centrality, SCC, topological sort — cached per session. `recall_with_impact` returns blast-radius data alongside results. All weights are runtime-configurable via `set_scoring_weights` and persist in `~/.codemem/config.toml`.
+Recall uses 9-component hybrid scoring: vector cosine (25%), graph strength via PageRank/betweenness/degree/cluster coefficient (20%), Okapi BM25 with camelCase/snake_case tokenization (15%), temporal alignment (10%), importance (10%), confidence (10%), tag matching (5%), recency (5%). The graph layer (petgraph) runs 25 algorithms — PageRank, Louvain community detection, betweenness centrality, SCC, topological sort — cached per session. `recall_with_impact` returns blast-radius data alongside results. All weights are runtime-configurable via `set_scoring_weights` and persist in `~/.codemem/config.toml`.
 
 Consolidation runs 5 cycles: Decay (power-law `importance × 0.9^(days/30) × (1 + log₂(access_count) × 0.1)`), Creative (O(n log n) vector KNN + Union-Find to create SHARES_THEME edges across memory types), Cluster (cosine similarity > 0.92 deduplication), Summarize (LLM-powered connected-component summarization via Ollama/OpenAI/Anthropic), Forget (prune below threshold). Memories support self-editing: `refine_memory` creates EVOLVED_INTO provenance chains, `split_memory` decomposes via PART_OF edges, `merge_memories` combines via SUMMARIZES edges — all with temporal edge tracking (valid_from/valid_to).
 
@@ -14,13 +14,13 @@ Consolidation runs 5 cycles: Decay (power-law `importance × 0.9^(days/30) × (1
 
 ## 1. System Overview
 
-The following diagram shows the full Codemem system: AI assistant integration points at the top, the Codemem binary in the middle (organized as a Cargo workspace of 12 crates), and the persistent storage layer at the bottom.
+The following diagram shows the full Codemem system: AI assistant integration points at the top, the Codemem binary in the middle (organized as a Cargo workspace of 13 crates), and the persistent storage layer at the bottom.
 
 ```mermaid
 graph TB
     subgraph "AI Coding Assistant"
         H[4 Lifecycle Hooks<br/>SessionStart, UserPromptSubmit,<br/>PostToolUse, Stop]
-        M[MCP Tools<br/>42 tools via JSON-RPC stdio]
+        M[MCP Tools<br/>43 tools via JSON-RPC stdio]
     end
 
     subgraph "Codemem Binary"
@@ -38,6 +38,7 @@ graph TB
             IDX[codemem-index<br/>tree-sitter, 14 languages]
         end
 
+        API[codemem-api<br/>REST/SSE API + embedded UI]
         VIZ[codemem-viz<br/>Dashboard]
         BENCH[codemem-bench<br/>Criterion benchmarks]
     end
@@ -60,7 +61,12 @@ graph TB
     CORE --> STORE
     CORE --> GRAPH
     CLI --> IDX
+    CLI --> API
     MCP --> IDX
+    API --> CORE
+    API --> STORE
+    API --> GRAPH
+    API --> VEC
     STORE --> DB
     VEC --> HNSW
     EMB --> MODEL
@@ -82,10 +88,11 @@ Each arrow reads "depends on." The `codemem-core` crate sits at the root with no
 flowchart TD
     cli[codemem-cli]
 
-    cli --> mcp & hooks & viz & watch & index
+    cli --> mcp & hooks & viz & watch & index & api
     cli --> storage & vector & graphCrate & embeddings
 
     mcp[codemem-mcp] --> storage & vector & graphCrate & embeddings & index
+    api[codemem-api] --> mcp & storage & vector & graphCrate & embeddings
     hooks[codemem-hooks] --> storage & vector & embeddings
     viz[codemem-viz] --> storage
     bench[codemem-bench] --> storage & vector & graphCrate & embeddings
@@ -106,16 +113,17 @@ flowchart TD
 
 | Crate | Description |
 |-------|-------------|
-| codemem-core | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`), config (`config.rs`: `CodememConfig` TOML persistence). 7 `MemoryType`s, 5 `PatternType`s, 24 `RelationshipType`s, 12 `NodeKind`s, `ScoringWeights` |
+| codemem-core | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`), config (`config.rs`: `CodememConfig`, `ChunkingConfig`, `EnrichmentConfig` TOML persistence). 7 `MemoryType`s, 5 `PatternType`s, 24 `RelationshipType`s, 13 `NodeKind`s, `ScoringWeights` |
 | codemem-storage | rusqlite (bundled), WAL mode, versioned schema migrations. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning with `schema_version` table) |
 | codemem-vector | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200, efSearch=100, persistent ID mapping |
-| codemem-graph | petgraph + SQLite persistence. Split into `traversal.rs` (GraphBackend trait impl: BFS/DFS/shortest path), `algorithms.rs` (PageRank, personalized PageRank, Louvain, betweenness, SCC, topological layers). Cached centrality scores (`recompute_centrality()`) |
+| codemem-graph | petgraph + SQLite persistence. Split into `traversal.rs` (GraphBackend trait impl: BFS/DFS/shortest path + `bfs_filtered`/`dfs_filtered` for kind-aware traversal), `algorithms.rs` (PageRank, personalized PageRank, Louvain, betweenness, SCC, topological layers). Cached centrality scores (`recompute_centrality()`). Graph compaction (`compact_graph`): two-pass pruning of chunks and symbols by scoring, package node creation (`pkg:dir/`) with CONTAINS edges |
 | codemem-embeddings | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization. Safe concurrency via `LockPoisoned` error handling |
 | codemem-index | tree-sitter code indexing, 13 language extractors (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform), manifest parsing (Cargo.toml), reference resolution, incremental indexing |
-| codemem-mcp | JSON-RPC stdio server, 42 MCP tools. Split into `tools_memory.rs` (CRUD + self-editing), `tools_graph.rs` (analysis), `tools_recall.rs` (advanced recall/namespaces), `tools_consolidation.rs` (lifecycle + LLM summarization), `tools_enrich.rs` (git history, security, performance enrichment), `scoring.rs` (hybrid scorer), `types.rs` (protocol types), `compress.rs` (LLM compression), `patterns.rs` (cross-session detection), `metrics.rs` (operational metrics). BM25 scoring, contextual enrichment, temporal edges, power-law decay, semantic clustering |
+| codemem-mcp | JSON-RPC stdio server, 43 MCP tools. Split into `tools_memory.rs` (CRUD + self-editing), `tools_graph.rs` (analysis + `summary_tree`), `tools_recall.rs` (advanced recall/namespaces), `tools_consolidation.rs` (lifecycle + LLM summarization), `tools_enrich.rs` (git history, security, performance enrichment), `scoring.rs` (hybrid scorer), `types.rs` (protocol types), `compress.rs` (LLM compression), `patterns.rs` (cross-session detection), `metrics.rs` (operational metrics). BM25 scoring, contextual enrichment, temporal edges, power-law decay, semantic clustering |
 | codemem-hooks | PostToolUse JSON parser, extractors per tool type (Read, Glob, Grep, Edit, Write), diff-aware memory via `similar` crate (semantic summaries), edge materialization, content hashing |
 | codemem-cli | clap derive, 18 commands. Split into `commands_init.rs`, `commands_search.rs`, `commands_data.rs`, `commands_lifecycle.rs`, `commands_consolidation.rs`, `commands_export.rs`, `commands_doctor.rs`, `commands_config.rs`, `commands_migrate.rs`. Multi-format export (JSONL/JSON/CSV/Markdown), health checks, config management |
 | codemem-watch | Real-time file watcher via `notify` + `notify-debouncer-mini` (50ms debounce), proper `.gitignore` parsing via `ignore` crate, 17 file extensions, crossbeam channels |
+| codemem-api | REST/SSE API with Axum. Routes for memories, graph (subgraph, neighbors, communities, pagerank, impact, browse, reload), vectors (PCA-projected 3D point cloud), stats, patterns, insights, agents (recipe runner), config, timeline, namespaces, sessions. Embeds React UI assets from `ui-dist/`. Power-iteration PCA (`pca.rs`) for 3D vector space visualization |
 | codemem-viz | Axum REST API + embedded HTML frontend, PCA projection of embeddings to 3D, interactive dashboard |
 | codemem-bench | Criterion benchmarks (vector, storage, graph), 20% CI regression threshold |
 
@@ -267,12 +275,12 @@ sequenceDiagram
 | Component | Weight | Source |
 |-----------|--------|--------|
 | Vector similarity | 25% | Cosine similarity from HNSW search |
-| Graph strength | 25% | Multi-factor: PageRank 40% + betweenness centrality 30% + normalized degree 20% + cluster bonus 10% |
+| Graph strength | 20% | Multi-factor: PageRank 40% + betweenness centrality 30% + normalized degree 20% + cluster bonus 10% |
 | BM25 token overlap | 15% | Okapi BM25 scoring with code-aware tokenizer (camelCase/snake_case splitting, k1=1.2, b=0.75) |
 | Temporal alignment | 10% | How closely the memory's timestamps match the query context |
-| Tag matching | 10% | Overlap between query-derived tags and memory tags |
-| Importance | 5% | Memory importance score (0.0-1.0) |
-| Confidence | 5% | Memory confidence score (0.0-1.0) |
+| Importance | 10% | Memory importance score (0.0-1.0) |
+| Confidence | 10% | Memory confidence score (0.0-1.0) |
+| Tag matching | 5% | Overlap between query-derived tags and memory tags |
 | Recency | 5% | Boost for recently accessed memories |
 
 Weights are configurable at runtime via the `set_scoring_weights` MCP tool and are always normalized to sum to 1.0.
@@ -341,6 +349,189 @@ Each consolidation run is logged in the `consolidation_log` table with cycle typ
 
 ---
 
+## 7.5. Data Flow -- Code Indexing & Graph Compaction
+
+When `index_codebase` is called (via MCP tool or CLI), the codebase goes through an 8-phase pipeline: directory walking, tree-sitter parsing, CST-aware chunking, reference resolution, graph construction (files, packages, symbols, chunks), contextual embedding, graph compaction, and centrality recomputation.
+
+```mermaid
+sequenceDiagram
+    participant AI as AI Assistant
+    participant MCP as codemem-mcp
+    participant IDX as codemem-index
+    participant Graph as codemem-graph
+    participant Emb as codemem-embeddings
+    participant Store as codemem-storage
+    participant Vec as codemem-vector
+
+    AI->>MCP: index_codebase(path)
+
+    Note over MCP,IDX: Phase 1-2: Walk & Parse
+    MCP->>IDX: index_directory(path)
+    IDX->>IDX: Walk files (ignore .gitignore)
+    IDX->>IDX: SHA-256 incremental check
+    IDX->>IDX: tree-sitter parse → CST
+
+    Note over IDX: Phase 3: CST-Aware Chunking
+    IDX->>IDX: Recursive chunk collection
+    IDX->>IDX: Greedy merge of small chunks
+    IDX->>IDX: Parent symbol resolution
+
+    Note over IDX: Phase 4: Reference Resolution
+    IDX->>IDX: Extract symbols + references
+    IDX->>IDX: Resolve refs → edges
+
+    Note over MCP,Store: Phase 5: Graph Construction
+    MCP->>Store: Create File nodes
+    MCP->>Store: Create Package nodes (pkg:dir/)
+    MCP->>Store: Create CONTAINS edges (pkg→file)
+    MCP->>Store: Create Symbol nodes (sym:name)
+    MCP->>Store: Create Reference edges (Calls, Imports, etc.)
+    MCP->>Store: Create Chunk nodes (chunk:file:idx)
+    MCP->>Graph: Mirror all nodes & edges in-memory
+
+    Note over MCP,Vec: Phase 6: Contextual Embedding
+    MCP->>Emb: Enrich symbol text (kind, visibility, edges)
+    Emb-->>Vec: Insert 768-dim vectors
+    MCP->>Emb: Enrich chunk text (node_kind, parent)
+    Emb-->>Vec: Insert 768-dim vectors
+
+    Note over MCP,Graph: Phase 7: Graph Compaction
+    MCP->>MCP: Score chunks (centrality, parent, memory, density)
+    MCP->>Store: Prune low-score chunks
+    MCP->>MCP: Score symbols (calls, visibility, kind, memory, size)
+    MCP->>Store: Prune low-score symbols
+    MCP->>Graph: Recompute centrality
+```
+
+### CST-Aware Chunking (Phase 3)
+
+Tree-sitter produces a Concrete Syntax Tree preserving the full source structure. The chunker operates in three steps:
+
+1. **Recursive collection**: Starting at the CST root, each node is measured by non-whitespace character count. If a node fits within `max_chunk_size` (default 1500 chars), it becomes a chunk. Otherwise, its named children are recursed into. This ensures chunks align to syntactic boundaries (function bodies, struct definitions, impl blocks) rather than arbitrary line counts.
+
+2. **Greedy merge**: Adjacent small chunks below `min_chunk_size` (default 50 chars) are merged with their neighbor if the combined size stays within `max_chunk_size`. This prevents proliferation of tiny fragments (e.g., a single `use` statement).
+
+3. **Parent resolution**: Each chunk is matched to its innermost containing symbol (the symbol with the smallest line-range that fully contains the chunk). This creates the structural link between chunks and their parent function/method/class.
+
+### Package Node Hierarchy (Phase 5)
+
+During graph construction, each file's parent directories are walked upward to create a tree of `Package` nodes:
+
+```
+pkg:/project/         ──CONTAINS──▶  pkg:/project/src/
+pkg:/project/src/     ──CONTAINS──▶  pkg:/project/src/lib/
+pkg:/project/src/lib/ ──CONTAINS──▶  file:/project/src/lib/main.rs
+```
+
+This enables the `summary_tree` tool to browse the codebase hierarchically (packages → files → symbols → chunks) following `CONTAINS` edges.
+
+### Graph Compaction (Phase 7)
+
+Compaction reduces graph traversal complexity while preserving all embeddings in the vector index. Pruned nodes remain semantically searchable but are no longer graph-traversal-reachable. Controlled by `ChunkingConfig`.
+
+**Pass 1 — Chunk scoring and pruning:**
+
+Each chunk is scored on four factors:
+
+| Factor | Weight | Source |
+|--------|--------|--------|
+| Centrality rank | 30% | Normalized edge degree (how connected) |
+| Has symbol parent | 20% | 1.0 if chunk belongs to a named symbol |
+| Memory link | 30% | 1.0 if any edge connects to a memory node |
+| Content density | 20% | Normalized non-whitespace character count |
+
+Per file, retain at least `max(3, symbol_count)` chunks and at most `max_retained_chunks_per_file` (default 10). Chunks below `min_chunk_score_threshold` (default 0.2) are always pruned. When a chunk is pruned, its line range is annotated on the parent symbol's `covered_ranges` payload.
+
+**Pass 2 — Symbol scoring and pruning:**
+
+Each symbol is scored on five factors:
+
+| Factor | Weight | Source |
+|--------|--------|--------|
+| Call connectivity | 30% | Normalized count of CALLS edges |
+| Visibility | 20% | public=1.0, crate=0.5, private=0.0 |
+| Kind | 15% | Class/Interface/Module=1.0, Function/Method=0.6, Test=0.3, Constant=0.1 |
+| Memory link | 20% | 1.0 if connected to a memory node |
+| Code size | 15% | Normalized line span |
+
+**Always retained (never pruned):** Class, Interface, and Module nodes (structural anchors) and any symbol linked to a memory node. Per file, retain at least `max(max_retained_symbols_per_file, public_symbol_count)` (default 15). Symbols below `min_symbol_score_threshold` (default 0.15) are pruned.
+
+After compaction, `compute_centrality()` and `recompute_centrality()` (PageRank + betweenness) are re-run on the pruned graph.
+
+---
+
+## 7.6. Data Flow -- Enrichment Pipeline
+
+Three enrichment tools (`enrich_git_history`, `enrich_security`, `enrich_performance`) analyze the code graph and produce `Insight` memories tagged `static-analysis`. All insights go through a shared `store_insight()` pipeline with content-hash dedup, semantic near-duplicate rejection (cosine > `dedup_similarity_threshold`, default 0.90), and auto-linking to code nodes.
+
+```mermaid
+sequenceDiagram
+    participant AI as AI Assistant
+    participant MCP as codemem-mcp
+    participant Graph as codemem-graph
+    participant Store as codemem-storage
+    participant Vec as codemem-vector
+
+    AI->>MCP: enrich_* tool call
+
+    Note over MCP,Graph: Phase 1: Analysis
+    MCP->>Graph: Scan nodes (git log / regex / centrality)
+    MCP->>Graph: Annotate node payloads
+
+    Note over MCP,Store: Phase 2: Insight Creation
+    MCP->>Store: SHA-256 content-hash dedup
+    MCP->>Vec: Embed insight, check top-3 neighbors
+    alt Cosine similarity > 0.90
+        MCP->>Store: Delete near-duplicate
+    else New insight
+        MCP->>Store: Store Insight memory
+        MCP->>Graph: Create Memory graph node
+        MCP->>Graph: Auto-link to file:/sym: nodes (RELATES_TO)
+        MCP->>Vec: Store contextually enriched embedding
+    end
+```
+
+### enrich_git_history
+
+Runs `git log` for the specified time window and produces three types of data:
+
+1. **Node annotations**: File nodes get `git_commit_count`, `git_authors`, `git_churn_rate` (commits/month) in their payload.
+2. **CO_CHANGED edges**: File pairs that appear in the same commit ≥2 times get temporal edges with `valid_from`/`valid_to` timestamps and weight = `co_occurrence_count / total_commits`.
+3. **Insights**: "High activity" files (commits > `git_min_commit_count`, default 25), "Co-change patterns" (co-occurrences ≥ `git_min_co_change_count`, default 5), and "Top contributors" (top 3 authors).
+
+### enrich_security
+
+Scans all graph nodes with regex patterns for security-sensitive code:
+
+1. **File scan**: Matches paths containing `auth`, `secret`, `key`, `password`, `token`, `credential`, `.env`, `encrypt`, etc. → `security_flags: ["sensitive"]`.
+2. **Endpoint scan**: All `Endpoint` nodes flagged → `security_flags: ["exposed_endpoint"]`.
+3. **Function scan**: Matches function names like `hash`, `verify`, `sign`, `encrypt`, `authenticate`, `authorize`, `validate_token` → `security_flags: ["security_function"]`.
+4. **Insights**: Per sensitive file (importance 0.8, severity:high), endpoint aggregate (importance 0.7, severity:medium), per security function (importance 0.6, severity:medium).
+
+### enrich_performance
+
+Analyzes structural complexity and dependency depth:
+
+1. **Coupling scores**: Edge degree per node, annotated as `coupling_score` in payload. Insights for nodes exceeding `perf_min_coupling_degree` (default 25).
+2. **Dependency layers**: Topological sort assigns `dependency_layer` to each node. Insight fires when chain depth > 5.
+3. **Critical path**: File nodes ranked by PageRank; top file annotated as `critical_path_rank`. Insight for the highest-centrality file (importance 0.8).
+4. **Complexity**: Files with symbol count > `perf_min_symbol_count` (default 30) get `symbol_count` annotation and a "Complex file" insight.
+
+### Graph Strength Bridge
+
+The enrichment pipeline feeds directly into recall scoring. When `store_insight()` creates `RELATES_TO` edges from insight memories to `file:` and `sym:` code nodes, the `graph_strength_for_memory()` function bridges these connections:
+
+```
+graph_strength = 0.4 × max_pagerank(connected_code_nodes)
+               + 0.3 × max_betweenness(connected_code_nodes)
+               + 0.2 × connectivity_bonus(code_neighbor_count / 5)
+               + 0.1 × edge_weight_bonus(avg_edge_weight)
+```
+
+This means enrichment insights connected to high-PageRank files automatically score higher in recall, creating a self-reinforcing loop: structurally important code produces higher-scoring insights.
+
+---
+
 ## 8. Storage Schema
 
 All persistent state lives in a single SQLite database at `~/.codemem/codemem.db`, configured with WAL mode, 64MB cache, 256MB memory-mapped I/O, and foreign key enforcement. Configuration is stored in `~/.codemem/config.toml` (TOML format, loaded at startup, partial configs merge with defaults).
@@ -380,7 +571,7 @@ Indexes: `memory_type`, `content_hash`, `importance`, `created_at`, `namespace`.
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | TEXT PK | Node identifier (e.g., `file:src/main.rs`, `sym:crate::func`) |
-| `kind` | TEXT NOT NULL | One of the 12 `NodeKind` values |
+| `kind` | TEXT NOT NULL | One of the 13 `NodeKind` values |
 | `label` | TEXT | Human-readable label |
 | `payload` | TEXT | JSON object for arbitrary properties |
 | `centrality` | REAL | Degree centrality score, default 0.0 |
@@ -449,7 +640,7 @@ Used by incremental indexing to skip unchanged files on re-index.
 
 ## 9. Graph Model
 
-### Node Types (12 `NodeKind` variants)
+### Node Types (13 `NodeKind` variants)
 
 | Kind | Description |
 |------|-------------|
@@ -465,6 +656,7 @@ Used by incremental indexing to skip unchanged files on re-index.
 | Memory | Codemem memory node |
 | Endpoint | REST/gRPC endpoint definition |
 | Test | Test function |
+| Chunk | CST-aware code chunk (sub-file fragment) |
 
 ### Relationship Types (24 `RelationshipType` variants)
 
@@ -510,6 +702,8 @@ Used by incremental indexing to skip unchanged files on re-index.
 | Louvain Communities | `louvain_communities()` | Community detection with configurable resolution |
 | Betweenness Centrality | `betweenness_centrality()` | Brandes' algorithm for node importance |
 | Topological Layers | `topological_layers()` | Layer-by-layer topological ordering (DAG) |
+| Filtered BFS | `bfs_filtered()` | BFS that skips specified node kinds and restricts to specified relationship types |
+| Filtered DFS | `dfs_filtered()` | DFS that skips specified node kinds and restricts to specified relationship types |
 | Multi-hop Expansion | `expand()` | Expand N hops from a set of seed nodes |
 | Neighbor Lookup | `neighbors()` | Direct neighbors of a node |
 
@@ -594,7 +788,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 
 ---
 
-## 12. MCP Tools (41 total)
+## 12. MCP Tools (43 total)
 
 ### Memory Operations
 | Tool | Description |
@@ -610,6 +804,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 |------|-------------|
 | `associate_memories` | Create an edge between two memory nodes |
 | `graph_traverse` | BFS/DFS traversal from a starting node |
+| `summary_tree` | Hierarchical package/file/symbol tree browser |
 
 ### Code Index Operations
 | Tool | Description |
@@ -648,7 +843,8 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 | `consolidate_decay` | Run decay cycle (reduce stale memory importance) |
 | `consolidate_creative` | Run creative/REM cycle (discover new connections) |
 | `consolidate_cluster` | Run cluster cycle (group similar memories) |
-| `consolidate_forget` | Run forget cycle (archive/delete low-importance memories) |
+| `consolidate_forget` | Run forget cycle (archive/delete low-importance memories, tag-aware bulk cleanup) |
+| `consolidate_summarize` | LLM-powered cluster summarization into Insight memories |
 | `consolidation_status` | Report last run for each consolidation cycle |
 
 ### Impact & Patterns
@@ -658,6 +854,13 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 | `get_decision_chain` | Get chronological chain of Decision memories for a file or topic |
 | `detect_patterns` | Detect cross-session patterns (repeated searches, file hotspots, decision chains, tool preferences) |
 | `pattern_insights` | Generate human-readable markdown insights from detected patterns |
+
+### Self-Editing
+| Tool | Description |
+|------|-------------|
+| `refine_memory` | Refine a memory in-place with EVOLVED_INTO provenance chain |
+| `split_memory` | Split a memory into multiple parts with PART_OF edges |
+| `merge_memories` | Merge multiple memories into one with SUMMARIZES edges |
 
 ### Enrichment
 | Tool | Description |
@@ -671,3 +874,5 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 |------|-------------|
 | `codemem_stats` | Database statistics (memory count, embedding count, node count, edge count) |
 | `codemem_health` | Health check (storage, vector, graph, embeddings status) |
+| `codemem_metrics` | Operational metrics (tool call counts, latencies, error rates) |
+| `session_checkpoint` | Save a mid-session checkpoint with current context |

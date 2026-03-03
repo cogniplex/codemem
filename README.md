@@ -43,7 +43,7 @@ Downloads the local embedding model (~440MB, one-time), registers lifecycle hook
 
 ### That's it
 
-Codemem now automatically captures context, injects prior knowledge at session start, and provides 42 MCP tools to your assistant.
+Codemem now automatically captures context, injects prior knowledge at session start, and provides 43 MCP tools to your assistant.
 
 ### Map your codebase (optional)
 
@@ -68,7 +68,7 @@ See [`examples/agents/code-mapper.md`](examples/agents/code-mapper.md) for the f
 ## Key Features
 
 - **Graph-vector hybrid architecture** -- HNSW vector search (768-dim) + petgraph knowledge graph with 25 algorithms (PageRank, Louvain, betweenness centrality, BFS/DFS, and more)
-- **42 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (git history, security, performance), consolidation, impact analysis, metrics, and pattern detection over JSON-RPC
+- **43 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (git history, security, performance), consolidation, impact analysis, metrics, and pattern detection over JSON-RPC
 - **4 lifecycle hooks** -- Automatic context injection (SessionStart), prompt capture (UserPromptSubmit), observation capture (PostToolUse), and session summaries (Stop)
 - **9-component hybrid scoring** -- Vector similarity, graph strength, BM25 token overlap, temporal alignment, tag matching, importance, confidence, and recency
 - **Code-aware indexing** -- tree-sitter structural extraction for 13 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform)
@@ -146,11 +146,11 @@ Scoring weights, vector/graph tuning, and storage settings persist in `~/.codeme
 
 ## MCP Tools
 
-42 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
+43 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
 
 | Category | Tools |
 |----------|-------|
-| Core Memory (8) | `store_memory`, `recall_memory`, `update_memory`, `delete_memory`, `associate_memories`, `graph_traverse`, `codemem_stats`, `codemem_health` |
+| Core Memory (9) | `store_memory`, `recall_memory`, `update_memory`, `delete_memory`, `associate_memories`, `graph_traverse`, `summary_tree`, `codemem_stats`, `codemem_health` |
 | Self-Editing (3) | `refine_memory`, `split_memory`, `merge_memories` |
 | Structural Index (10) | `index_codebase`, `search_symbols`, `get_symbol_info`, `get_dependencies`, `get_impact`, `get_clusters`, `get_cross_repo`, `get_pagerank`, `search_code`, `set_scoring_weights` |
 | Export/Import (2) | `export_memories`, `import_memories` |
@@ -193,7 +193,7 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 ## Documentation
 
 - [Architecture](docs/architecture.md) -- System design, data flow diagrams, storage schema
-- [MCP Tools Reference](docs/mcp-tools.md) -- All 42 tools with parameters and examples
+- [MCP Tools Reference](docs/mcp-tools.md) -- All 43 tools with parameters and examples
 - [CLI Reference](docs/cli-reference.md) -- All 18 commands
 - [Comparison](docs/comparison.md) -- vs Mem0, Zep/Graphiti, Letta, claude-mem, and more
 

@@ -4,29 +4,29 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 42 MCP tools, 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), optional LLM observation compression, real-time file watching, cross-session pattern detection, a REST/SSE API, and a React web UI.
+Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 43 MCP tools, 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), optional LLM observation compression, real-time file watching, cross-session pattern detection, a REST/SSE API, and a React web UI.
 
 ## Workspace Structure (13 crates)
 
 | Crate | Purpose |
 |-------|---------|
-| codemem-core | Shared types (`types.rs`), traits (`traits.rs`), errors (`error.rs`), config (`config.rs`): MemoryNode, Edge, Session, DetectedPattern, CodememConfig, 7 MemoryTypes, 24 RelationshipTypes, 12 NodeKinds, ScoringWeights, VectorBackend/GraphBackend/StorageBackend traits |
+| codemem-core | Shared types (`types.rs`), traits (`traits.rs`), errors (`error.rs`), config (`config.rs`): MemoryNode, Edge, Session, DetectedPattern, CodememConfig, ChunkingConfig, EnrichmentConfig, 7 MemoryTypes, 24 RelationshipTypes, 13 NodeKinds, ScoringWeights, VectorBackend/GraphBackend/StorageBackend traits |
 | codemem-storage | rusqlite (bundled), WAL mode, versioned schema migrations; split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning) |
 | codemem-vector | usearch HNSW index, 768-dim cosine, M=16, efConstruction=200 |
-| codemem-graph | petgraph + SQLite; split into `traversal.rs` (GraphBackend impl), `algorithms.rs` (PageRank, Louvain, SCC, betweenness, topological), cached centrality |
+| codemem-graph | petgraph + SQLite; split into `traversal.rs` (GraphBackend impl + `bfs_filtered`/`dfs_filtered` for kind-aware traversal), `algorithms.rs` (PageRank, Louvain, SCC, betweenness, topological), cached centrality, graph compaction (`compact_graph`), package nodes (`pkg:dir/`) |
 | codemem-embeddings | Pluggable via `from_env()`: Candle (local BERT, default), Ollama, OpenAI-compatible. `CachedProvider` wrapper, BAAI/bge-base-en-v1.5 (768-dim), LRU cache 10K. Safe concurrency via `LockPoisoned` error handling |
 | codemem-index | tree-sitter code indexing, 14 languages (Rust, TS, JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL) |
-| codemem-mcp | JSON-RPC stdio server, 42 MCP tools; split into `tools_memory.rs`, `tools_graph.rs`, `tools_recall.rs`, `tools_consolidation.rs`, `tools_enrich.rs`, `scoring.rs`, `types.rs`, `compress.rs`, `patterns.rs`, `metrics.rs`. Static enrichment insights auto-tagged `static-analysis` for agent reviewability |
+| codemem-mcp | JSON-RPC stdio server, 43 MCP tools; split into `tools_memory.rs`, `tools_graph.rs` (+ `summary_tree`), `tools_recall.rs`, `tools_consolidation.rs` (+ `consolidate_summarize`), `tools_enrich.rs`, `scoring.rs`, `types.rs`, `compress.rs`, `patterns.rs`, `metrics.rs`. Static enrichment insights auto-tagged `static-analysis` for agent reviewability |
 | codemem-hooks | PostToolUse JSON parser, per-tool extractors, diff-aware memory (semantic summaries) |
 | codemem-cli | clap derive, 18 commands. Stop hook stores `pending-analysis` tagged memories for changed files; SessionStart surfaces pending analysis in context |
-| codemem-api | REST/SSE API with Axum; routes for memories, graph, stats, patterns, insights, agents (recipe runner), config, timeline, namespaces. Embeds UI assets from `ui-dist/` |
+| codemem-api | REST/SSE API with Axum; routes for memories, graph (subgraph, neighbors, communities, pagerank, impact, browse, reload), vectors (PCA 3D point cloud), stats, patterns, insights, agents (recipe runner), config, timeline, namespaces. Power-iteration PCA (`pca.rs`). Embeds UI assets from `ui-dist/` |
 | codemem-viz | PCA visualization dashboard with timeline, distribution, and D3 graph endpoints |
 | codemem-bench | Criterion benchmarks, 20% regression threshold |
 | codemem-watch | Real-time file watcher via notify (<50ms debounce), proper .gitignore parsing via `ignore` crate |
 
 ## Web UI (`ui/`)
 
-React 19 + Vite + TailwindCSS v4 dashboard for exploring the memory graph, browsing memories, and tuning scoring weights. Key stack: Zustand (state), React Router, React Query, Sigma.js (graph visualization), Recharts. Tests via Playwright. Uses Bun as package manager.
+React 19 + Vite + TailwindCSS v4 dashboard with three-tab GraphView: Graph (Sigma.js force-directed with relationship filters, focus mode, ego-graph), Explorer (paginated node browser with kind filters, mini ego-graph detail), Vector Space (3D PCA point cloud via React Three Fiber + Three.js). Key stack: Zustand (state), React Router, React Query, Sigma.js (graph visualization), @react-three/fiber + drei + three (3D point cloud), Recharts. Tests via Playwright. Uses Bun as package manager.
 
 ```bash
 cd ui && bun install            # Install UI dependencies
@@ -47,7 +47,7 @@ cd ui && npx playwright test    # E2E tests
 - **Contextual embeddings**: Text enriched with metadata + graph context before embedding
 - **7 memory types**: Decision, Pattern, Preference, Style, Habit, Insight, Context
 - **24 relationship types**: RELATES_TO, LEADS_TO, PART_OF, REINFORCES, CONTRADICTS, EVOLVED_INTO, DERIVED_FROM, INVALIDATED_BY, DEPENDS_ON, IMPORTS, EXTENDS, CALLS, CONTAINS, SUPERSEDES, BLOCKS, IMPLEMENTS, INHERITS, SIMILAR_TO, PRECEDED_BY, EXEMPLIFIES, EXPLAINS, SHARES_THEME, SUMMARIZES, CO_CHANGED
-- **9-component hybrid scoring**: vector_similarity 25%, graph_strength 25% (PageRank 40% + betweenness 30% + degree 20% + cluster 10%), BM25_token_overlap 15%, temporal 10%, tag_matching 10%, importance 5%, confidence 5%, recency 5%
+- **9-component hybrid scoring**: vector_similarity 25%, graph_strength 20% (PageRank 40% + betweenness 30% + degree 20% + cluster 10%), BM25_token_overlap 15%, temporal 10%, importance 10%, confidence 10%, tag_matching 5%, recency 5%
 - **BM25 scoring**: Okapi BM25 (k1=1.2, b=0.75) with code-aware tokenizer (camelCase/snake_case splitting)
 - **4 lifecycle hooks**: SessionStart (context injection + pending analysis), UserPromptSubmit (prompt capture), PostToolUse (observation capture), Stop (session summary + change tracking)
 - **Change batching**: Stop hook stores `pending-analysis` tagged memories with edited file lists; SessionStart surfaces these for code-mapper agent analysis
@@ -63,13 +63,16 @@ cd ui && npx playwright test    # E2E tests
 - **Temporal edges**: Edges have `valid_from`/`valid_to` fields for tracking when relationships are active
 - **Pattern confidence**: Log-scaled confidence based on `ln(frequency)/ln(total_sessions)` instead of linear `count/N`
 - **Storage**: Single database at ~/.codemem/codemem.db + ~/.codemem/codemem.idx, namespace-scoped queries
-- **Persistent config**: TOML config at `~/.codemem/config.toml` with scoring weights, vector/graph tuning, embedding provider, and storage settings. Loaded at startup; partial configs merge with defaults
+- **13 node kinds**: File, Package, Function, Method, Class, Interface, Type, Constant, Module, Memory, Endpoint, Test, Chunk
+- **Graph compaction**: Two-pass pruning after indexing — chunks scored by embedding rarity + structural parent + memory link, symbols scored by call connectivity + visibility + kind + memory link + code size. Configurable via `ChunkingConfig`
+- **Enrichment config**: `EnrichmentConfig` with tunable thresholds for git history, performance analysis, insight confidence, and semantic dedup (cosine > 0.90)
+- **Persistent config**: TOML config at `~/.codemem/config.toml` with scoring weights, vector/graph tuning, embedding provider, chunking, enrichment, and storage settings. Loaded at startup; partial configs merge with defaults
 - **Schema migrations**: Versioned, idempotent SQL migrations tracked in a `schema_version` table. Schema extracted into `.sql` files
 - **Safe concurrency**: Zero `.unwrap()` on lock acquisitions; all mutexes/rwlocks use typed lock helpers returning `CodememError::LockPoisoned`. `UnsafeCell` replaced with `RwLock` for scoring weights
 
 ## Key Dependencies
 
-candle-core/nn/transformers (ML inference), usearch (HNSW), rusqlite (bundled SQLite), petgraph (graph), tokenizers (HuggingFace), tree-sitter (code parsing), clap (CLI), serde/serde_json, hf-hub (model download), lru (cache), sha2 (dedup), similar (diffs), notify/notify-debouncer-mini (file watching), reqwest (HTTP for embedding providers + LLM compression), criterion (benchmarks), toml (config persistence), ignore (gitignore parsing), tempfile (test fixtures), axum/tower-http (REST API), tokio (async runtime)
+candle-core/nn/transformers (ML inference), usearch (HNSW), rusqlite (bundled SQLite), petgraph (graph), tokenizers (HuggingFace), tree-sitter (code parsing), clap (CLI), serde/serde_json, hf-hub (model download), lru (cache), sha2 (dedup), similar (diffs), notify/notify-debouncer-mini (file watching), reqwest (HTTP for embedding providers + LLM compression), criterion (benchmarks), toml (config persistence), ignore (gitignore parsing), tempfile (test fixtures), axum/tower-http (REST API), tokio (async runtime), ndarray (PCA)
 
 ## Build & Test
 
@@ -102,6 +105,6 @@ All checks must pass on push to main:
 ## Documentation
 
 - [Architecture](docs/architecture.md) — System design with Mermaid diagrams
-- [MCP Tools](docs/mcp-tools.md) — All 42 tools reference
+- [MCP Tools](docs/mcp-tools.md) — All 43 tools reference
 - [CLI Reference](docs/cli-reference.md) — All 18 commands
 - [Comparison](docs/comparison.md) — vs claude-mem, AgentDB, AutoMem, and more

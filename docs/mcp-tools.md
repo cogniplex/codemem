@@ -1,6 +1,6 @@
 # Codemem MCP Tools API Reference
 
-Codemem exposes 42 tools over JSON-RPC 2.0 (stdio transport). All requests use the
+Codemem exposes 43 tools over JSON-RPC 2.0 (stdio transport). All requests use the
 `tools/call` method with `{"name": "<tool>", "arguments": {...}}` as params.
 
 ---
@@ -123,6 +123,9 @@ Semantic search using 9-component hybrid scoring with graph expansion and bridge
 | `k` | integer | no | `10` | Number of results to return |
 | `memory_type` | string | no | -- | Filter by memory type |
 | `namespace` | string | no | -- | Filter results to a specific namespace |
+| `exclude_tags` | string[] | no | `[]` | Exclude memories with any of these tags (e.g., `["static-analysis"]`) |
+| `min_importance` | number | no | -- | Only return memories above this importance threshold |
+| `min_confidence` | number | no | -- | Only return memories above this confidence threshold |
 
 ```json
 {
@@ -130,7 +133,9 @@ Semantic search using 9-component hybrid scoring with graph expansion and bridge
   "arguments": {
     "query": "error handling patterns",
     "k": 5,
-    "memory_type": "pattern"
+    "memory_type": "pattern",
+    "exclude_tags": ["static-analysis"],
+    "min_importance": 0.3
   }
 }
 ```
@@ -449,12 +454,12 @@ Update the 9-component hybrid scoring weights at runtime. Weights are normalized
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `vector_similarity` | number | no | `0.25` | Weight for vector cosine similarity |
-| `graph_strength` | number | no | `0.25` | Weight for graph relationship strength |
+| `graph_strength` | number | no | `0.20` | Weight for graph relationship strength |
 | `token_overlap` | number | no | `0.15` | Weight for content token overlap |
 | `temporal` | number | no | `0.10` | Weight for temporal alignment |
-| `tag_matching` | number | no | `0.10` | Weight for tag matching |
-| `importance` | number | no | `0.05` | Weight for importance score |
-| `confidence` | number | no | `0.05` | Weight for memory confidence |
+| `importance` | number | no | `0.10` | Weight for importance score |
+| `confidence` | number | no | `0.10` | Weight for memory confidence |
+| `tag_matching` | number | no | `0.05` | Weight for tag matching |
 | `recency` | number | no | `0.05` | Weight for recency boost |
 
 ```json
@@ -673,17 +678,21 @@ No parameters.
 
 ### consolidate_forget
 
-Run forget consolidation: delete memories with importance below the threshold and zero access count.
+Run forget consolidation: delete memories with importance below the threshold and zero access count. Supports tag-aware bulk cleanup.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `importance_threshold` | number | no | `0.1` | Delete memories with importance below this value (0.0 to 1.0) |
+| `target_tags` | string[] | no | `[]` | Only target memories with these tags (e.g., `["static-analysis"]`) |
+| `max_access_count` | integer | no | `0` | Also forget rarely-accessed memories with access count at or below this value |
 
 ```json
 {
   "name": "consolidate_forget",
   "arguments": {
-    "importance_threshold": 0.15
+    "importance_threshold": 0.15,
+    "target_tags": ["static-analysis"],
+    "max_access_count": 1
   }
 }
 ```
@@ -755,12 +764,12 @@ The 9-component scoring system used by `recall_memory` and `recall_with_expansio
 | Component | Default Weight | Description |
 |-----------|---------------|-------------|
 | Vector similarity | 0.25 | Cosine similarity between query and memory embeddings |
-| Graph strength | 0.25 | Multi-factor: PageRank (40%) + betweenness centrality (30%) + normalized degree (20%) + cluster bonus (10%) |
+| Graph strength | 0.20 | Multi-factor: PageRank (40%) + betweenness centrality (30%) + normalized degree (20%) + cluster bonus (10%) |
 | BM25 token overlap | 0.15 | Okapi BM25 scoring with code-aware tokenizer (camelCase/snake_case splitting) |
 | Temporal | 0.10 | Temporal alignment with query context |
-| Tag matching | 0.10 | Overlap between query-derived tags and memory tags |
-| Importance | 0.05 | The memory's stored importance score |
-| Confidence | 0.05 | The memory's confidence score |
+| Importance | 0.10 | The memory's stored importance score |
+| Confidence | 0.10 | The memory's confidence score |
+| Tag matching | 0.05 | Overlap between query-derived tags and memory tags |
 | Recency | 0.05 | Boost for recently accessed/created memories |
 
 Weights can be adjusted at runtime via `set_scoring_weights`.
@@ -910,5 +919,161 @@ Compute coupling scores, dependency depth, critical path (PageRank), and file co
     "namespace": "/Users/dev/myproject",
     "top": 20
   }
+}
+```
+
+---
+
+## Self-Editing Tools (3)
+
+### refine_memory
+
+Refine an existing memory's content in-place. Creates an EVOLVED_INTO provenance chain from the old version to the refined version, preserving full edit history.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | string | yes | -- | Memory ID to refine |
+| `content` | string | yes | -- | New refined content |
+| `importance` | number | no | -- | New importance score (0.0-1.0) |
+
+```json
+{
+  "name": "refine_memory",
+  "arguments": {
+    "id": "a1b2c3d4-5678-9abc-def0-123456789abc",
+    "content": "Updated: Use Axum 0.8 with Tower middleware for rate limiting",
+    "importance": 0.9
+  }
+}
+```
+
+---
+
+### split_memory
+
+Split a memory into multiple smaller, focused parts. Creates PART_OF edges from each new memory back to the original. The original memory is preserved.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | string | yes | -- | Memory ID to split |
+| `parts` | array | yes | -- | Array of objects with `content` and optional `memory_type`, `importance`, `tags` |
+
+```json
+{
+  "name": "split_memory",
+  "arguments": {
+    "id": "a1b2c3d4-5678-9abc-def0-123456789abc",
+    "parts": [
+      { "content": "Use Axum for HTTP routing", "memory_type": "decision" },
+      { "content": "Use Tower middleware for rate limiting", "memory_type": "decision" }
+    ]
+  }
+}
+```
+
+---
+
+### merge_memories
+
+Merge multiple memories into a single consolidated memory. Creates SUMMARIZES edges from the merged memory to each source. Source memories are preserved.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `ids` | string[] | yes | -- | Array of memory IDs to merge |
+| `content` | string | yes | -- | Content for the merged memory |
+| `memory_type` | string | no | `"insight"` | Type for the merged memory |
+| `importance` | number | no | -- | Importance score for the merged memory |
+
+```json
+{
+  "name": "merge_memories",
+  "arguments": {
+    "ids": ["aaa-111", "bbb-222", "ccc-333"],
+    "content": "API layer uses Axum 0.8 with Tower middleware for routing, rate limiting, and auth",
+    "memory_type": "insight",
+    "importance": 0.8
+  }
+}
+```
+
+---
+
+## Graph Browser Tools (1)
+
+### summary_tree
+
+Return a hierarchical summary tree (packages → files → symbols). Start from a `pkg:` node to browse the directory structure of an indexed codebase.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `start_id` | string | yes | -- | Node ID to start from (e.g., `pkg:src/`) |
+| `max_depth` | integer | no | `3` | Maximum tree depth |
+| `include_chunks` | boolean | no | `false` | Include chunk nodes in the tree |
+
+```json
+{
+  "name": "summary_tree",
+  "arguments": {
+    "start_id": "pkg:src/",
+    "max_depth": 2,
+    "include_chunks": false
+  }
+}
+```
+
+---
+
+## Additional Consolidation Tools (1)
+
+### consolidate_summarize
+
+LLM-powered consolidation that finds connected components in the memory graph, summarizes large clusters into Insight memories linked via SUMMARIZES edges. Requires `CODEMEM_COMPRESS_PROVIDER` to be configured.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `cluster_size` | integer | no | `5` | Minimum cluster size to summarize |
+
+```json
+{
+  "name": "consolidate_summarize",
+  "arguments": {
+    "cluster_size": 3
+  }
+}
+```
+
+---
+
+## Session & Metrics Tools (2)
+
+### session_checkpoint
+
+Save a mid-session checkpoint with current context. Stores the checkpoint as a memory with session metadata for later resumption.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `summary` | string | no | -- | Optional summary of the current session state |
+
+```json
+{
+  "name": "session_checkpoint",
+  "arguments": {
+    "summary": "Halfway through refactoring auth module"
+  }
+}
+```
+
+---
+
+### codemem_metrics
+
+Get operational metrics: tool call counts, latencies, error rates, and other runtime statistics.
+
+No parameters.
+
+```json
+{
+  "name": "codemem_metrics",
+  "arguments": {}
 }
 ```

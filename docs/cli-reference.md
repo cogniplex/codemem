@@ -104,7 +104,7 @@ codemem stats
 
 ## `codemem serve`
 
-Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 42 MCP tools.
+Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 43 MCP tools.
 
 **Syntax**
 
