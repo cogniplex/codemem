@@ -25,15 +25,15 @@ clean:
 	cargo clean
 
 install: ui-build
-	cargo install --path crates/codemem-cli --features ui
+	cargo install --path crates/codemem --features ui
 
 serve:
 	cargo run -- serve
 
 ui-build:
 	cd ui && bun install && bun run build
-	rm -rf crates/codemem-api/ui-dist
-	cp -r ui/dist crates/codemem-api/ui-dist
+	rm -rf crates/codemem/ui-dist
+	cp -r ui/dist crates/codemem/ui-dist
 
 ui-lint:
 	cd ui && bun run tsc --noEmit && bun run eslint .
