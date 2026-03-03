@@ -1,7 +1,8 @@
-//! Language-specific helpers for visibility, test detection, signatures, and doc comments.
+//! Language-specific helpers for visibility, test detection, signatures, doc comments,
+//! and enhanced symbol metadata extraction (parameters, return types, attributes, etc.).
 
 use super::clean_block_doc_comment;
-use crate::index::symbol::Visibility;
+use crate::index::symbol::{Parameter, Visibility};
 use ast_grep_core::{Doc, Node};
 
 impl super::AstGrepEngine {
@@ -527,5 +528,711 @@ impl super::AstGrepEngine {
             }
         }
         None
+    }
+
+    // ── Enhanced Symbol Metadata Extraction ────────────────────────────
+
+    /// Enrich a Symbol with extracted metadata (parameters, return type, attributes, etc.).
+    /// Only populates fields for function/method-like symbols where it makes sense.
+    pub(super) fn enrich_symbol_metadata<D: Doc>(
+        &self,
+        lang_name: &str,
+        node: &Node<'_, D>,
+        sym: &mut crate::index::symbol::Symbol,
+    ) where
+        D::Lang: ast_grep_core::Language,
+    {
+        use crate::index::symbol::SymbolKind;
+
+        let is_callable = matches!(
+            sym.kind,
+            SymbolKind::Function | SymbolKind::Method | SymbolKind::Test | SymbolKind::Constructor
+        );
+
+        if is_callable {
+            sym.parameters = self.extract_parameters(lang_name, node);
+            sym.return_type = self.extract_return_type(lang_name, node);
+            sym.is_async = self.detect_async(lang_name, node);
+            sym.throws = self.extract_throws(lang_name, node);
+            sym.is_abstract = self.detect_abstract(lang_name, node);
+            sym.generic_params = self.extract_generic_params(lang_name, node);
+        }
+
+        // Attributes apply to all symbol kinds
+        sym.attributes = self.extract_attributes(lang_name, node);
+    }
+
+    /// Extract parameters from a function/method node using tree-sitter children.
+    pub(super) fn extract_parameters<D: Doc>(
+        &self,
+        lang_name: &str,
+        node: &Node<'_, D>,
+    ) -> Vec<Parameter>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        match lang_name {
+            "rust" => self.extract_rust_parameters(node),
+            "python" => self.extract_python_parameters(node),
+            "typescript" | "tsx" | "javascript" => self.extract_ts_parameters(node),
+            "go" => self.extract_go_parameters(node),
+            "java" | "kotlin" | "csharp" => self.extract_java_like_parameters(node),
+            _ => self.extract_parameters_from_signature(node),
+        }
+    }
+
+    /// Extract return type from a function/method node.
+    pub(super) fn extract_return_type<D: Doc>(
+        &self,
+        lang_name: &str,
+        node: &Node<'_, D>,
+    ) -> Option<String>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        match lang_name {
+            "rust" => {
+                // Rust: look for return_type field (-> Type)
+                node.field("return_type").map(|n| {
+                    n.text()
+                        .to_string()
+                        .trim_start_matches("->")
+                        .trim()
+                        .to_string()
+                })
+            }
+            "python" => {
+                // Python: return_type annotation after ->
+                node.field("return_type").map(|n| n.text().to_string())
+            }
+            "typescript" | "tsx" | "javascript" => {
+                // TS: return_type or type_annotation on the function
+                node.field("return_type").map(|n| {
+                    n.text()
+                        .to_string()
+                        .trim_start_matches(':')
+                        .trim()
+                        .to_string()
+                })
+            }
+            "go" => {
+                // Go: result field
+                node.field("result").map(|n| n.text().to_string())
+            }
+            "java" | "csharp" | "kotlin" => {
+                // Java/C#: type field on method_declaration
+                node.field("type").map(|n| n.text().to_string())
+            }
+            _ => {
+                // Fallback: try to parse from signature
+                self.extract_return_type_from_signature(node)
+            }
+        }
+    }
+
+    /// Extract attributes/decorators/annotations preceding a node.
+    pub(super) fn extract_attributes<D: Doc>(
+        &self,
+        lang_name: &str,
+        node: &Node<'_, D>,
+    ) -> Vec<String>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        let mut attrs = Vec::new();
+        match lang_name {
+            "rust" => {
+                // Walk preceding sibling attribute_item nodes (#[...])
+                let mut prev = node.prev();
+                while let Some(sibling) = prev {
+                    match sibling.kind().as_ref() {
+                        "attribute_item" => {
+                            attrs.push(sibling.text().to_string());
+                            prev = sibling.prev();
+                        }
+                        "line_comment" => {
+                            prev = sibling.prev();
+                        }
+                        _ => break,
+                    }
+                }
+                attrs.reverse();
+            }
+            "python" => {
+                // Walk preceding decorator nodes (@...)
+                let mut prev = node.prev();
+                while let Some(sibling) = prev {
+                    if sibling.kind().as_ref() == "decorator" {
+                        attrs.push(sibling.text().to_string());
+                        prev = sibling.prev();
+                    } else {
+                        break;
+                    }
+                }
+                // Also check parent decorated_definition
+                if let Some(parent) = node.parent() {
+                    if parent.kind().as_ref() == "decorated_definition" {
+                        for child in parent.children() {
+                            if child.kind().as_ref() == "decorator" {
+                                let text = child.text().to_string();
+                                if !attrs.contains(&text) {
+                                    attrs.push(text);
+                                }
+                            }
+                        }
+                    }
+                }
+                attrs.reverse();
+            }
+            "java" | "kotlin" => {
+                // Walk preceding annotation/marker_annotation nodes
+                let mut prev = node.prev();
+                while let Some(sibling) = prev {
+                    match sibling.kind().as_ref() {
+                        "marker_annotation" | "annotation" => {
+                            attrs.push(sibling.text().to_string());
+                            prev = sibling.prev();
+                        }
+                        "block_comment" | "line_comment" | "comment" => {
+                            prev = sibling.prev();
+                        }
+                        _ => break,
+                    }
+                }
+                // Also check modifiers children for annotations
+                for child in node.children() {
+                    let ck = child.kind();
+                    if ck.as_ref() == "modifiers" {
+                        for mc in child.children() {
+                            if mc.kind().as_ref() == "marker_annotation"
+                                || mc.kind().as_ref() == "annotation"
+                            {
+                                let text = mc.text().to_string();
+                                if !attrs.contains(&text) {
+                                    attrs.push(text);
+                                }
+                            }
+                        }
+                    }
+                }
+                attrs.reverse();
+            }
+            "csharp" => {
+                // C# attributes: [Attribute]
+                let mut prev = node.prev();
+                while let Some(sibling) = prev {
+                    if sibling.kind().as_ref() == "attribute_list" {
+                        attrs.push(sibling.text().to_string());
+                        prev = sibling.prev();
+                    } else {
+                        break;
+                    }
+                }
+                attrs.reverse();
+            }
+            "typescript" | "tsx" | "javascript" => {
+                // TS/JS decorators (@...)
+                let mut prev = node.prev();
+                while let Some(sibling) = prev {
+                    if sibling.kind().as_ref() == "decorator" {
+                        attrs.push(sibling.text().to_string());
+                        prev = sibling.prev();
+                    } else {
+                        break;
+                    }
+                }
+                attrs.reverse();
+            }
+            _ => {}
+        }
+        attrs
+    }
+
+    /// Detect if a function/method is async.
+    pub(super) fn detect_async<D: Doc>(&self, lang_name: &str, node: &Node<'_, D>) -> bool
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        match lang_name {
+            "rust" => {
+                // Check for "async" keyword child
+                node.children().any(|c| c.text().as_ref() == "async")
+            }
+            "python" => {
+                // async keyword or parent is async_function_definition
+                let kind = node.kind();
+                kind.as_ref() == "async_function_definition"
+                    || node.children().any(|c| c.text().as_ref() == "async")
+            }
+            "typescript" | "tsx" | "javascript" => {
+                // Check for "async" keyword child
+                node.children().any(|c| c.text().as_ref() == "async")
+            }
+            "kotlin" => {
+                // Check modifiers for "suspend"
+                for child in node.children() {
+                    if child.kind().as_ref() == "modifiers" {
+                        for mc in child.children() {
+                            if mc.text().as_ref() == "suspend" {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            "csharp" => {
+                // Check modifiers for "async"
+                for child in node.children() {
+                    let ck = child.kind();
+                    if (ck.as_ref() == "modifiers" || ck.as_ref() == "modifier")
+                        && child.text().contains("async")
+                    {
+                        return true;
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Extract generic type parameters from a node.
+    pub(super) fn extract_generic_params<D: Doc>(
+        &self,
+        lang_name: &str,
+        node: &Node<'_, D>,
+    ) -> Option<String>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        match lang_name {
+            "rust" => {
+                // Look for type_parameters child
+                node.field("type_parameters").map(|n| n.text().to_string())
+            }
+            "typescript" | "tsx" => {
+                // Look for type_parameters child
+                node.field("type_parameters").map(|n| n.text().to_string())
+            }
+            "java" | "kotlin" | "csharp" => {
+                // Look for type_parameters child
+                node.field("type_parameters").map(|n| n.text().to_string())
+            }
+            "go" => {
+                // Go 1.18+ type parameters
+                node.field("type_parameters").map(|n| n.text().to_string())
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract error/exception types from a function signature.
+    pub(super) fn extract_throws<D: Doc>(&self, lang_name: &str, node: &Node<'_, D>) -> Vec<String>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        match lang_name {
+            "rust" => {
+                // Extract E from Result<T, E> return types
+                if let Some(ret) = node.field("return_type") {
+                    let text = ret.text().to_string();
+                    if let Some(result_content) = extract_result_error_type(&text) {
+                        return vec![result_content];
+                    }
+                }
+                Vec::new()
+            }
+            "java" | "kotlin" => {
+                // Look for throws_clause child
+                for child in node.children() {
+                    if child.kind().as_ref() == "throws" {
+                        let mut types = Vec::new();
+                        for tc in child.children() {
+                            let tk = tc.kind();
+                            if tk.as_ref() == "type_identifier"
+                                || tk.as_ref() == "scoped_type_identifier"
+                            {
+                                types.push(tc.text().to_string());
+                            }
+                        }
+                        return types;
+                    }
+                }
+                Vec::new()
+            }
+            "swift" => {
+                // Check for "throws" keyword
+                let text = node.text().to_string();
+                if text.contains("throws") {
+                    vec!["throws".to_string()]
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Detect if a method is abstract (trait/interface method without a body).
+    pub(super) fn detect_abstract<D: Doc>(&self, lang_name: &str, node: &Node<'_, D>) -> bool
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        match lang_name {
+            "rust" => {
+                // In Rust, trait methods without a body are abstract (have semicolon, no body)
+                node.field("body").is_none() && node.text().to_string().trim_end().ends_with(';')
+            }
+            "java" | "csharp" => {
+                // Check for "abstract" modifier
+                for child in node.children() {
+                    let ck = child.kind();
+                    if (ck.as_ref() == "modifiers" || ck.as_ref() == "modifier")
+                        && child.text().contains("abstract")
+                    {
+                        return true;
+                    }
+                }
+                // Also: interface methods without body are abstract
+                node.field("body").is_none()
+            }
+            "kotlin" => {
+                for child in node.children() {
+                    if child.kind().as_ref() == "modifiers" {
+                        for mc in child.children() {
+                            if mc.text().as_ref() == "abstract" {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            "typescript" | "tsx" => {
+                // Check for "abstract" keyword child
+                node.children().any(|c| c.text().as_ref() == "abstract")
+            }
+            "python" => {
+                // Check for @abstractmethod decorator
+                let mut prev = node.prev();
+                while let Some(sibling) = prev {
+                    if sibling.kind().as_ref() == "decorator" {
+                        if sibling.text().contains("abstractmethod") {
+                            return true;
+                        }
+                        prev = sibling.prev();
+                    } else {
+                        break;
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    // ── Private Parameter Extraction Helpers ───────────────────────────
+
+    fn extract_rust_parameters<D: Doc>(&self, node: &Node<'_, D>) -> Vec<Parameter>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        let params_node = match node.field("parameters") {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        let mut params = Vec::new();
+        for child in params_node.children() {
+            let ck = child.kind();
+            match ck.as_ref() {
+                "parameter" => {
+                    let name = child
+                        .field("pattern")
+                        .map(|n| n.text().to_string())
+                        .unwrap_or_default();
+                    let type_ann = child.field("type").map(|n| n.text().to_string());
+                    params.push(Parameter {
+                        name,
+                        type_annotation: type_ann,
+                        default_value: None,
+                    });
+                }
+                "self_parameter" => {
+                    params.push(Parameter {
+                        name: child.text().to_string(),
+                        type_annotation: None,
+                        default_value: None,
+                    });
+                }
+                _ => {}
+            }
+        }
+        params
+    }
+
+    fn extract_python_parameters<D: Doc>(&self, node: &Node<'_, D>) -> Vec<Parameter>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        let params_node = match node.field("parameters") {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        let mut params = Vec::new();
+        for child in params_node.children() {
+            let ck = child.kind();
+            match ck.as_ref() {
+                "identifier" => {
+                    params.push(Parameter {
+                        name: child.text().to_string(),
+                        type_annotation: None,
+                        default_value: None,
+                    });
+                }
+                "typed_parameter" | "typed_default_parameter" => {
+                    let name = child
+                        .children()
+                        .find(|c| c.kind().as_ref() == "identifier")
+                        .map(|c| c.text().to_string())
+                        .unwrap_or_default();
+                    let type_ann = child.field("type").map(|n| n.text().to_string());
+                    let default = child.field("value").map(|n| n.text().to_string());
+                    params.push(Parameter {
+                        name,
+                        type_annotation: type_ann,
+                        default_value: default,
+                    });
+                }
+                "default_parameter" => {
+                    let name = child
+                        .field("name")
+                        .map(|n| n.text().to_string())
+                        .unwrap_or_default();
+                    let default = child.field("value").map(|n| n.text().to_string());
+                    params.push(Parameter {
+                        name,
+                        type_annotation: None,
+                        default_value: default,
+                    });
+                }
+                _ => {}
+            }
+        }
+        params
+    }
+
+    fn extract_ts_parameters<D: Doc>(&self, node: &Node<'_, D>) -> Vec<Parameter>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        let params_node = match node.field("parameters") {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        let mut params = Vec::new();
+        for child in params_node.children() {
+            let ck = child.kind();
+            match ck.as_ref() {
+                "required_parameter" | "optional_parameter" => {
+                    let name = child
+                        .field("pattern")
+                        .or_else(|| child.field("name"))
+                        .map(|n| n.text().to_string())
+                        .unwrap_or_default();
+                    let type_ann = child.field("type").map(|n| {
+                        n.text()
+                            .to_string()
+                            .trim_start_matches(':')
+                            .trim()
+                            .to_string()
+                    });
+                    let default = child.field("value").map(|n| n.text().to_string());
+                    params.push(Parameter {
+                        name,
+                        type_annotation: type_ann,
+                        default_value: default,
+                    });
+                }
+                _ => {}
+            }
+        }
+        params
+    }
+
+    fn extract_go_parameters<D: Doc>(&self, node: &Node<'_, D>) -> Vec<Parameter>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        let params_node = match node.field("parameters") {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        let mut params = Vec::new();
+        for child in params_node.children() {
+            if child.kind().as_ref() == "parameter_declaration" {
+                let name = child
+                    .field("name")
+                    .map(|n| n.text().to_string())
+                    .unwrap_or_default();
+                let type_ann = child.field("type").map(|n| n.text().to_string());
+                params.push(Parameter {
+                    name,
+                    type_annotation: type_ann,
+                    default_value: None,
+                });
+            }
+        }
+        params
+    }
+
+    fn extract_java_like_parameters<D: Doc>(&self, node: &Node<'_, D>) -> Vec<Parameter>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        // Java/Kotlin/C#: formal_parameters → formal_parameter
+        let params_node = node.field("parameters").or_else(|| {
+            node.children()
+                .find(|c| c.kind().as_ref() == "formal_parameters")
+        });
+        let params_node = match params_node {
+            Some(n) => n,
+            None => return Vec::new(),
+        };
+        let mut params = Vec::new();
+        for child in params_node.children() {
+            let ck = child.kind();
+            if ck.as_ref() == "formal_parameter" || ck.as_ref() == "spread_parameter" {
+                let name = child
+                    .field("name")
+                    .map(|n| n.text().to_string())
+                    .unwrap_or_else(|| {
+                        // Fallback: last identifier child is typically the name
+                        child
+                            .children()
+                            .filter(|c| c.kind().as_ref() == "identifier")
+                            .last()
+                            .map(|c| c.text().to_string())
+                            .unwrap_or_default()
+                    });
+                let type_ann = child
+                    .field("type")
+                    .map(|n| n.text().to_string())
+                    .or_else(|| {
+                        // Fallback: first type child
+                        child
+                            .children()
+                            .find(|c| {
+                                let k = c.kind();
+                                k.as_ref().contains("type") || k.as_ref() == "identifier"
+                            })
+                            .map(|c| c.text().to_string())
+                    });
+                // Avoid adding name as type if they're the same
+                let type_ann = type_ann.filter(|t| t != &name);
+                params.push(Parameter {
+                    name,
+                    type_annotation: type_ann,
+                    default_value: None,
+                });
+            }
+        }
+        params
+    }
+
+    /// Fallback: extract parameters from the signature text for unsupported languages.
+    fn extract_parameters_from_signature<D: Doc>(&self, node: &Node<'_, D>) -> Vec<Parameter>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        let text = node.text().to_string();
+        let open = match text.find('(') {
+            Some(p) => p,
+            None => return Vec::new(),
+        };
+        let close = match text[open..].find(')') {
+            Some(p) => open + p,
+            None => return Vec::new(),
+        };
+        let params_text = &text[open + 1..close];
+        if params_text.trim().is_empty() {
+            return Vec::new();
+        }
+        params_text
+            .split(',')
+            .filter_map(|p| {
+                let p = p.trim();
+                if p.is_empty() {
+                    return None;
+                }
+                // Try to split "type name" or "name: type" patterns
+                let parts: Vec<&str> = p.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    Some(Parameter {
+                        name: parts[0].trim().to_string(),
+                        type_annotation: Some(parts[1].trim().to_string()),
+                        default_value: None,
+                    })
+                } else {
+                    Some(Parameter {
+                        name: p.to_string(),
+                        type_annotation: None,
+                        default_value: None,
+                    })
+                }
+            })
+            .collect()
+    }
+
+    /// Fallback: extract return type from signature text (-> Type or : Type).
+    fn extract_return_type_from_signature<D: Doc>(&self, node: &Node<'_, D>) -> Option<String>
+    where
+        D::Lang: ast_grep_core::Language,
+    {
+        let text = node.text().to_string();
+        // Look for -> pattern (Rust, Python, Swift)
+        if let Some(pos) = text.find("->") {
+            let after = text[pos + 2..].trim();
+            let ret = after.split(['{', ':', '\n']).next().unwrap_or("").trim();
+            if !ret.is_empty() {
+                return Some(ret.to_string());
+            }
+        }
+        None
+    }
+}
+
+/// Extract the error type `E` from a Rust `Result<T, E>` return type string.
+fn extract_result_error_type(text: &str) -> Option<String> {
+    let trimmed = text.trim().trim_start_matches("->").trim();
+    if !trimmed.starts_with("Result") {
+        return None;
+    }
+    let open = trimmed.find('<')?;
+    let close = trimmed.rfind('>')?;
+    let inner = &trimmed[open + 1..close];
+    // Find the comma separating T and E, respecting nested angle brackets
+    let mut depth = 0i32;
+    let mut comma_pos = None;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            ',' if depth == 0 => {
+                comma_pos = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let error_type = if let Some(pos) = comma_pos {
+        inner[pos + 1..].trim()
+    } else {
+        return None;
+    };
+    if error_type.is_empty() {
+        None
+    } else {
+        Some(error_type.to_string())
     }
 }

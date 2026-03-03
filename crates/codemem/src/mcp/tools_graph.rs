@@ -1,9 +1,10 @@
-//! Graph & analysis tools: traverse, stats, health, index, symbols, deps, impact,
-//! clusters, cross-repo, pagerank, search-code, scoring weights, metrics.
+//! Graph & analysis tools: traverse, codemem_status (merged stats+health+metrics),
+//! index, search_code (with mode), get_symbol_info (with deps), get_symbol_graph,
+//! find_important_nodes, find_related_groups, cross-repo, summary_tree.
 
 use super::types::ToolResult;
 use super::McpServer;
-use codemem_core::{GraphBackend, NodeKind, RelationshipType, ScoringWeights, VectorBackend};
+use codemem_core::{GraphBackend, NodeKind, RelationshipType, VectorBackend};
 use codemem_engine::IndexCache;
 use serde_json::{json, Value};
 
@@ -92,32 +93,42 @@ impl McpServer {
         }
     }
 
-    pub(crate) fn tool_stats(&self) -> ToolResult {
-        let storage_stats = match self.engine.storage.stats() {
-            Ok(s) => s,
-            Err(e) => return ToolResult::tool_error(format!("Stats error: {e}")),
-        };
+    /// Unified status tool: combines stats, health, and metrics.
+    /// `include` parameter controls which sections to return (default: all).
+    pub(crate) fn tool_codemem_status(&self, args: &Value) -> ToolResult {
+        let include: Vec<&str> = args
+            .get("include")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_else(|| vec!["stats", "health", "metrics"]);
 
-        let vector_stats = match self.lock_vector() {
-            Ok(v) => v.stats(),
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
-        let graph_stats = match self.lock_graph() {
-            Ok(g) => g.stats(),
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
+        let mut response = json!({});
 
-        let cache_info = match self.lock_embeddings() {
-            Ok(Some(emb)) => {
-                let (size, cap) = emb.cache_stats();
-                Some(json!({"size": size, "capacity": cap}))
-            }
-            Ok(None) => None,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
+        if include.contains(&"stats") {
+            let storage_stats = match self.engine.storage.stats() {
+                Ok(s) => s,
+                Err(e) => return ToolResult::tool_error(format!("Stats error: {e}")),
+            };
 
-        ToolResult::text(
-            serde_json::to_string_pretty(&json!({
+            let vector_stats = match self.lock_vector() {
+                Ok(v) => v.stats(),
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            };
+            let graph_stats = match self.lock_graph() {
+                Ok(g) => g.stats(),
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            };
+
+            let cache_info = match self.lock_embeddings() {
+                Ok(Some(emb)) => {
+                    let (size, cap) = emb.cache_stats();
+                    Some(json!({"size": size, "capacity": cap}))
+                }
+                Ok(None) => None,
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            };
+
+            response["stats"] = json!({
                 "storage": {
                     "memories": storage_stats.memory_count,
                     "embeddings": storage_stats.embedding_count,
@@ -139,28 +150,33 @@ impl McpServer {
                     "available": self.engine.embeddings.is_some(),
                     "cache": cache_info,
                 }
-            }))
-            .expect("JSON serialization of literal"),
-        )
-    }
+            });
+        }
 
-    pub(crate) fn tool_health(&self) -> ToolResult {
-        let storage_ok = self.engine.storage.stats().is_ok();
-        let vector_ok = true; // HnswIndex is always available
-        let graph_ok = true; // GraphEngine is always available
-        let embeddings_ok = self.engine.embeddings.is_some();
+        if include.contains(&"health") {
+            let storage_ok = self.engine.storage.stats().is_ok();
+            let vector_ok = true;
+            let graph_ok = true;
+            let embeddings_ok = self.engine.embeddings.is_some();
 
-        let healthy = storage_ok && vector_ok && graph_ok;
+            let healthy = storage_ok && vector_ok && graph_ok;
 
-        ToolResult::text(
-            serde_json::to_string_pretty(&json!({
+            response["health"] = json!({
                 "healthy": healthy,
                 "storage": if storage_ok { "ok" } else { "error" },
                 "vector": if vector_ok { "ok" } else { "error" },
                 "graph": if graph_ok { "ok" } else { "error" },
                 "embeddings": if embeddings_ok { "ok" } else { "not_configured" },
-            }))
-            .expect("JSON serialization of literal"),
+            });
+        }
+
+        if include.contains(&"metrics") {
+            let snapshot = self.engine.metrics.snapshot();
+            response["metrics"] = serde_json::to_value(snapshot).unwrap_or(json!({}));
+        }
+
+        ToolResult::text(
+            serde_json::to_string_pretty(&response).expect("JSON serialization of literal"),
         )
     }
 
@@ -229,21 +245,74 @@ impl McpServer {
         )
     }
 
-    pub(crate) fn tool_search_symbols(&self, args: &Value) -> ToolResult {
+    /// Enhanced search_code with `mode` parameter: "semantic" (default), "text", "hybrid".
+    /// Optional `kind` filter for symbol kind.
+    pub(crate) fn tool_search_code(&self, args: &Value) -> ToolResult {
         let query = match args.get("query").and_then(|v| v.as_str()) {
             Some(q) if !q.is_empty() => q,
             _ => return ToolResult::tool_error("Missing or empty 'query' parameter"),
         };
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+        let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+        let mode = args
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("semantic");
         let kind_filter: Option<&str> = args.get("kind").and_then(|v| v.as_str());
 
-        match self.engine.search_symbols(query, limit, kind_filter) {
-            Ok(matches) if matches.is_empty() => ToolResult::text("No matching symbols found."),
-            Ok(matches) => {
-                let output: Vec<Value> = matches
-                    .iter()
-                    .map(|sym| {
-                        json!({
+        match mode {
+            "text" => {
+                // Text mode = search_symbols (substring match)
+                match self.engine.search_symbols(query, k, kind_filter) {
+                    Ok(matches) if matches.is_empty() => {
+                        ToolResult::text("No matching symbols found.")
+                    }
+                    Ok(matches) => {
+                        let output: Vec<Value> = matches
+                            .iter()
+                            .map(|sym| {
+                                json!({
+                                    "name": sym.name,
+                                    "qualified_name": sym.qualified_name,
+                                    "kind": sym.kind,
+                                    "signature": sym.signature,
+                                    "file_path": sym.file_path,
+                                    "line_start": sym.line_start,
+                                    "line_end": sym.line_end,
+                                    "visibility": sym.visibility,
+                                    "parent": sym.parent,
+                                })
+                            })
+                            .collect();
+                        ToolResult::text(
+                            serde_json::to_string_pretty(&output)
+                                .expect("JSON serialization of literal"),
+                        )
+                    }
+                    Err(e) => ToolResult::tool_error(format!("{e}")),
+                }
+            }
+            "hybrid" => {
+                // Hybrid: run both text and semantic, merge-rank results
+                let text_results = self
+                    .engine
+                    .search_symbols(query, k, kind_filter)
+                    .unwrap_or_default();
+                let semantic_results = self.engine.search_code(query, k).unwrap_or_default();
+
+                let mut combined: Vec<Value> = Vec::new();
+                let mut seen_ids = std::collections::HashSet::new();
+
+                // Semantic results first (higher quality)
+                for r in &semantic_results {
+                    if seen_ids.insert(r.id.clone()) {
+                        combined.push(Self::format_code_search_result(r));
+                    }
+                }
+                // Then text results
+                for sym in &text_results {
+                    let id = format!("sym:{}", sym.qualified_name);
+                    if seen_ids.insert(id) {
+                        combined.push(json!({
                             "name": sym.name,
                             "qualified_name": sym.qualified_name,
                             "kind": sym.kind,
@@ -253,22 +322,82 @@ impl McpServer {
                             "line_end": sym.line_end,
                             "visibility": sym.visibility,
                             "parent": sym.parent,
-                        })
-                    })
-                    .collect();
-                ToolResult::text(
-                    serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
-                )
+                            "match_mode": "text",
+                        }));
+                    }
+                }
+                combined.truncate(k);
+
+                if combined.is_empty() {
+                    ToolResult::text("No matching code found.")
+                } else {
+                    ToolResult::text(
+                        serde_json::to_string_pretty(&combined)
+                            .expect("JSON serialization of literal"),
+                    )
+                }
             }
-            Err(e) => ToolResult::tool_error(format!("{e}")),
+            _ => {
+                // Default: "semantic" (original search_code behavior)
+                match self.engine.search_code(query, k) {
+                    Ok(results) if results.is_empty() => {
+                        ToolResult::text("No matching code found.")
+                    }
+                    Ok(results) => {
+                        let output: Vec<Value> = results
+                            .iter()
+                            .map(Self::format_code_search_result)
+                            .collect();
+                        ToolResult::text(
+                            serde_json::to_string_pretty(&output)
+                                .expect("JSON serialization of literal"),
+                        )
+                    }
+                    Err(e) => ToolResult::tool_error(format!("{e}")),
+                }
+            }
         }
     }
 
+    fn format_code_search_result(r: &codemem_engine::CodeSearchResult) -> Value {
+        if r.kind == "chunk" {
+            json!({
+                "id": r.id,
+                "kind": "chunk",
+                "label": r.label,
+                "similarity": format!("{:.4}", r.similarity),
+                "file_path": r.file_path,
+                "line_start": r.line_start,
+                "line_end": r.line_end,
+                "node_kind": r.node_kind,
+                "parent_symbol": r.parent_symbol,
+                "non_ws_chars": r.non_ws_chars,
+            })
+        } else {
+            json!({
+                "qualified_name": r.qualified_name,
+                "kind": r.kind,
+                "label": r.label,
+                "similarity": format!("{:.4}", r.similarity),
+                "file_path": r.file_path,
+                "line_start": r.line_start,
+                "line_end": r.line_end,
+                "signature": r.signature,
+                "doc_comment": r.doc_comment,
+            })
+        }
+    }
+
+    /// Enhanced get_symbol_info with optional `include_dependencies`.
     pub(crate) fn tool_get_symbol_info(&self, args: &Value) -> ToolResult {
         let qualified_name = match args.get("qualified_name").and_then(|v| v.as_str()) {
             Some(qn) => qn,
             None => return ToolResult::tool_error("Missing 'qualified_name' parameter"),
         };
+        let include_deps = args
+            .get("include_dependencies")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let cache = match self.lock_index_cache() {
             Ok(c) => c,
@@ -286,29 +415,58 @@ impl McpServer {
             None => return ToolResult::tool_error(format!("Symbol not found: {qualified_name}")),
         };
 
+        let mut result = json!({
+            "name": sym.name,
+            "qualified_name": sym.qualified_name,
+            "kind": sym.kind.to_string(),
+            "signature": sym.signature,
+            "visibility": sym.visibility.to_string(),
+            "file_path": sym.file_path,
+            "line_start": sym.line_start,
+            "line_end": sym.line_end,
+            "doc_comment": sym.doc_comment,
+            "parent": sym.parent,
+        });
+
+        // Optionally include dependencies from graph
+        if include_deps {
+            drop(cache); // Release cache lock before graph lock
+            let node_id = format!("sym:{qualified_name}");
+            let graph = match self.lock_graph() {
+                Ok(g) => g,
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            };
+
+            let edges: Vec<Value> = graph
+                .get_edges(&node_id)
+                .unwrap_or_default()
+                .iter()
+                .map(|e| {
+                    json!({
+                        "source": e.src,
+                        "target": e.dst,
+                        "relationship": e.relationship.to_string(),
+                        "weight": e.weight,
+                    })
+                })
+                .collect();
+            result["dependencies"] = json!(edges);
+        }
+
         ToolResult::text(
-            serde_json::to_string_pretty(&json!({
-                "name": sym.name,
-                "qualified_name": sym.qualified_name,
-                "kind": sym.kind.to_string(),
-                "signature": sym.signature,
-                "visibility": sym.visibility.to_string(),
-                "file_path": sym.file_path,
-                "line_start": sym.line_start,
-                "line_end": sym.line_end,
-                "doc_comment": sym.doc_comment,
-                "parent": sym.parent,
-            }))
-            .expect("JSON serialization of literal"),
+            serde_json::to_string_pretty(&result).expect("JSON serialization of literal"),
         )
     }
 
-    pub(crate) fn tool_get_dependencies(&self, args: &Value) -> ToolResult {
+    /// Merged get_dependencies + get_impact into get_symbol_graph.
+    /// depth=1 is like get_dependencies, depth>1 is like get_impact.
+    pub(crate) fn tool_get_symbol_graph(&self, args: &Value) -> ToolResult {
         let qualified_name = match args.get("qualified_name").and_then(|v| v.as_str()) {
             Some(qn) => qn,
             None => return ToolResult::tool_error("Missing 'qualified_name' parameter"),
         };
 
+        let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
         let direction = args
             .get("direction")
             .and_then(|v| v.as_str())
@@ -320,6 +478,7 @@ impl McpServer {
             Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
         };
 
+        // Get direct edges (filtered by direction)
         let edges = match graph.get_edges(&node_id) {
             Ok(e) => e,
             Err(_) => {
@@ -327,7 +486,7 @@ impl McpServer {
             }
         };
 
-        let filtered: Vec<Value> = edges
+        let direct_edges: Vec<Value> = edges
             .iter()
             .filter(|e| match direction {
                 "incoming" => e.dst == node_id,
@@ -344,80 +503,73 @@ impl McpServer {
             })
             .collect();
 
-        if filtered.is_empty() {
-            return ToolResult::text(format!(
-                "No {direction} dependencies found for {qualified_name}."
-            ));
-        }
-
-        ToolResult::text(
-            serde_json::to_string_pretty(&filtered).expect("JSON serialization of literal"),
-        )
-    }
-
-    pub(crate) fn tool_get_impact(&self, args: &Value) -> ToolResult {
-        let qualified_name = match args.get("qualified_name").and_then(|v| v.as_str()) {
-            Some(qn) => qn,
-            None => return ToolResult::tool_error("Missing 'qualified_name' parameter"),
-        };
-
-        let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
-
-        let node_id = format!("sym:{qualified_name}");
-        let graph = match self.lock_graph() {
-            Ok(g) => g,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
-
-        // BFS from the node to find all reachable nodes within N hops
-        let nodes = match graph.bfs(&node_id, depth) {
-            Ok(n) => n,
-            Err(e) => {
-                return ToolResult::tool_error(format!(
-                    "Impact analysis failed for {qualified_name}: {e}"
-                ))
+        if depth <= 1 {
+            // depth=1: just return direct edges
+            if direct_edges.is_empty() {
+                return ToolResult::text(format!(
+                    "No {direction} dependencies found for {qualified_name}."
+                ));
             }
-        };
+            ToolResult::text(
+                serde_json::to_string_pretty(&json!({
+                    "symbol": qualified_name,
+                    "depth": depth,
+                    "direction": direction,
+                    "edges": direct_edges,
+                }))
+                .expect("JSON serialization of literal"),
+            )
+        } else {
+            // depth>1: BFS reachability (impact analysis)
+            let nodes = match graph.bfs(&node_id, depth) {
+                Ok(n) => n,
+                Err(e) => {
+                    return ToolResult::tool_error(format!(
+                        "Impact analysis failed for {qualified_name}: {e}"
+                    ))
+                }
+            };
 
-        // Also collect edges that connect to the node (incoming = "who depends on me")
-        let all_edges = graph.get_edges(&node_id).unwrap_or_default();
-
-        let incoming: Vec<Value> = all_edges
-            .iter()
-            .filter(|e| e.dst == node_id)
-            .map(|e| {
-                json!({
-                    "source": e.src,
-                    "relationship": e.relationship.to_string(),
+            let incoming: Vec<Value> = edges
+                .iter()
+                .filter(|e| e.dst == node_id)
+                .map(|e| {
+                    json!({
+                        "source": e.src,
+                        "relationship": e.relationship.to_string(),
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        let reachable: Vec<Value> = nodes
-            .iter()
-            .filter(|n| n.id != node_id)
-            .map(|n| {
-                json!({
-                    "id": n.id,
-                    "kind": n.kind.to_string(),
-                    "label": n.label,
+            let reachable: Vec<Value> = nodes
+                .iter()
+                .filter(|n| n.id != node_id)
+                .map(|n| {
+                    json!({
+                        "id": n.id,
+                        "kind": n.kind.to_string(),
+                        "label": n.label,
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        ToolResult::text(
-            serde_json::to_string_pretty(&json!({
-                "symbol": qualified_name,
-                "depth": depth,
-                "direct_dependents": incoming,
-                "reachable_nodes": reachable.len(),
-                "reachable": reachable,
-            }))
-            .expect("JSON serialization of literal"),
-        )
+            ToolResult::text(
+                serde_json::to_string_pretty(&json!({
+                    "symbol": qualified_name,
+                    "depth": depth,
+                    "direction": direction,
+                    "direct_edges": direct_edges,
+                    "direct_dependents": incoming,
+                    "reachable_nodes": reachable.len(),
+                    "reachable": reachable,
+                }))
+                .expect("JSON serialization of literal"),
+            )
+        }
     }
 
-    pub(crate) fn tool_get_clusters(&self, args: &Value) -> ToolResult {
+    /// Renamed from get_clusters: find related groups via Louvain community detection.
+    pub(crate) fn tool_find_related_groups(&self, args: &Value) -> ToolResult {
         let resolution = args
             .get("resolution")
             .and_then(|v| v.as_f64())
@@ -521,7 +673,8 @@ impl McpServer {
         )
     }
 
-    pub(crate) fn tool_get_pagerank(&self, args: &Value) -> ToolResult {
+    /// Renamed from get_pagerank: find the most important/central nodes.
+    pub(crate) fn tool_find_important_nodes(&self, args: &Value) -> ToolResult {
         let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
         let damping = args.get("damping").and_then(|v| v.as_f64()).unwrap_or(0.85);
 
@@ -558,142 +711,6 @@ impl McpServer {
             .expect("JSON serialization of literal"),
         )
     }
-
-    pub(crate) fn tool_search_code(&self, args: &Value) -> ToolResult {
-        let query = match args.get("query").and_then(|v| v.as_str()) {
-            Some(q) if !q.is_empty() => q,
-            _ => return ToolResult::tool_error("Missing or empty 'query' parameter"),
-        };
-        let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-
-        match self.engine.search_code(query, k) {
-            Ok(results) if results.is_empty() => ToolResult::text("No matching code found."),
-            Ok(results) => {
-                // Format results to match the original JSON shape
-                let output: Vec<Value> = results
-                    .iter()
-                    .map(|r| {
-                        if r.kind == "chunk" {
-                            json!({
-                                "id": r.id,
-                                "kind": "chunk",
-                                "label": r.label,
-                                "similarity": format!("{:.4}", r.similarity),
-                                "file_path": r.file_path,
-                                "line_start": r.line_start,
-                                "line_end": r.line_end,
-                                "node_kind": r.node_kind,
-                                "parent_symbol": r.parent_symbol,
-                                "non_ws_chars": r.non_ws_chars,
-                            })
-                        } else {
-                            json!({
-                                "qualified_name": r.qualified_name,
-                                "kind": r.kind,
-                                "label": r.label,
-                                "similarity": format!("{:.4}", r.similarity),
-                                "file_path": r.file_path,
-                                "line_start": r.line_start,
-                                "line_end": r.line_end,
-                                "signature": r.signature,
-                                "doc_comment": r.doc_comment,
-                            })
-                        }
-                    })
-                    .collect();
-                ToolResult::text(
-                    serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
-                )
-            }
-            Err(e) => ToolResult::tool_error(format!("{e}")),
-        }
-    }
-
-    /// MCP tool: set_scoring_weights -- update the server's scoring weights at runtime.
-    pub(crate) fn tool_set_scoring_weights(&self, args: &Value) -> ToolResult {
-        let vector_similarity = args
-            .get("vector_similarity")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.25);
-        let graph_strength = args
-            .get("graph_strength")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.25);
-        let token_overlap = args
-            .get("token_overlap")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.15);
-        let temporal = args
-            .get("temporal")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.10);
-        let tag_matching = args
-            .get("tag_matching")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.10);
-        let importance = args
-            .get("importance")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.05);
-        let confidence = args
-            .get("confidence")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.05);
-        let recency = args.get("recency").and_then(|v| v.as_f64()).unwrap_or(0.05);
-
-        let raw = ScoringWeights {
-            vector_similarity,
-            graph_strength,
-            token_overlap,
-            temporal,
-            tag_matching,
-            importance,
-            confidence,
-            recency,
-        };
-        let normalized = raw.normalized();
-
-        match self.scoring_weights_mut() {
-            Ok(mut w) => *w = normalized.clone(),
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        }
-
-        // Persist scoring weights to config file
-        let mut config = codemem_core::CodememConfig::load_or_default();
-        config.scoring = normalized.clone();
-        if let Err(e) = config.save(&codemem_core::CodememConfig::default_path()) {
-            tracing::warn!("Failed to persist scoring weights: {e}");
-        }
-
-        let response = json!({
-            "updated": true,
-            "weights": {
-                "vector_similarity": normalized.vector_similarity,
-                "graph_strength": normalized.graph_strength,
-                "token_overlap": normalized.token_overlap,
-                "temporal": normalized.temporal,
-                "tag_matching": normalized.tag_matching,
-                "importance": normalized.importance,
-                "confidence": normalized.confidence,
-                "recency": normalized.recency,
-            }
-        });
-
-        ToolResult::text(
-            serde_json::to_string_pretty(&response).expect("JSON serialization of literal"),
-        )
-    }
-
-    /// Return a snapshot of operational metrics (latency percentiles, counters, gauges).
-    pub(crate) fn tool_metrics(&self) -> ToolResult {
-        let snapshot = self.engine.metrics.snapshot();
-        match serde_json::to_string_pretty(&snapshot) {
-            Ok(json) => ToolResult::text(json),
-            Err(e) => ToolResult::tool_error(format!("Failed to serialize metrics: {e}")),
-        }
-    }
-
-    // ── Graph Compaction ─────────────────────────────────────────────────
 
     // ── Summary Tree Tool ────────────────────────────────────────────────
 

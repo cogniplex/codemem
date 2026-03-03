@@ -16,25 +16,27 @@ fn handle_unknown_tool() {
 #[test]
 fn handle_health() {
     let server = test_server();
+    // Legacy alias "codemem_health" maps to codemem_status(include: ["health"])
     let params = json!({"name": "codemem_health", "arguments": {}});
     let resp = server.handle_request("tools/call", Some(&params), json!(7));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
-    let health: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(health["healthy"], true);
-    assert_eq!(health["storage"], "ok");
+    let parsed: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(parsed["health"]["healthy"], true);
+    assert_eq!(parsed["health"]["storage"], "ok");
 }
 
 #[test]
 fn handle_stats() {
     let server = test_server();
+    // Legacy alias "codemem_stats" maps to codemem_status(include: ["stats"])
     let params = json!({"name": "codemem_stats", "arguments": {}});
     let resp = server.handle_request("tools/call", Some(&params), json!(8));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
-    let stats: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(stats["storage"]["memories"], 0);
-    assert_eq!(stats["vector"]["dimensions"], 768);
+    let parsed: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(parsed["stats"]["storage"]["memories"], 0);
+    assert_eq!(parsed["stats"]["vector"]["dimensions"], 768);
 }
 
 // ── Graph Strength Scoring Tests ────────────────────────────────────
@@ -392,48 +394,27 @@ fn get_pagerank_with_nodes() {
 }
 
 #[test]
-fn set_scoring_weights_updates_weights() {
+fn set_scoring_weights_returns_removed_error() {
     let server = test_server();
 
-    // Set custom weights (all equal)
     let params = json!({
         "name": "set_scoring_weights",
         "arguments": {
             "vector_similarity": 1.0,
-            "graph_strength": 1.0,
-            "token_overlap": 1.0,
-            "temporal": 1.0,
-            "tag_matching": 1.0,
-            "importance": 1.0,
-            "confidence": 1.0,
-            "recency": 1.0,
         }
     });
     let resp = server.handle_request("tools/call", Some(&params), json!(100));
     let result = resp.result.unwrap();
+    assert_eq!(result["isError"], true);
     let text = result["content"][0]["text"].as_str().unwrap();
-    let parsed: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(parsed["updated"], true);
-
-    // All weights should be normalized to 0.125
-    let weights = &parsed["weights"];
-    let expected = 0.125;
-    let eps = 1e-10;
-    assert!((weights["vector_similarity"].as_f64().unwrap() - expected).abs() < eps);
-    assert!((weights["graph_strength"].as_f64().unwrap() - expected).abs() < eps);
-    assert!((weights["token_overlap"].as_f64().unwrap() - expected).abs() < eps);
-    assert!((weights["temporal"].as_f64().unwrap() - expected).abs() < eps);
-    assert!((weights["tag_matching"].as_f64().unwrap() - expected).abs() < eps);
-    assert!((weights["importance"].as_f64().unwrap() - expected).abs() < eps);
-    assert!((weights["confidence"].as_f64().unwrap() - expected).abs() < eps);
-    assert!((weights["recency"].as_f64().unwrap() - expected).abs() < eps);
+    assert!(text.contains("removed"));
 }
 
 #[test]
-fn recall_uses_custom_scoring_weights() {
+fn recall_uses_default_scoring_weights() {
     let server = test_server();
 
-    // Store two memories: one with high importance, one with many tags matching
+    // Store two memories
     store_memory(&server, "rust ownership concept", "insight", &[]);
     store_memory(
         &server,
@@ -446,57 +427,6 @@ fn recall_uses_custom_scoring_weights() {
     let text_default = recall_memories(&server, "rust", None);
     let results_default: Vec<Value> = serde_json::from_str(&text_default).unwrap();
     assert_eq!(results_default.len(), 2);
-
-    // Set weights to heavily favor tag_matching (1.0) and minimize everything else
-    let params = json!({
-        "name": "set_scoring_weights",
-        "arguments": {
-            "vector_similarity": 0.0,
-            "graph_strength": 0.0,
-            "token_overlap": 0.01,
-            "temporal": 0.0,
-            "tag_matching": 1.0,
-            "importance": 0.0,
-            "confidence": 0.0,
-            "recency": 0.0,
-        }
-    });
-    server.handle_request("tools/call", Some(&params), json!(200));
-
-    // Recall again - the tagged memory should score much higher
-    let text_custom = recall_memories(&server, "rust", None);
-    let results_custom: Vec<Value> = serde_json::from_str(&text_custom).unwrap();
-    assert!(!results_custom.is_empty());
-
-    // The first result should be the one with more tag matches
-    assert!(results_custom[0]["content"]
-        .as_str()
-        .unwrap()
-        .contains("borrowing"));
-}
-
-#[test]
-fn set_scoring_weights_with_defaults_for_omitted() {
-    let server = test_server();
-
-    // Only set vector_similarity, rest should use defaults
-    let params = json!({
-        "name": "set_scoring_weights",
-        "arguments": {
-            "vector_similarity": 0.5,
-        }
-    });
-    let resp = server.handle_request("tools/call", Some(&params), json!(300));
-    let result = resp.result.unwrap();
-    let text = result["content"][0]["text"].as_str().unwrap();
-    let parsed: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(parsed["updated"], true);
-
-    // vector_similarity should be 0.5 normalized against the sum of all defaults
-    // sum = 0.5 + 0.25 + 0.15 + 0.10 + 0.10 + 0.05 + 0.05 + 0.05 = 1.25
-    // so vector_similarity = 0.5 / 1.25 = 0.4
-    let vs = parsed["weights"]["vector_similarity"].as_f64().unwrap();
-    assert!((vs - 0.4).abs() < 1e-10);
 }
 
 // ── Filtered Traversal MCP Tool Tests ─────────────────────────────
@@ -674,18 +604,25 @@ fn tool_metrics_returns_snapshot() {
     codemem_core::Metrics::increment_counter(&*server.engine.metrics, "tool_calls_total", 1);
     codemem_core::Metrics::record_gauge(&*server.engine.metrics, "memory_count", 7.0);
 
-    let result = server.tool_metrics();
+    let result = server.tool_codemem_status(&serde_json::json!({"include": ["metrics"]}));
     assert!(!result.is_error);
     let text = &result.content[0].text;
     let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
     assert!(
-        parsed["latencies"]["recall_memory"]["count"]
+        parsed["metrics"]["latencies"]["recall_memory"]["count"]
             .as_u64()
             .unwrap()
             >= 1
     );
-    assert_eq!(parsed["counters"]["tool_calls_total"], 1);
-    assert!((parsed["gauges"]["memory_count"].as_f64().unwrap() - 7.0).abs() < f64::EPSILON);
+    assert_eq!(parsed["metrics"]["counters"]["tool_calls_total"], 1);
+    assert!(
+        (parsed["metrics"]["gauges"]["memory_count"]
+            .as_f64()
+            .unwrap()
+            - 7.0)
+            .abs()
+            < f64::EPSILON
+    );
 }
 
 // ── Phase 5: Graph Compaction Tests ─────────────────────────────────

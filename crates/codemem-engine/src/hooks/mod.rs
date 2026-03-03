@@ -66,6 +66,10 @@ pub fn extract(payload: &HookPayload) -> Result<Option<ExtractedMemory>, Codemem
         "Grep" => extract_grep(payload),
         "Edit" | "MultiEdit" => extract_edit(payload),
         "Write" => extract_write(payload),
+        "Bash" => extract_bash(payload),
+        "WebFetch" | "WebSearch" => extract_web(payload),
+        "Agent" | "SendMessage" => extract_agent_communication(payload),
+        "ListFiles" | "ListDir" => extract_list_dir(payload),
         _ => {
             tracing::debug!("Unknown tool: {}", payload.tool_name);
             Ok(None)
@@ -367,6 +371,238 @@ fn extract_write(payload: &HookPayload) -> Result<Option<ExtractedMemory>, Codem
     )))
 }
 
+/// Extract memory from a Bash tool use.
+fn extract_bash(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
+    let command = payload
+        .tool_input
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let first_word = command.split_whitespace().next().unwrap_or("unknown");
+    let response = truncate(&payload.tool_response, 2000);
+
+    let content = format!("Bash command: {}\nOutput:\n{}", command, response);
+
+    let mut tags = vec!["bash".to_string(), format!("command:{first_word}")];
+
+    // Add directory tag if present in input
+    if let Some(dir) = payload.tool_input.get("cwd").and_then(|v| v.as_str()) {
+        tags.push(format!("dir:{dir}"));
+    } else if let Some(dir) = payload.cwd.as_deref() {
+        tags.push(format!("dir:{dir}"));
+    }
+
+    // Detect error indicators
+    let response_lower = payload.tool_response.to_lowercase();
+    if response_lower.contains("error:")
+        || response_lower.contains("failed")
+        || payload
+            .tool_input
+            .get("exit_code")
+            .and_then(|v| v.as_i64())
+            .is_some_and(|c| c != 0)
+    {
+        tags.push("error".to_string());
+    }
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "tool".to_string(),
+        serde_json::Value::String("Bash".to_string()),
+    );
+    metadata.insert(
+        "command".to_string(),
+        serde_json::Value::String(command.to_string()),
+    );
+
+    // Try to detect a file path reference in the command for graph node creation
+    let graph_node = extract_file_path_from_command(command).map(|fp| GraphNode {
+        id: format!("file:{fp}"),
+        kind: NodeKind::File,
+        label: fp.to_string(),
+        payload: HashMap::new(),
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+    });
+
+    Ok(Some(ExtractedMemory {
+        content,
+        memory_type: MemoryType::Context,
+        tags,
+        metadata,
+        graph_node,
+        graph_edges: vec![],
+        session_id: payload.session_id.clone(),
+    }))
+}
+
+/// Try to extract a recognizable file path from a bash command string.
+/// Looks for arguments that look like file paths (contain `/` or `.` with an extension).
+fn extract_file_path_from_command(command: &str) -> Option<&str> {
+    for token in command.split_whitespace() {
+        // Skip flags
+        if token.starts_with('-') {
+            continue;
+        }
+        // Check for path-like tokens: contains a slash or has a file extension
+        let path = std::path::Path::new(token);
+        if token.contains('/') || path.extension().is_some() {
+            // Validate it looks like a real path (not a URL scheme, not just a dot)
+            if !token.starts_with("http://") && !token.starts_with("https://") && token.len() > 1 {
+                return Some(token);
+            }
+        }
+    }
+    None
+}
+
+/// Extract memory from a WebFetch/WebSearch tool use.
+fn extract_web(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
+    let url = payload
+        .tool_input
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let query = payload
+        .tool_input
+        .get("query")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let response = truncate(&payload.tool_response, 2000);
+
+    let content = if !url.is_empty() {
+        format!("Web fetch: {url}\nResponse:\n{response}")
+    } else {
+        format!("Web search: {query}\nResults:\n{response}")
+    };
+
+    let mut tags = vec!["web-research".to_string()];
+
+    // Extract domain from URL
+    if !url.is_empty() {
+        if let Some(domain) = extract_domain(url) {
+            tags.push(format!("url:{domain}"));
+        }
+    }
+
+    if !query.is_empty() {
+        tags.push(format!("query:{query}"));
+    }
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "tool".to_string(),
+        serde_json::Value::String(payload.tool_name.clone()),
+    );
+    if !url.is_empty() {
+        metadata.insert(
+            "url".to_string(),
+            serde_json::Value::String(url.to_string()),
+        );
+    }
+    if !query.is_empty() {
+        metadata.insert(
+            "query".to_string(),
+            serde_json::Value::String(query.to_string()),
+        );
+    }
+
+    Ok(Some(ExtractedMemory {
+        content,
+        memory_type: MemoryType::Context,
+        tags,
+        metadata,
+        graph_node: None,
+        graph_edges: vec![],
+        session_id: payload.session_id.clone(),
+    }))
+}
+
+/// Extract domain from a URL string.
+fn extract_domain(url: &str) -> Option<&str> {
+    let after_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    let domain = after_scheme.split('/').next()?;
+    if domain.is_empty() {
+        None
+    } else {
+        Some(domain)
+    }
+}
+
+/// Extract memory from Agent/SendMessage tool uses.
+fn extract_agent_communication(
+    payload: &HookPayload,
+) -> Result<Option<ExtractedMemory>, CodememError> {
+    let response = truncate(&payload.tool_response, 2000);
+
+    let content = format!("Agent communication ({}): {}", payload.tool_name, response);
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "tool".to_string(),
+        serde_json::Value::String(payload.tool_name.clone()),
+    );
+
+    Ok(Some(ExtractedMemory {
+        content,
+        memory_type: MemoryType::Context,
+        tags: vec!["agent-communication".to_string()],
+        metadata,
+        graph_node: None,
+        graph_edges: vec![],
+        session_id: payload.session_id.clone(),
+    }))
+}
+
+/// Extract memory from ListFiles/ListDir tool uses.
+fn extract_list_dir(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
+    let directory = payload
+        .tool_input
+        .get("path")
+        .or_else(|| payload.tool_input.get("directory"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+
+    let response = truncate(&payload.tool_response, 2000);
+    let content = format!("Listed directory: {directory}\n{response}");
+
+    let mut tags = vec!["discovery".to_string()];
+    // Add the directory basename as a tag
+    if let Some(name) = std::path::Path::new(directory)
+        .file_name()
+        .and_then(|f| f.to_str())
+    {
+        tags.push(format!("dir:{name}"));
+    }
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "tool".to_string(),
+        serde_json::Value::String(payload.tool_name.clone()),
+    );
+    metadata.insert(
+        "directory".to_string(),
+        serde_json::Value::String(directory.to_string()),
+    );
+
+    Ok(Some(ExtractedMemory {
+        content,
+        memory_type: MemoryType::Context,
+        tags,
+        metadata,
+        graph_node: None,
+        graph_edges: vec![],
+        session_id: payload.session_id.clone(),
+    }))
+}
+
 /// Extract entity tags from a file path.
 fn extract_tags_from_path(path: &str) -> Vec<String> {
     let mut tags = Vec::new();
@@ -518,7 +754,85 @@ pub fn check_triggers(
         }
     }
 
-    // Trigger 3: Same search pattern used 2+ times
+    // Trigger 3: "Understanding module" — 3+ files read from the same directory
+    // (reuses the directory focus data but generates a module-level insight)
+    if tool_name == "Read" {
+        if let Some(fp) = file_path {
+            let directory = std::path::Path::new(fp)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !directory.is_empty() {
+                let module_name = std::path::Path::new(&directory)
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .unwrap_or("unknown");
+                let dedup_tag = format!("exploring_module:{}", directory);
+                let already_exists = storage
+                    .has_auto_insight(session_id, &dedup_tag)
+                    .unwrap_or(true);
+                if !already_exists {
+                    let count = storage
+                        .count_directory_reads(session_id, &directory)
+                        .unwrap_or(0);
+                    if count >= 3 {
+                        insights.push(AutoInsight {
+                            content: format!(
+                                "Exploring '{}' module: {} files read. Building understanding of this area.",
+                                module_name, count
+                            ),
+                            tags: vec![
+                                "auto-insight".to_string(),
+                                "exploring-module".to_string(),
+                                format!("module:{}", module_name),
+                            ],
+                            importance: 0.55,
+                            dedup_tag,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Trigger 4: "Debugging" — Bash with error output followed by file reads
+    if tool_name == "Bash" {
+        let has_error = storage
+            .count_search_pattern_in_session(session_id, "error")
+            .unwrap_or(0)
+            > 0;
+        if has_error {
+            let area = file_path
+                .and_then(|fp| {
+                    std::path::Path::new(fp)
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|f| f.to_str())
+                })
+                .unwrap_or("project");
+            let dedup_tag = format!("debugging:{}", area);
+            let already_exists = storage
+                .has_auto_insight(session_id, &dedup_tag)
+                .unwrap_or(true);
+            if !already_exists {
+                insights.push(AutoInsight {
+                    content: format!(
+                        "Debugging in '{}': error output detected in bash commands during this session.",
+                        area
+                    ),
+                    tags: vec![
+                        "auto-insight".to_string(),
+                        "debugging".to_string(),
+                        format!("area:{}", area),
+                    ],
+                    importance: 0.6,
+                    dedup_tag,
+                });
+            }
+        }
+    }
+
+    // Trigger 5: Same search pattern used 2+ times
     if matches!(tool_name, "Grep" | "Glob") {
         if let Some(pat) = pattern {
             let dedup_tag = format!("repeated_search:{}", pat);

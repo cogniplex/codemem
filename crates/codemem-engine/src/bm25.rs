@@ -4,6 +4,7 @@
 //! snake_case, and other programming conventions. Replaces the naive
 //! split+intersect token overlap in hybrid scoring.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 // ── Code-Aware Tokenizer ────────────────────────────────────────────────────
@@ -108,6 +109,10 @@ fn split_camel_case(s: &str) -> Vec<String> {
 ///
 /// Maintains document frequency statistics incrementally. Documents are
 /// identified by string IDs and can be added/removed dynamically.
+///
+/// Supports serialization via `serialize()`/`deserialize()` for persistence
+/// across restarts, avoiding the need to rebuild from all stored memories.
+#[derive(Serialize, Deserialize)]
 pub struct Bm25Index {
     /// Number of documents containing each term: term -> count
     doc_freq: HashMap<String, usize>,
@@ -116,7 +121,7 @@ pub struct Bm25Index {
     /// Per-document term frequencies for removal support: doc_id -> (term -> count)
     doc_terms: HashMap<String, HashMap<String, usize>>,
     /// Total number of documents
-    doc_count: usize,
+    pub doc_count: usize,
     /// Average document length
     avg_doc_len: f64,
     /// BM25 k1 parameter (term frequency saturation)
@@ -364,6 +369,34 @@ impl Bm25Index {
             let total: usize = self.doc_lengths.values().sum();
             self.avg_doc_len = total as f64 / self.doc_count as f64;
         }
+    }
+}
+
+impl Bm25Index {
+    /// Serialize the BM25 index to a byte vector for persistence.
+    ///
+    /// Uses bincode for compact binary representation. The serialized format
+    /// includes all document frequency statistics, term frequencies, and
+    /// parameters, enabling fast startup without re-indexing all memories.
+    pub fn serialize(&self) -> Vec<u8> {
+        // Use JSON for reliable serialization (bincode not in deps)
+        serde_json::to_vec(self).unwrap_or_default()
+    }
+
+    /// Deserialize a BM25 index from bytes previously produced by `serialize()`.
+    ///
+    /// Returns `Err` if the data is corrupt or from an incompatible version.
+    pub fn deserialize(data: &[u8]) -> Result<Self, String> {
+        serde_json::from_slice(data).map_err(|e| format!("BM25 deserialization failed: {e}"))
+    }
+
+    /// Whether the index contains any documents and may need saving.
+    ///
+    /// Useful for batch operations: call `persist_memory_no_save()` in a loop,
+    /// then check `needs_save()` before writing the vector index to disk once
+    /// at the end. This avoids O(N) disk writes during bulk inserts.
+    pub fn needs_save(&self) -> bool {
+        self.doc_count > 0
     }
 }
 

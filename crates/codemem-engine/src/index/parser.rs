@@ -56,13 +56,14 @@ impl CodeParser {
         let lang = self.engine.find_language(extension)?;
         let source = std::str::from_utf8(content).ok()?;
 
-        let symbols = self.engine.extract_symbols(lang, source, path);
-        let references = self.engine.extract_references(lang, source, path);
-
-        // TODO(L22): Source is parsed 3 times (symbols, references, chunking). Refactor
-        // extract_symbols/extract_references to accept a pre-parsed tree root, then
-        // parse once and share it across all three passes.
+        // C1: Parse source once and share the tree across all three passes.
         let root = lang.lang.ast_grep(source);
+        let symbols = self
+            .engine
+            .extract_symbols_from_tree(lang, &root, source, path);
+        let references = self
+            .engine
+            .extract_references_from_tree(lang, &root, source, path);
         let chunks = chunk_file(&root, source, path, &symbols, &self.chunk_config);
 
         // Map internal language names to the canonical names used by consumers.
@@ -91,6 +92,38 @@ impl CodeParser {
     /// Check if a given file extension is supported.
     pub fn supports_extension(&self, ext: &str) -> bool {
         self.engine.supports_extension(ext)
+    }
+}
+
+impl ParseResult {
+    /// C5: Generate (id, text) pairs suitable for adding to a BM25 index.
+    ///
+    /// For symbols: uses `qualified_name + signature + doc_comment` as document text.
+    /// For chunks: uses the chunk text content.
+    ///
+    /// IDs are prefixed with `sym:` and `chunk:` respectively.
+    pub fn bm25_documents(&self) -> Vec<(String, String)> {
+        let mut docs = Vec::with_capacity(self.symbols.len() + self.chunks.len());
+
+        for sym in &self.symbols {
+            let mut text = sym.qualified_name.clone();
+            if !sym.signature.is_empty() {
+                text.push(' ');
+                text.push_str(&sym.signature);
+            }
+            if let Some(ref doc) = sym.doc_comment {
+                text.push(' ');
+                text.push_str(doc);
+            }
+            docs.push((format!("sym:{}", sym.qualified_name), text));
+        }
+
+        for chunk in &self.chunks {
+            let id = format!("chunk:{}:{}", chunk.file_path, chunk.index);
+            docs.push((id, chunk.text.clone()));
+        }
+
+        docs
     }
 }
 

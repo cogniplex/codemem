@@ -363,7 +363,8 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Store prompt as a Context memory
+    // Store prompt as a Context memory via the full persist pipeline
+    // (BM25 + graph node + embedding + auto-linking)
     let content = format!("User prompt: {}", super::truncate_str(prompt, 2000));
     let content_hash = codemem_engine::hooks::content_hash(&content);
 
@@ -397,7 +398,16 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
         access_count: 0,
     };
 
-    let _ = storage.insert_memory(&memory);
+    // Use the engine's persist_memory pipeline for consistent indexing
+    match codemem_engine::CodememEngine::from_db_path(&db_path) {
+        Ok(engine) => {
+            let _ = engine.persist_memory(&memory);
+        }
+        Err(_) => {
+            // Fallback to raw storage insert if engine init fails
+            let _ = storage.insert_memory(&memory);
+        }
+    }
 
     let output = serde_json::json!({"continue": true});
     println!("{}", serde_json::to_string(&output)?);
@@ -610,6 +620,14 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
     // - non-trivial investigation (5+ files read)
     // Skip summaries that are just echoed prompts — those aren't insights.
     let has_substance = !files_edited.is_empty() || !decisions.is_empty() || files_read.len() >= 5;
+
+    // Build the engine once for both memory persists (if needed)
+    let engine = if (has_substance && !session_memories.is_empty()) || !files_edited.is_empty() {
+        codemem_engine::CodememEngine::from_db_path(&db_path).ok()
+    } else {
+        None
+    };
+
     if has_substance && !session_memories.is_empty() {
         let content_hash = codemem_engine::hooks::content_hash(&summary_text);
         let now = chrono::Utc::now();
@@ -647,7 +665,15 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
             last_accessed_at: now,
             access_count: 0,
         };
-        let _ = storage.insert_memory(&summary_memory);
+        // Use the engine's persist_memory pipeline for consistent indexing
+        match &engine {
+            Some(eng) => {
+                let _ = eng.persist_memory(&summary_memory);
+            }
+            None => {
+                let _ = storage.insert_memory(&summary_memory);
+            }
+        }
     }
 
     // Store a change-tracking memory for the code-mapper to pick up
@@ -683,7 +709,15 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
             last_accessed_at: now,
             access_count: 0,
         };
-        let _ = storage.insert_memory(&change_memory);
+        // Use the engine's persist_memory pipeline for consistent indexing
+        match &engine {
+            Some(eng) => {
+                let _ = eng.persist_memory(&change_memory);
+            }
+            None => {
+                let _ = storage.insert_memory(&change_memory);
+            }
+        }
     }
 
     // End the session with summary

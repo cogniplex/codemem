@@ -43,6 +43,7 @@ fn large_file_produces_multiple_chunks() {
     let config = ChunkConfig {
         max_chunk_size: 200,
         min_chunk_size: 20,
+        ..Default::default()
     };
     let chunks = parse_and_chunk(&source, "rs", &config);
     assert!(
@@ -84,6 +85,7 @@ impl Config {
     let config = ChunkConfig {
         max_chunk_size: 50,
         min_chunk_size: 10,
+        ..Default::default()
     };
     let chunks = parse_and_chunk(source, "rs", &config);
 
@@ -117,6 +119,7 @@ pub fn outer() {
     let config = ChunkConfig {
         max_chunk_size: 30,
         min_chunk_size: 5,
+        ..Default::default()
     };
     let chunks = parse_and_chunk(source, "rs", &config);
     assert!(
@@ -131,6 +134,7 @@ fn custom_chunk_config() {
     let config = ChunkConfig {
         max_chunk_size: 5000,
         min_chunk_size: 1,
+        ..Default::default()
     };
     let chunks = parse_and_chunk(source, "rs", &config);
 
@@ -224,6 +228,7 @@ pub fn d() { }
     let config = ChunkConfig {
         max_chunk_size: 20,
         min_chunk_size: 5,
+        ..Default::default()
     };
     let chunks = parse_and_chunk(source, "rs", &config);
 

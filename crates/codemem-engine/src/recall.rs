@@ -262,13 +262,24 @@ impl CodememEngine {
         }
 
         // Step 2-4: Graph expansion from each direct result
+        // A7: BFS traverses through ALL node kinds (including code nodes like
+        // File, Function, etc.) as intermediaries, but only COLLECTS Memory nodes.
+        // A6: Apply temporal edge filtering — skip edges whose valid_to < now.
+        let now = chrono::Utc::now();
         let direct_ids: Vec<String> = all_memories.iter().map(|m| m.memory.id.clone()).collect();
 
         for direct_id in &direct_ids {
-            // Cache edges for this direct node outside the inner loop
-            let direct_edges = graph.get_edges(direct_id).unwrap_or_default();
+            // Cache edges for this direct node outside the inner loop,
+            // filtering out expired temporal edges (A6)
+            let direct_edges: Vec<_> = graph
+                .get_edges(direct_id)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|e| is_edge_active(e, now))
+                .collect();
 
-            // Use BFS expansion from this memory's graph node
+            // A7: Only exclude Chunk from BFS traversal (noisy), but allow
+            // File, Function, Class, etc. as intermediaries to reach more Memory nodes
             if let Ok(expanded_nodes) =
                 graph.bfs_filtered(direct_id, expansion_depth, &[NodeKind::Chunk], None)
             {
@@ -278,7 +289,8 @@ impl CodememEngine {
                         continue;
                     }
 
-                    // Only consider memory nodes
+                    // A7: Only COLLECT Memory nodes in results, but we
+                    // traversed through all other node kinds to reach them
                     if expanded_node.kind != NodeKind::Memory {
                         continue;
                     }
@@ -475,4 +487,22 @@ impl CodememEngine {
 
         Ok(deleted)
     }
+}
+
+/// Check if an edge is currently active based on its temporal bounds.
+/// An edge is active if:
+/// - `valid_from` is None or <= `now`
+/// - `valid_to` is None or > `now`
+fn is_edge_active(edge: &codemem_core::Edge, now: chrono::DateTime<chrono::Utc>) -> bool {
+    if let Some(valid_to) = edge.valid_to {
+        if valid_to < now {
+            return false;
+        }
+    }
+    if let Some(valid_from) = edge.valid_from {
+        if valid_from > now {
+            return false;
+        }
+    }
+    true
 }

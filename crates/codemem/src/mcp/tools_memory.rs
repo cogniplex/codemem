@@ -1,4 +1,4 @@
-//! Memory CRUD tools: store, recall, update, delete, associate, refine, split, merge.
+//! Memory CRUD tools: store, recall (unified), delete, associate, refine (with destructive mode), split, merge.
 
 use super::args::{parse_memory_type, parse_opt_string, parse_string_array};
 use super::scoring::format_recall_results;
@@ -101,7 +101,8 @@ impl McpServer {
         )
     }
 
-    pub(crate) fn tool_recall_memory(&self, args: &Value) -> ToolResult {
+    /// Unified recall tool: basic recall, with optional graph expansion and impact data.
+    pub(crate) fn tool_recall(&self, args: &Value) -> ToolResult {
         let query = match args.get("query").and_then(|v| v.as_str()) {
             Some(q) if !q.is_empty() => q,
             _ => return ToolResult::tool_error("Missing or empty 'query' parameter"),
@@ -116,35 +117,100 @@ impl McpServer {
         let exclude_tags = parse_string_array(args, "exclude_tags");
         let min_importance: Option<f64> = args.get("min_importance").and_then(|v| v.as_f64());
         let min_confidence: Option<f64> = args.get("min_confidence").and_then(|v| v.as_f64());
+        let expand = args
+            .get("expand")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let expansion_depth = args
+            .get("expansion_depth")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize;
+        let include_impact = args
+            .get("include_impact")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-        match self.engine.recall(
-            query,
-            k,
-            memory_type_filter,
-            namespace_filter,
-            &exclude_tags,
-            min_importance,
-            min_confidence,
-        ) {
-            Ok(results) => format_recall_results(&results, None),
-            Err(e) => ToolResult::tool_error(format!("Recall error: {e}")),
-        }
-    }
-
-    pub(crate) fn tool_update_memory(&self, args: &Value) -> ToolResult {
-        let id = match args.get("id").and_then(|v| v.as_str()) {
-            Some(id) => id,
-            None => return ToolResult::tool_error("Missing 'id' parameter"),
-        };
-        let content = match args.get("content").and_then(|v| v.as_str()) {
-            Some(c) => c,
-            None => return ToolResult::tool_error("Missing 'content' parameter"),
-        };
-        let importance = args.get("importance").and_then(|v| v.as_f64());
-
-        match self.engine.update_memory(id, content, importance) {
-            Ok(()) => ToolResult::text(json!({"id": id, "updated": true}).to_string()),
-            Err(e) => ToolResult::tool_error(format!("Update failed: {e}")),
+        // If include_impact is requested, use recall_with_impact path
+        if include_impact {
+            match self.engine.recall_with_impact(query, k, namespace_filter) {
+                Ok(results) if results.is_empty() => {
+                    ToolResult::text("No matching memories found.")
+                }
+                Ok(results) => {
+                    let output: Vec<Value> = results
+                        .iter()
+                        .map(|r| {
+                            json!({
+                                "id": r.search_result.memory.id,
+                                "content": r.search_result.memory.content,
+                                "memory_type": r.search_result.memory.memory_type.to_string(),
+                                "score": format!("{:.4}", r.search_result.score),
+                                "importance": r.search_result.memory.importance,
+                                "tags": r.search_result.memory.tags,
+                                "access_count": r.search_result.memory.access_count,
+                                "impact": {
+                                    "pagerank": format!("{:.6}", r.pagerank),
+                                    "centrality": format!("{:.6}", r.centrality),
+                                    "connected_decisions": r.connected_decisions,
+                                    "dependent_files": r.dependent_files,
+                                    "modification_count": r.search_result.memory.access_count,
+                                }
+                            })
+                        })
+                        .collect();
+                    ToolResult::text(
+                        serde_json::to_string_pretty(&output)
+                            .expect("JSON serialization of literal"),
+                    )
+                }
+                Err(e) => ToolResult::tool_error(format!("Recall error: {e}")),
+            }
+        } else if expand {
+            // Graph expansion path
+            match self
+                .engine
+                .recall_with_expansion(query, k, expansion_depth, namespace_filter)
+            {
+                Ok(results) if results.is_empty() => {
+                    ToolResult::text("No matching memories found.")
+                }
+                Ok(results) => {
+                    let output: Vec<Value> = results
+                        .iter()
+                        .map(|er| {
+                            json!({
+                                "id": er.result.memory.id,
+                                "content": er.result.memory.content,
+                                "memory_type": er.result.memory.memory_type.to_string(),
+                                "score": format!("{:.4}", er.result.score),
+                                "importance": er.result.memory.importance,
+                                "tags": er.result.memory.tags,
+                                "access_count": er.result.memory.access_count,
+                                "expansion_path": er.expansion_path,
+                            })
+                        })
+                        .collect();
+                    ToolResult::text(
+                        serde_json::to_string_pretty(&output)
+                            .expect("JSON serialization of literal"),
+                    )
+                }
+                Err(e) => ToolResult::tool_error(format!("Recall error: {e}")),
+            }
+        } else {
+            // Standard recall
+            match self.engine.recall(
+                query,
+                k,
+                memory_type_filter,
+                namespace_filter,
+                &exclude_tags,
+                min_importance,
+                min_confidence,
+            ) {
+                Ok(results) => format_recall_results(&results, None),
+                Err(e) => ToolResult::tool_error(format!("Recall error: {e}")),
+            }
         }
     }
 
@@ -161,8 +227,10 @@ impl McpServer {
         }
     }
 
+    /// Refine a memory. By default creates a new version linked via EVOLVED_INTO.
+    /// With `destructive: true`, updates in-place (like the old update_memory tool).
     pub(crate) fn tool_refine_memory(&self, args: &Value) -> ToolResult {
-        let old_id = match args.get("id").and_then(|v| v.as_str()) {
+        let id = match args.get("id").and_then(|v| v.as_str()) {
             Some(id) => id,
             None => return ToolResult::tool_error("Missing 'id' parameter"),
         };
@@ -174,17 +242,34 @@ impl McpServer {
                 .collect()
         });
         let importance = args.get("importance").and_then(|v| v.as_f64());
+        let destructive = args
+            .get("destructive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
-        match self.engine.refine_memory(old_id, content, tags, importance) {
-            Ok((_memory, new_id)) => ToolResult::text(
-                serde_json::to_string_pretty(&json!({
-                    "old_id": old_id,
-                    "new_id": new_id,
-                    "relationship": "EVOLVED_INTO",
-                }))
-                .expect("JSON serialization of literal"),
-            ),
-            Err(e) => ToolResult::tool_error(format!("{e}")),
+        if destructive {
+            // In-place update (former update_memory behavior)
+            let update_content = match content {
+                Some(c) => c,
+                None => return ToolResult::tool_error("Missing 'content' for destructive refine"),
+            };
+            match self.engine.update_memory(id, update_content, importance) {
+                Ok(()) => ToolResult::text(json!({"id": id, "updated": true}).to_string()),
+                Err(e) => ToolResult::tool_error(format!("Update failed: {e}")),
+            }
+        } else {
+            // Default: create new version with EVOLVED_INTO provenance
+            match self.engine.refine_memory(id, content, tags, importance) {
+                Ok((_memory, new_id)) => ToolResult::text(
+                    serde_json::to_string_pretty(&json!({
+                        "old_id": id,
+                        "new_id": new_id,
+                        "relationship": "EVOLVED_INTO",
+                    }))
+                    .expect("JSON serialization of literal"),
+                ),
+                Err(e) => ToolResult::tool_error(format!("{e}")),
+            }
         }
     }
 

@@ -1,17 +1,15 @@
 //! codemem-mcp: MCP server for Codemem (JSON-RPC 2.0 over stdio).
 //!
-//! Implements 43 tools: store_memory, recall_memory, update_memory,
-//! delete_memory, associate_memories, graph_traverse, summary_tree,
-//! codemem_stats, codemem_health,
-//! index_codebase, search_symbols, get_symbol_info, get_dependencies, get_impact,
-//! get_clusters, get_cross_repo, get_pagerank, search_code, set_scoring_weights,
-//! export_memories, import_memories, recall_with_expansion, list_namespaces,
-//! namespace_stats, delete_namespace, consolidate_decay, consolidate_creative,
-//! consolidate_cluster, consolidate_forget, consolidation_status,
-//! recall_with_impact, get_decision_chain, detect_patterns, pattern_insights,
-//! refine_memory, split_memory, merge_memories, consolidate_summarize,
-//! codemem_metrics, session_checkpoint,
-//! enrich_git_history, enrich_security, enrich_performance.
+//! Implements 28 tools:
+//! store_memory, recall, delete_memory, associate_memories, refine_memory,
+//! split_memory, merge_memories, graph_traverse, summary_tree,
+//! codemem_status, index_codebase, search_code, get_symbol_info,
+//! get_symbol_graph, find_important_nodes, find_related_groups,
+//! get_cross_repo, consolidate, detect_patterns, get_decision_chain,
+//! list_namespaces, namespace_stats, delete_namespace,
+//! session_checkpoint, session_context,
+//! enrich_codebase, analyze_codebase,
+//! enrich_git_history.
 //!
 //! Transport: Newline-delimited JSON-RPC messages over stdio.
 //! All logging goes to stderr; stdout is reserved for JSON-RPC only.
@@ -116,12 +114,6 @@ impl McpServer {
         &self,
     ) -> Result<std::sync::MutexGuard<'_, Option<IndexCache>>, CodememError> {
         self.engine.lock_index_cache()
-    }
-
-    pub(crate) fn scoring_weights_mut(
-        &self,
-    ) -> Result<std::sync::RwLockWriteGuard<'_, codemem_core::ScoringWeights>, CodememError> {
-        self.engine.scoring_weights_mut()
     }
 
     /// Core recall logic: delegates to `CodememEngine::recall()`.
@@ -281,49 +273,117 @@ impl McpServer {
 
     fn dispatch_tool_inner(&self, name: &str, args: &Value) -> ToolResult {
         match name {
+            // ── Memory CRUD ─────────────────────────────────────────────
             "store_memory" => self.tool_store_memory(args),
-            "recall_memory" => self.tool_recall_memory(args),
-            "update_memory" => self.tool_update_memory(args),
+            "recall" => self.tool_recall(args),
             "delete_memory" => self.tool_delete_memory(args),
             "associate_memories" => self.tool_associate_memories(args),
-            "graph_traverse" => self.tool_graph_traverse(args),
-            "summary_tree" => self.tool_summary_tree(args),
-            "codemem_stats" => self.tool_stats(),
-            "codemem_health" => self.tool_health(),
-            "index_codebase" => self.tool_index_codebase(args),
-            "search_symbols" => self.tool_search_symbols(args),
-            "get_symbol_info" => self.tool_get_symbol_info(args),
-            "get_dependencies" => self.tool_get_dependencies(args),
-            "get_impact" => self.tool_get_impact(args),
-            "get_clusters" => self.tool_get_clusters(args),
-            "get_cross_repo" => self.tool_get_cross_repo(args),
-            "get_pagerank" => self.tool_get_pagerank(args),
-            "search_code" => self.tool_search_code(args),
-            "set_scoring_weights" => self.tool_set_scoring_weights(args),
-            "consolidate_decay" => self.tool_consolidate_decay(args),
-            "consolidate_creative" => self.tool_consolidate_creative(args),
-            "consolidate_cluster" => self.tool_consolidate_cluster(args),
-            "consolidate_forget" => self.tool_consolidate_forget(args),
-            "consolidation_status" => self.tool_consolidation_status(),
-            "recall_with_expansion" => self.tool_recall_with_expansion(args),
-            "recall_with_impact" => self.tool_recall_with_impact(args),
-            "get_decision_chain" => self.tool_get_decision_chain(args),
-            "list_namespaces" => self.tool_list_namespaces(),
-            "namespace_stats" => self.tool_namespace_stats(args),
-            "delete_namespace" => self.tool_delete_namespace(args),
-            "export_memories" => self.tool_export_memories(args),
-            "import_memories" => self.tool_import_memories(args),
-            "detect_patterns" => self.tool_detect_patterns(args),
-            "pattern_insights" => self.tool_pattern_insights(args),
             "refine_memory" => self.tool_refine_memory(args),
             "split_memory" => self.tool_split_memory(args),
             "merge_memories" => self.tool_merge_memories(args),
-            "consolidate_summarize" => self.tool_consolidate_summarize(args),
-            "codemem_metrics" => self.tool_metrics(),
+
+            // ── Graph & Structure ───────────────────────────────────────
+            "graph_traverse" => self.tool_graph_traverse(args),
+            "summary_tree" => self.tool_summary_tree(args),
+            "codemem_status" => self.tool_codemem_status(args),
+            "index_codebase" => self.tool_index_codebase(args),
+            "search_code" => self.tool_search_code(args),
+            "get_symbol_info" => self.tool_get_symbol_info(args),
+            "get_symbol_graph" => self.tool_get_symbol_graph(args),
+            "find_important_nodes" => self.tool_find_important_nodes(args),
+            "find_related_groups" => self.tool_find_related_groups(args),
+            "get_cross_repo" => self.tool_get_cross_repo(args),
+
+            // ── Consolidation & Patterns ────────────────────────────────
+            "consolidate" => self.tool_consolidate(args),
+            "detect_patterns" => self.tool_detect_patterns(args),
+            "get_decision_chain" => self.tool_get_decision_chain(args),
+
+            // ── Namespace Management ────────────────────────────────────
+            "list_namespaces" => self.tool_list_namespaces(),
+            "namespace_stats" => self.tool_namespace_stats(args),
+            "delete_namespace" => self.tool_delete_namespace(args),
+
+            // ── Session & Context ───────────────────────────────────────
+            "session_checkpoint" => self.tool_session_checkpoint(args),
+            "session_context" => self.tool_session_context(args),
+
+            // ── Enrichment ──────────────────────────────────────────────
+            "enrich_codebase" => self.tool_enrich_codebase(args),
+            "analyze_codebase" => self.tool_analyze_codebase(args),
             "enrich_git_history" => self.tool_enrich_git_history(args),
+
+            // ── Legacy aliases (backwards compatibility) ─────────────────
+            "recall_memory" => self.tool_recall(args),
+            "recall_with_expansion" => {
+                // Translate to unified recall with expand=true
+                let mut patched = args.clone();
+                patched["expand"] = json!(true);
+                self.tool_recall(&patched)
+            }
+            "recall_with_impact" => {
+                // Translate to unified recall with include_impact=true
+                let mut patched = args.clone();
+                patched["include_impact"] = json!(true);
+                self.tool_recall(&patched)
+            }
+            "update_memory" => {
+                // Translate to refine_memory with destructive=true
+                let mut patched = args.clone();
+                patched["destructive"] = json!(true);
+                self.tool_refine_memory(&patched)
+            }
+            "codemem_stats" => self.tool_codemem_status(&json!({"include": ["stats"]})),
+            "codemem_health" => self.tool_codemem_status(&json!({"include": ["health"]})),
+            "codemem_metrics" => self.tool_codemem_status(&json!({"include": ["metrics"]})),
+            "consolidate_decay" => {
+                let mut patched = args.clone();
+                patched["mode"] = json!("decay");
+                self.tool_consolidate(&patched)
+            }
+            "consolidate_creative" => {
+                let mut patched = args.clone();
+                patched["mode"] = json!("creative");
+                self.tool_consolidate(&patched)
+            }
+            "consolidate_cluster" => {
+                let mut patched = args.clone();
+                patched["mode"] = json!("cluster");
+                self.tool_consolidate(&patched)
+            }
+            "consolidate_forget" => {
+                let mut patched = args.clone();
+                patched["mode"] = json!("forget");
+                self.tool_consolidate(&patched)
+            }
+            "consolidate_summarize" => {
+                let mut patched = args.clone();
+                patched["mode"] = json!("summarize");
+                self.tool_consolidate(&patched)
+            }
+            "consolidation_status" => self.tool_consolidate(&json!({"mode": "auto"})),
+            "pattern_insights" => {
+                let mut patched = args.clone();
+                patched["format"] = json!("markdown");
+                self.tool_detect_patterns(&patched)
+            }
+            "search_symbols" => {
+                let mut patched = args.clone();
+                patched["mode"] = json!("text");
+                self.tool_search_code(&patched)
+            }
+            "get_dependencies" => self.tool_get_symbol_graph(args),
+            "get_impact" => self.tool_get_symbol_graph(args),
+            "get_clusters" => self.tool_find_related_groups(args),
+            "get_pagerank" => self.tool_find_important_nodes(args),
+            "set_scoring_weights" | "export_memories" | "import_memories" => {
+                ToolResult::tool_error(format!(
+                    "Tool '{name}' has been removed from MCP. Use CLI or config instead."
+                ))
+            }
             "enrich_security" => self.tool_enrich_security(args),
             "enrich_performance" => self.tool_enrich_performance(args),
-            "session_checkpoint" => self.tool_session_checkpoint(args),
+
             _ => ToolResult::tool_error(format!("Unknown tool: {name}")),
         }
     }
@@ -386,9 +446,10 @@ impl<'a> StdioTransport<'a> {
 
 fn tool_definitions() -> Vec<Value> {
     vec![
+        // ── Memory CRUD (7 tools) ──────────────────────────────────────────
         json!({
             "name": "store_memory",
-            "description": "Store a new memory with auto-embedding, type classification, and graph linking",
+            "description": "Store a new memory with auto-embedding, type classification, and graph linking. Automatically links to code nodes mentioned in content.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -404,15 +465,16 @@ fn tool_definitions() -> Vec<Value> {
                     "links": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "List of graph node IDs to link this memory to (e.g., structural symbol IDs)"
-                    }
+                        "description": "List of graph node IDs to link this memory to"
+                    },
+                    "auto_link": { "type": "boolean", "default": true, "description": "Auto-link to code nodes mentioned in content (default: true)" }
                 },
                 "required": ["content"]
             }
         }),
         json!({
-            "name": "recall_memory",
-            "description": "Semantic search using 9-component hybrid scoring with graph expansion and bridge discovery",
+            "name": "recall",
+            "description": "Unified memory search: 9-component hybrid scoring with optional graph expansion and impact analysis. Use expand=true for graph-expanded recall, include_impact=true for PageRank-enriched results.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -420,24 +482,14 @@ fn tool_definitions() -> Vec<Value> {
                     "k": { "type": "integer", "default": 10, "description": "Number of results" },
                     "memory_type": { "type": "string", "description": "Filter by memory type" },
                     "namespace": { "type": "string", "description": "Filter results to a specific namespace" },
-                    "exclude_tags": { "type": "array", "items": { "type": "string" }, "description": "Exclude memories with any of these tags (e.g. [\"static-analysis\"])" },
-                    "min_importance": { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Only return memories with importance >= this value" },
-                    "min_confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Only return memories with confidence >= this value" }
+                    "exclude_tags": { "type": "array", "items": { "type": "string" }, "description": "Exclude memories with any of these tags" },
+                    "min_importance": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                    "min_confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                    "expand": { "type": "boolean", "default": false, "description": "Enable graph expansion to discover related memories" },
+                    "expansion_depth": { "type": "integer", "default": 1, "description": "Max graph hops for expansion (when expand=true)" },
+                    "include_impact": { "type": "boolean", "default": false, "description": "Include PageRank, centrality, connected decisions, dependent files" }
                 },
                 "required": ["query"]
-            }
-        }),
-        json!({
-            "name": "update_memory",
-            "description": "Update an existing memory's content and re-embed",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string" },
-                    "content": { "type": "string" },
-                    "importance": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
-                },
-                "required": ["id", "content"]
             }
         }),
         json!({
@@ -453,7 +505,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "associate_memories",
-            "description": "Create a typed relationship between two memories in the knowledge graph",
+            "description": "Create a typed relationship between two nodes in the knowledge graph",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -473,401 +525,23 @@ fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "graph_traverse",
-            "description": "Multi-hop graph traversal from a start node with optional filtering by node kind and relationship type",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "start_id": { "type": "string" },
-                    "max_depth": { "type": "integer", "default": 2 },
-                    "algorithm": { "type": "string", "enum": ["bfs", "dfs"], "default": "bfs" },
-                    "exclude_kinds": {
-                        "type": "array",
-                        "items": { "type": "string", "enum": ["file","package","function","class","module","memory","method","interface","type","constant","endpoint","test","chunk"] },
-                        "description": "Node kinds to exclude from results and traversal (e.g. [\"chunk\"] to skip chunks)"
-                    },
-                    "include_relationships": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Only follow edges of these relationship types (e.g. [\"CALLS\",\"IMPORTS\"]). If omitted, all relationships are followed."
-                    }
-                },
-                "required": ["start_id"]
-            }
-        }),
-        json!({
-            "name": "summary_tree",
-            "description": "Return a hierarchical summary tree (packages → files → symbols). Start from a pkg: node to see the directory structure.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "start_id": { "type": "string", "description": "Node ID to start from (e.g. 'pkg:src/')" },
-                    "max_depth": { "type": "integer", "default": 3, "description": "Maximum tree depth" },
-                    "include_chunks": { "type": "boolean", "default": false, "description": "Include chunk nodes in the tree" }
-                },
-                "required": ["start_id"]
-            }
-        }),
-        json!({
-            "name": "codemem_stats",
-            "description": "Get database and index statistics",
-            "inputSchema": { "type": "object", "properties": {} }
-        }),
-        json!({
-            "name": "codemem_health",
-            "description": "Health check across all Codemem subsystems (storage, vector, graph, embeddings)",
-            "inputSchema": { "type": "object", "properties": {} }
-        }),
-        // ── Structural Index Tools ──────────────────────────────────────────
-        json!({
-            "name": "index_codebase",
-            "description": "Index a codebase directory to extract symbols and references using tree-sitter, populating the structural knowledge graph",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Absolute path to the codebase directory to index" }
-                },
-                "required": ["path"]
-            }
-        }),
-        json!({
-            "name": "search_symbols",
-            "description": "Search indexed code symbols by name substring, optionally filtering by kind (function, method, struct, etc.)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "Substring to search for in symbol names" },
-                    "kind": {
-                        "type": "string",
-                        "enum": ["function", "method", "class", "struct", "enum", "interface", "type", "constant", "module", "test"],
-                        "description": "Filter by symbol kind"
-                    },
-                    "limit": { "type": "integer", "default": 20, "description": "Maximum number of results" }
-                },
-                "required": ["query"]
-            }
-        }),
-        json!({
-            "name": "get_symbol_info",
-            "description": "Get full details of a symbol by qualified name, including signature, file path, doc comment, and parent",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "qualified_name": { "type": "string", "description": "Fully qualified name of the symbol (e.g. 'module::Struct::method')" }
-                },
-                "required": ["qualified_name"]
-            }
-        }),
-        json!({
-            "name": "get_dependencies",
-            "description": "Get graph edges (calls, imports, extends, etc.) connected to a symbol",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "qualified_name": { "type": "string", "description": "Fully qualified name of the symbol" },
-                    "direction": {
-                        "type": "string",
-                        "enum": ["incoming", "outgoing", "both"],
-                        "default": "both",
-                        "description": "Direction of dependencies to return"
-                    }
-                },
-                "required": ["qualified_name"]
-            }
-        }),
-        json!({
-            "name": "get_impact",
-            "description": "Impact analysis: find all graph nodes reachable from a symbol within N hops (what breaks if this changes?)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "qualified_name": { "type": "string", "description": "Fully qualified name of the symbol to analyze" },
-                    "depth": { "type": "integer", "default": 2, "description": "Maximum BFS depth for reachability" }
-                },
-                "required": ["qualified_name"]
-            }
-        }),
-        json!({
-            "name": "get_clusters",
-            "description": "Run Louvain community detection on the knowledge graph to find clusters of related symbols",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "resolution": { "type": "number", "default": 1.0, "description": "Louvain resolution parameter (higher = more clusters)" }
-                }
-            }
-        }),
-        json!({
-            "name": "get_cross_repo",
-            "description": "Scan for workspace manifests (Cargo.toml, package.json) and report workspace structure and cross-package dependencies",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Path to scan (defaults to the last indexed codebase root)" }
-                }
-            }
-        }),
-        json!({
-            "name": "get_pagerank",
-            "description": "Run PageRank on the full knowledge graph to find the most important/central nodes",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "top_k": { "type": "integer", "default": 20, "description": "Number of top-ranked nodes to return" },
-                    "damping": { "type": "number", "default": 0.85, "description": "PageRank damping factor" }
-                }
-            }
-        }),
-        json!({
-            "name": "search_code",
-            "description": "Semantic search over indexed code symbols using signature embeddings. Finds functions, types, and methods by meaning rather than exact name match.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "Natural language description of the code you're looking for (e.g. 'parse JSON config', 'HTTP request handler')" },
-                    "k": { "type": "integer", "default": 10, "description": "Number of results to return" }
-                },
-                "required": ["query"]
-            }
-        }),
-        json!({
-            "name": "set_scoring_weights",
-            "description": "Update the 9-component hybrid scoring weights at runtime. Weights are normalized to sum to 1.0. Omitted weights use their default values.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "vector_similarity": { "type": "number", "minimum": 0.0, "description": "Weight for vector cosine similarity (default: 0.25)" },
-                    "graph_strength": { "type": "number", "minimum": 0.0, "description": "Weight for graph relationship strength (default: 0.25)" },
-                    "token_overlap": { "type": "number", "minimum": 0.0, "description": "Weight for content token overlap (default: 0.15)" },
-                    "temporal": { "type": "number", "minimum": 0.0, "description": "Weight for temporal alignment (default: 0.10)" },
-                    "tag_matching": { "type": "number", "minimum": 0.0, "description": "Weight for tag matching (default: 0.10)" },
-                    "importance": { "type": "number", "minimum": 0.0, "description": "Weight for importance score (default: 0.05)" },
-                    "confidence": { "type": "number", "minimum": 0.0, "description": "Weight for memory confidence (default: 0.05)" },
-                    "recency": { "type": "number", "minimum": 0.0, "description": "Weight for recency boost (default: 0.05)" }
-                }
-            }
-        }),
-        // ── Export/Import Tools ──────────────────────────────────────────────
-        json!({
-            "name": "export_memories",
-            "description": "Export memories as a JSON array with optional namespace and memory_type filters. Returns memory objects with their graph edges.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "namespace": { "type": "string", "description": "Filter by namespace" },
-                    "memory_type": {
-                        "type": "string",
-                        "enum": ["decision", "pattern", "preference", "style", "habit", "insight", "context"],
-                        "description": "Filter by memory type"
-                    },
-                    "limit": { "type": "integer", "default": 100, "description": "Maximum number of memories to export" }
-                }
-            }
-        }),
-        json!({
-            "name": "import_memories",
-            "description": "Import memories from a JSON array. Each object must have at least a 'content' field. Auto-deduplicates by content hash.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "memories": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "content": { "type": "string", "description": "The memory content (required)" },
-                                "memory_type": {
-                                    "type": "string",
-                                    "enum": ["decision", "pattern", "preference", "style", "habit", "insight", "context"],
-                                    "description": "Type of memory (default: context)"
-                                },
-                                "importance": { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Importance score (default: 0.5)" },
-                                "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Confidence score (default: 1.0)" },
-                                "tags": { "type": "array", "items": { "type": "string" } },
-                                "namespace": { "type": "string", "description": "Namespace to scope the memory" },
-                                "metadata": { "type": "object", "description": "Arbitrary metadata key-value pairs" }
-                            },
-                            "required": ["content"]
-                        },
-                        "description": "Array of memory objects to import"
-                    }
-                },
-                "required": ["memories"]
-            }
-        }),
-        // ── Graph-Expanded Recall & Namespace Management ────────────────────
-        json!({
-            "name": "recall_with_expansion",
-            "description": "Semantic search with graph expansion: finds memories via vector similarity then expands through the knowledge graph to discover related memories up to N hops away",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "Natural language search query" },
-                    "k": { "type": "integer", "default": 5, "description": "Number of results to return" },
-                    "expansion_depth": { "type": "integer", "default": 1, "description": "Maximum graph hops for expansion (0 = no expansion)" },
-                    "namespace": { "type": "string", "description": "Filter results to a specific namespace" }
-                },
-                "required": ["query"]
-            }
-        }),
-        json!({
-            "name": "list_namespaces",
-            "description": "List all namespaces with their memory counts",
-            "inputSchema": { "type": "object", "properties": {} }
-        }),
-        json!({
-            "name": "namespace_stats",
-            "description": "Get detailed statistics for a specific namespace: count, avg importance/confidence, type distribution, tag frequency, date range",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "namespace": { "type": "string", "description": "Namespace to get stats for" }
-                },
-                "required": ["namespace"]
-            }
-        }),
-        json!({
-            "name": "delete_namespace",
-            "description": "Delete all memories in a namespace (destructive, requires confirmation)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "namespace": { "type": "string", "description": "Namespace to delete" },
-                    "confirm": { "type": "boolean", "description": "Must be true to confirm deletion" }
-                },
-                "required": ["namespace", "confirm"]
-            }
-        }),
-        // ── Impact-Aware Recall & Decision Chain Tools ──────────────────────
-        json!({
-            "name": "recall_with_impact",
-            "description": "Semantic search with PageRank-enriched impact data. Returns memories with pagerank, centrality, connected decisions, dependent files, and modification counts.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "Natural language search query" },
-                    "k": { "type": "integer", "default": 10, "description": "Number of results" },
-                    "namespace": { "type": "string", "description": "Filter results to a specific namespace" }
-                },
-                "required": ["query"]
-            }
-        }),
-        json!({
-            "name": "get_decision_chain",
-            "description": "Follow the evolution of decisions through the knowledge graph. Traces EVOLVED_INTO, LEADS_TO, and DERIVED_FROM edges to build a chronologically ordered decision chain.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "file_path": { "type": "string", "description": "File path to find decisions about (e.g. 'src/auth.rs')" },
-                    "topic": { "type": "string", "description": "Topic to find decisions about (e.g. 'authentication')" }
-                }
-            }
-        }),
-        // ── Consolidation Tools ─────────────────────────────────────────────
-        json!({
-            "name": "consolidate_decay",
-            "description": "Run decay consolidation: reduce importance by 10% for memories not accessed within threshold_days",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "threshold_days": { "type": "integer", "default": 30, "description": "Memories not accessed in this many days will decay (default: 30)" }
-                }
-            }
-        }),
-        json!({
-            "name": "consolidate_creative",
-            "description": "Run creative consolidation: find pairs of memories with overlapping tags but different types, create RELATES_TO edges between them",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            }
-        }),
-        json!({
-            "name": "consolidate_cluster",
-            "description": "Run cluster consolidation: group memories by content_hash prefix, keep highest-importance per group, delete duplicates",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "similarity_threshold": { "type": "number", "minimum": 0.5, "maximum": 1.0, "default": 0.92, "description": "Cosine similarity threshold for semantic deduplication (default: 0.92)" }
-                }
-            }
-        }),
-        json!({
-            "name": "consolidate_forget",
-            "description": "Run forget consolidation: delete memories with importance below threshold. Optionally target specific tags for cleanup.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "importance_threshold": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.1, "description": "Delete memories with importance below this value (default: 0.1)" },
-                    "target_tags": { "type": "array", "items": { "type": "string" }, "description": "Only forget memories with any of these tags (e.g. [\"static-analysis\"])" },
-                    "max_access_count": { "type": "integer", "default": 0, "description": "Only forget memories accessed at most this many times (default: 0)" }
-                }
-            }
-        }),
-        json!({
-            "name": "consolidation_status",
-            "description": "Show the last run timestamp and affected count for each consolidation cycle type",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            }
-        }),
-        json!({
-            "name": "detect_patterns",
-            "description": "Detect cross-session patterns in stored memories. Analyzes repeated searches, file hotspots, decision chains, and tool usage preferences across sessions.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "min_frequency": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "default": 3,
-                        "description": "Minimum number of occurrences before a pattern is flagged (default: 3)"
-                    },
-                    "namespace": {
-                        "type": "string",
-                        "description": "Optional namespace to scope the pattern detection"
-                    }
-                }
-            }
-        }),
-        json!({
-            "name": "pattern_insights",
-            "description": "Generate human-readable markdown insights from cross-session patterns. Summarizes file hotspots, repeated searches, decision chains, and tool preferences.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "min_frequency": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "default": 2,
-                        "description": "Minimum number of occurrences before a pattern is included (default: 2)"
-                    },
-                    "namespace": {
-                        "type": "string",
-                        "description": "Optional namespace to scope the pattern insights"
-                    }
-                }
-            }
-        }),
-        // ── Memory Refinement & Merge Tools ──────────────────────────────────
-        json!({
             "name": "refine_memory",
-            "description": "Refine an existing memory: creates a new version linked via EVOLVED_INTO edge, preserving the original for provenance tracking",
+            "description": "Refine an existing memory. Default: creates a new version linked via EVOLVED_INTO. With destructive=true: updates in-place.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "ID of the memory to refine" },
-                    "content": { "type": "string", "description": "Updated content (optional, inherits from original)" },
+                    "content": { "type": "string", "description": "Updated content (optional unless destructive=true)" },
                     "importance": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-                    "tags": { "type": "array", "items": { "type": "string" } }
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "destructive": { "type": "boolean", "default": false, "description": "When true, update in-place instead of creating a new version" }
                 },
                 "required": ["id"]
             }
         }),
         json!({
             "name": "split_memory",
-            "description": "Split a memory into multiple parts, each linked to the original via PART_OF edges for provenance tracking",
+            "description": "Split a memory into multiple parts, each linked to the original via PART_OF edges",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -882,8 +556,7 @@ fn tool_definitions() -> Vec<Value> {
                                 "importance": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
                             },
                             "required": ["content"]
-                        },
-                        "description": "Array of parts to create from the source memory"
+                        }
                     }
                 },
                 "required": ["id", "parts"]
@@ -891,92 +564,283 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "merge_memories",
-            "description": "Merge multiple memories into a single summary memory linked via SUMMARIZES edges for provenance tracking",
+            "description": "Merge multiple memories into a single summary memory linked via SUMMARIZES edges",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "source_ids": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "minItems": 2,
-                        "description": "IDs of memories to merge (minimum 2)"
-                    },
+                    "source_ids": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
                     "content": { "type": "string", "description": "Content for the merged summary memory" },
-                    "memory_type": {
-                        "type": "string",
-                        "enum": ["decision", "pattern", "preference", "style", "habit", "insight", "context"],
-                        "description": "Type for the merged memory (default: insight)"
-                    },
+                    "memory_type": { "type": "string", "enum": ["decision", "pattern", "preference", "style", "habit", "insight", "context"] },
                     "importance": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.7 },
                     "tags": { "type": "array", "items": { "type": "string" } }
                 },
                 "required": ["source_ids", "content"]
             }
         }),
+        // ── Graph & Structure (7 tools) ────────────────────────────────────
         json!({
-            "name": "consolidate_summarize",
-            "description": "LLM-powered consolidation: find connected components, summarize large clusters into Insight memories linked via SUMMARIZES edges. Requires CODEMEM_COMPRESS_PROVIDER env var.",
+            "name": "graph_traverse",
+            "description": "Multi-hop graph traversal from a start node with optional filtering by node kind and relationship type",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "cluster_size": { "type": "integer", "minimum": 2, "default": 5, "description": "Minimum cluster size to summarize (default: 5)" }
+                    "start_id": { "type": "string" },
+                    "max_depth": { "type": "integer", "default": 2 },
+                    "algorithm": { "type": "string", "enum": ["bfs", "dfs"], "default": "bfs" },
+                    "exclude_kinds": { "type": "array", "items": { "type": "string" } },
+                    "include_relationships": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["start_id"]
+            }
+        }),
+        json!({
+            "name": "summary_tree",
+            "description": "Hierarchical summary tree (packages -> files -> symbols)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "start_id": { "type": "string", "description": "Node ID to start from (e.g. 'pkg:src/')" },
+                    "max_depth": { "type": "integer", "default": 3 },
+                    "include_chunks": { "type": "boolean", "default": false }
+                },
+                "required": ["start_id"]
+            }
+        }),
+        json!({
+            "name": "codemem_status",
+            "description": "Unified status: database stats, health check, and operational metrics. Use include=[\"stats\",\"health\",\"metrics\"] to select sections.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "include": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": ["stats", "health", "metrics"] },
+                        "description": "Sections to include (default: all)"
+                    }
                 }
             }
         }),
         json!({
-            "name": "codemem_metrics",
-            "description": "Return operational metrics: per-tool latency percentiles (p50/p95/p99), call counters, and gauge values. No parameters required.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            }
-        }),
-        // ── Enrichment Tools ──────────────────────────────────────────────────
-        json!({
-            "name": "enrich_git_history",
-            "description": "Enrich the knowledge graph with git history: annotate file nodes with commit counts, authors, and churn rate; create CoChanged edges between files that change together; store activity Insights.",
+            "name": "index_codebase",
+            "description": "Index a codebase directory to extract symbols and references using tree-sitter",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Absolute path to the git repository root" },
-                    "days": { "type": "integer", "default": 90, "description": "Number of days of history to analyze (default: 90)" },
-                    "namespace": { "type": "string", "description": "Namespace for stored insights" }
+                    "path": { "type": "string", "description": "Absolute path to the codebase directory" }
                 },
                 "required": ["path"]
             }
         }),
         json!({
-            "name": "enrich_security",
-            "description": "Scan the knowledge graph for security-sensitive files, endpoints, and functions. Annotates nodes with security flags and stores security Insights.",
+            "name": "search_code",
+            "description": "Search code by meaning or name. mode=semantic (vector search, default), mode=text (symbol name substring), mode=hybrid (both merged).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "namespace": { "type": "string", "description": "Namespace filter for insights" }
+                    "query": { "type": "string", "description": "Search query (natural language for semantic, substring for text)" },
+                    "k": { "type": "integer", "default": 10, "description": "Number of results" },
+                    "mode": { "type": "string", "enum": ["semantic", "text", "hybrid"], "default": "semantic" },
+                    "kind": { "type": "string", "enum": ["function", "method", "class", "struct", "enum", "interface", "type", "constant", "module", "test"], "description": "Filter by symbol kind (text/hybrid modes)" }
+                },
+                "required": ["query"]
+            }
+        }),
+        json!({
+            "name": "get_symbol_info",
+            "description": "Get full details of a symbol by qualified name. Optionally include graph dependencies.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "qualified_name": { "type": "string", "description": "Fully qualified name (e.g. 'module::Struct::method')" },
+                    "include_dependencies": { "type": "boolean", "default": false, "description": "Include graph edges (calls, imports, etc.)" }
+                },
+                "required": ["qualified_name"]
+            }
+        }),
+        json!({
+            "name": "get_symbol_graph",
+            "description": "Get symbol dependency graph. depth=1: direct edges (calls, imports). depth>1: full impact analysis (BFS reachability).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "qualified_name": { "type": "string" },
+                    "depth": { "type": "integer", "default": 1, "description": "1=direct deps, >1=impact analysis" },
+                    "direction": { "type": "string", "enum": ["incoming", "outgoing", "both"], "default": "both" }
+                },
+                "required": ["qualified_name"]
+            }
+        }),
+        json!({
+            "name": "find_important_nodes",
+            "description": "Run PageRank to find the most important/central nodes in the knowledge graph",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "top_k": { "type": "integer", "default": 20 },
+                    "damping": { "type": "number", "default": 0.85 }
                 }
             }
         }),
         json!({
-            "name": "enrich_performance",
-            "description": "Analyze graph coupling, dependency depth, critical path (PageRank), and file complexity. Annotates nodes and stores performance Insights.",
+            "name": "find_related_groups",
+            "description": "Run Louvain community detection to find clusters of related symbols",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "namespace": { "type": "string", "description": "Namespace filter for insights" },
-                    "top": { "type": "integer", "default": 10, "description": "Number of top items to report (default: 10)" }
+                    "resolution": { "type": "number", "default": 1.0, "description": "Higher = more clusters" }
                 }
             }
         }),
-        // ── Session Checkpoint Tool ─────────────────────────────────────────────
+        json!({
+            "name": "get_cross_repo",
+            "description": "Scan workspace manifests and report cross-package dependencies",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to scan" }
+                }
+            }
+        }),
+        // ── Consolidation & Patterns (3 tools) ─────────────────────────────
+        json!({
+            "name": "consolidate",
+            "description": "Run memory consolidation. mode=auto runs all cycles. Individual modes: decay, creative, cluster, forget, summarize.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["auto", "decay", "creative", "cluster", "forget", "summarize"],
+                        "default": "auto"
+                    },
+                    "threshold_days": { "type": "integer", "description": "For decay mode (default: 30)" },
+                    "similarity_threshold": { "type": "number", "description": "For cluster mode (default: 0.92)" },
+                    "importance_threshold": { "type": "number", "description": "For forget mode (default: 0.1)" },
+                    "target_tags": { "type": "array", "items": { "type": "string" }, "description": "For forget mode" },
+                    "max_access_count": { "type": "integer", "description": "For forget mode" },
+                    "cluster_size": { "type": "integer", "description": "For summarize mode (default: 5)" }
+                }
+            }
+        }),
+        json!({
+            "name": "detect_patterns",
+            "description": "Detect cross-session patterns. format=json (default), format=markdown (human-readable), format=both.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "min_frequency": { "type": "integer", "minimum": 1, "default": 3 },
+                    "namespace": { "type": "string" },
+                    "format": { "type": "string", "enum": ["json", "markdown", "both"], "default": "json" }
+                }
+            }
+        }),
+        json!({
+            "name": "get_decision_chain",
+            "description": "Follow decision evolution through the knowledge graph via EVOLVED_INTO/LEADS_TO/DERIVED_FROM edges",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string" },
+                    "topic": { "type": "string" }
+                }
+            }
+        }),
+        // ── Namespace Management (3 tools) ──────────────────────────────────
+        json!({
+            "name": "list_namespaces",
+            "description": "List all namespaces with inline stats (counts, avg importance, type distribution, date range)",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
+        json!({
+            "name": "namespace_stats",
+            "description": "Detailed statistics for a specific namespace",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "namespace": { "type": "string" }
+                },
+                "required": ["namespace"]
+            }
+        }),
+        json!({
+            "name": "delete_namespace",
+            "description": "Delete all memories in a namespace (requires confirm=true)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "namespace": { "type": "string" },
+                    "confirm": { "type": "boolean" }
+                },
+                "required": ["namespace", "confirm"]
+            }
+        }),
+        // ── Session & Context (2 tools) ─────────────────────────────────────
         json!({
             "name": "session_checkpoint",
-            "description": "Mid-session checkpoint: summarize activity so far, detect session-scoped and cross-session patterns, identify focus areas, and store new pattern insights. Returns a markdown progress report.",
+            "description": "Mid-session progress report with activity summary, pattern detection, and focus areas",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string", "description": "The current session ID" },
-                    "namespace": { "type": "string", "description": "Optional namespace to scope pattern detection" }
+                    "session_id": { "type": "string" },
+                    "namespace": { "type": "string" }
                 },
                 "required": ["session_id"]
+            }
+        }),
+        json!({
+            "name": "session_context",
+            "description": "Get session context: recent memories, pending analyses, active patterns, and focus areas",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "namespace": { "type": "string" },
+                    "k": { "type": "integer", "default": 10, "description": "Number of recent memories" }
+                }
+            }
+        }),
+        // ── Enrichment (3 tools) ────────────────────────────────────────────
+        json!({
+            "name": "enrich_codebase",
+            "description": "Composite enrichment: runs git history, security, and performance analysis in one call",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path to the git repository root" },
+                    "days": { "type": "integer", "default": 90 },
+                    "namespace": { "type": "string" },
+                    "analyses": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": ["git", "security", "performance"] },
+                        "description": "Which analyses to run (default: all)"
+                    }
+                },
+                "required": ["path"]
+            }
+        }),
+        json!({
+            "name": "analyze_codebase",
+            "description": "Full pipeline: index -> enrich (git+security+performance) -> pagerank -> clusters -> summary",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path to the codebase" },
+                    "namespace": { "type": "string" },
+                    "days": { "type": "integer", "default": 90 }
+                },
+                "required": ["path"]
+            }
+        }),
+        json!({
+            "name": "enrich_git_history",
+            "description": "Enrich knowledge graph with git history: commit counts, churn rate, CoChanged edges, activity Insights",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Git repository root" },
+                    "days": { "type": "integer", "default": 90 },
+                    "namespace": { "type": "string" }
+                },
+                "required": ["path"]
             }
         }),
     ]

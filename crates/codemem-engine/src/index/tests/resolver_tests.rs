@@ -13,6 +13,13 @@ fn make_symbol(name: &str, qn: &str, file: &str) -> Symbol {
         line_end: 0,
         doc_comment: None,
         parent: None,
+        parameters: Vec::new(),
+        return_type: None,
+        is_async: false,
+        attributes: Vec::new(),
+        throws: Vec::new(),
+        generic_params: None,
+        is_abstract: false,
     }
 }
 

@@ -204,6 +204,42 @@ impl super::CodememEngine {
                     serde_json::Value::String(doc.clone()),
                 );
             }
+            if !sym.parameters.is_empty() {
+                payload.insert(
+                    "parameters".to_string(),
+                    serde_json::to_value(&sym.parameters).unwrap_or_default(),
+                );
+            }
+            if let Some(ref ret) = sym.return_type {
+                payload.insert(
+                    "return_type".to_string(),
+                    serde_json::Value::String(ret.clone()),
+                );
+            }
+            if sym.is_async {
+                payload.insert("is_async".to_string(), serde_json::json!(true));
+            }
+            if !sym.attributes.is_empty() {
+                payload.insert(
+                    "attributes".to_string(),
+                    serde_json::to_value(&sym.attributes).unwrap_or_default(),
+                );
+            }
+            if !sym.throws.is_empty() {
+                payload.insert(
+                    "throws".to_string(),
+                    serde_json::to_value(&sym.throws).unwrap_or_default(),
+                );
+            }
+            if let Some(ref gp) = sym.generic_params {
+                payload.insert(
+                    "generic_params".to_string(),
+                    serde_json::Value::String(gp.clone()),
+                );
+            }
+            if sym.is_abstract {
+                payload.insert("is_abstract".to_string(), serde_json::json!(true));
+            }
 
             let node = GraphNode {
                 id: format!("sym:{}", sym.qualified_name),
@@ -350,6 +386,13 @@ impl super::CodememEngine {
         // Phase 1: Collect enriched texts without holding the vector lock.
         // enrich_symbol_text / enrich_chunk_text only read from the passed-in
         // Symbol/CodeChunk and edges slice, so no lock is required.
+        //
+        // A12: Embedding bottleneck — The embedding provider is behind a Mutex,
+        // so `embed_batch` runs sequentially even though CPU-bound inference
+        // (Candle) could benefit from parallelism. For large codebases, this is
+        // the primary bottleneck. Potential fix: wrap the provider in an Arc and
+        // use `tokio::spawn_blocking` for CPU-bound Candle inference, or use a
+        // channel-based work queue to decouple embedding from persistence.
         let mut symbols_embedded = 0usize;
         let mut chunks_embedded = 0usize;
         if let Some(emb) = self.lock_embeddings()? {
@@ -456,6 +499,10 @@ impl super::CodememEngine {
     }
 
     /// Pass 1: Score and prune low-value chunks, transferring line ranges to parent symbols.
+    ///
+    /// Scoring weights adjust on cold start: when no memories exist yet, the
+    /// `memory_link_score` weight (normally 0.3) is redistributed to the other
+    /// factors so compaction still produces meaningful rankings.
     fn compact_chunks(
         &self,
         seen_files: &HashSet<String>,
@@ -464,6 +511,20 @@ impl super::CodememEngine {
     ) -> usize {
         let max_chunks_per_file = self.config.chunking.max_retained_chunks_per_file;
         let chunk_score_threshold = self.config.chunking.min_chunk_score_threshold;
+
+        // Cold-start detection: if no memories exist, memory_link_score is always 0
+        // and its weight should be redistributed to other factors.
+        let has_memories = self
+            .storage
+            .list_memory_ids()
+            .map(|ids| !ids.is_empty())
+            .unwrap_or(false);
+        let (w_centrality, w_parent, w_memory, w_size) = if has_memories {
+            (0.3, 0.2, 0.3, 0.2)
+        } else {
+            // Redistribute memory_link weight: centrality 0.4, parent 0.3, memory 0.0, size 0.3
+            (0.4, 0.3, 0.0, 0.3)
+        };
 
         let mut chunks_by_file: HashMap<String, Vec<(String, f64)>> = HashMap::new();
 
@@ -511,7 +572,7 @@ impl super::CodememEngine {
                 0.0
             };
 
-            let memory_link_score = if has_memory_link_edge(&**graph, &node.id) {
+            let memory_link_score = if has_memories && has_memory_link_edge(&**graph, &node.id) {
                 1.0
             } else {
                 0.0
@@ -524,10 +585,10 @@ impl super::CodememEngine {
                 .unwrap_or(0.0);
             let non_ws_rank = non_ws / max_non_ws;
 
-            let chunk_score = centrality_rank * 0.3
-                + has_symbol_parent * 0.2
-                + memory_link_score * 0.3
-                + non_ws_rank * 0.2;
+            let chunk_score = centrality_rank * w_centrality
+                + has_symbol_parent * w_parent
+                + memory_link_score * w_memory
+                + non_ws_rank * w_size;
 
             chunks_by_file
                 .entry(file_path)
@@ -624,6 +685,10 @@ impl super::CodememEngine {
     }
 
     /// Pass 2: Score and prune low-value symbol nodes, transferring ranges to parent files.
+    ///
+    /// Like chunk compaction, scoring weights adjust on cold start: when no memories
+    /// exist yet, the `memory_link_val` weight (normally 0.20) is redistributed to
+    /// call connectivity and code size factors.
     fn compact_symbols(
         &self,
         seen_files: &HashSet<String>,
@@ -632,6 +697,19 @@ impl super::CodememEngine {
     ) -> usize {
         let max_syms_per_file = self.config.chunking.max_retained_symbols_per_file;
         let sym_score_threshold = self.config.chunking.min_symbol_score_threshold;
+
+        // Cold-start: redistribute memory_link weight when no memories exist
+        let has_memories = self
+            .storage
+            .list_memory_ids()
+            .map(|ids| !ids.is_empty())
+            .unwrap_or(false);
+        let (w_calls, w_vis, w_kind, w_mem, w_size) = if has_memories {
+            (0.30, 0.20, 0.15, 0.20, 0.15)
+        } else {
+            // Redistribute memory weight to calls and code size
+            (0.40, 0.20, 0.15, 0.0, 0.25)
+        };
 
         let sym_nodes: Vec<&GraphNode> = all_nodes
             .iter()
@@ -709,7 +787,7 @@ impl super::CodememEngine {
                 _ => 0.5,
             };
 
-            let mem_linked = has_memory_link_edge(&**graph, &node.id);
+            let mem_linked = has_memories && has_memory_link_edge(&**graph, &node.id);
             let memory_link_val = if mem_linked { 1.0 } else { 0.0 };
 
             let line_start = node
@@ -725,11 +803,11 @@ impl super::CodememEngine {
             let code_size = (line_end - line_start).max(0.0);
             let code_size_rank = code_size / max_code_size;
 
-            let symbol_score = call_connectivity * 0.30
-                + visibility_score * 0.20
-                + kind_score * 0.15
-                + memory_link_val * 0.20
-                + code_size_rank * 0.15;
+            let symbol_score = call_connectivity * w_calls
+                + visibility_score * w_vis
+                + kind_score * w_kind
+                + memory_link_val * w_mem
+                + code_size_rank * w_size;
 
             let is_structural = matches!(
                 node.kind,

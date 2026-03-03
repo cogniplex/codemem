@@ -11,12 +11,13 @@
 //! - **metrics** — Operational metrics collection
 
 use codemem_core::{
-    CodememConfig, CodememError, Edge, GraphBackend, MemoryNode, MemoryType, RelationshipType,
-    ScoringWeights, StorageBackend, VectorBackend,
+    CodememConfig, CodememError, DetectedPattern, Edge, GraphBackend, MemoryNode, MemoryType,
+    NodeKind, RelationshipType, ScoringWeights, StorageBackend, VectorBackend,
 };
 use codemem_storage::graph::GraphEngine;
 use codemem_storage::HnswIndex;
 use codemem_storage::Storage;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -830,4 +831,318 @@ impl CodememEngine {
         graph.recompute_centrality();
         Ok(())
     }
+
+    // ── A2: File Watcher Event Processing ───────────────────────────────
+
+    /// Process a single file watcher event by re-indexing changed/created files
+    /// or cleaning up deleted file nodes.
+    ///
+    /// Call this from a watcher event loop:
+    /// ```ignore
+    /// while let Ok(event) = watcher.receiver().recv() {
+    ///     engine.process_watch_event(&event, namespace);
+    /// }
+    /// ```
+    pub fn process_watch_event(
+        &self,
+        event: &watch::WatchEvent,
+        namespace: Option<&str>,
+    ) -> Result<(), CodememError> {
+        match event {
+            watch::WatchEvent::FileChanged(path) | watch::WatchEvent::FileCreated(path) => {
+                self.index_single_file(path, namespace)?;
+            }
+            watch::WatchEvent::FileDeleted(path) => {
+                let path_str = path.to_string_lossy().to_string();
+                self.cleanup_file_nodes(&path_str)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Index (or re-index) a single file: parse it, persist nodes/edges/embeddings,
+    /// and update the index cache.
+    fn index_single_file(&self, path: &Path, namespace: Option<&str>) -> Result<(), CodememError> {
+        let content = std::fs::read(path)?;
+
+        let path_str = path.to_string_lossy().to_string();
+        let parser = index::CodeParser::new();
+
+        let parse_result = match parser.parse_file(&path_str, &content) {
+            Some(pr) => pr,
+            None => return Ok(()), // Unsupported file type or parse failure
+        };
+
+        // Build a minimal IndexAndResolveResult for this single file
+        let mut file_paths = HashSet::new();
+        file_paths.insert(parse_result.file_path.clone());
+
+        let mut resolver = index::ReferenceResolver::new();
+        resolver.add_symbols(&parse_result.symbols);
+        let edges = resolver.resolve_all(&parse_result.references);
+
+        let results = IndexAndResolveResult {
+            index: index::IndexResult {
+                files_scanned: 1,
+                files_parsed: 1,
+                files_skipped: 0,
+                total_symbols: parse_result.symbols.len(),
+                total_references: parse_result.references.len(),
+                total_chunks: parse_result.chunks.len(),
+                parse_results: Vec::new(),
+            },
+            symbols: parse_result.symbols,
+            references: parse_result.references,
+            chunks: parse_result.chunks,
+            file_paths,
+            edges,
+        };
+
+        self.persist_index_results(&results, namespace)?;
+        Ok(())
+    }
+
+    // ── A3: File Deletion Cleanup ───────────────────────────────────────
+
+    /// Remove graph nodes, edges, and embeddings for a single deleted file.
+    fn cleanup_file_nodes(&self, file_path: &str) -> Result<(), CodememError> {
+        let file_node_id = format!("file:{file_path}");
+
+        // Remove all chunk nodes for this file
+        let chunk_prefix = format!("chunk:{file_path}:");
+        let _ = self.storage.delete_graph_nodes_by_prefix(&chunk_prefix);
+
+        // Remove symbol nodes for this file by checking graph
+        let graph = self.lock_graph()?;
+        let sym_ids: Vec<String> = graph
+            .get_all_nodes()
+            .into_iter()
+            .filter(|n| {
+                n.id.starts_with("sym:")
+                    && n.payload.get("file_path").and_then(|v| v.as_str()) == Some(file_path)
+            })
+            .map(|n| n.id.clone())
+            .collect();
+        drop(graph);
+
+        for sym_id in &sym_ids {
+            let _ = self.storage.delete_graph_edges_for_node(sym_id);
+            let _ = self.storage.delete_graph_node(sym_id);
+            let _ = self.storage.delete_embedding(sym_id);
+        }
+
+        // Remove file node itself
+        let _ = self.storage.delete_graph_edges_for_node(&file_node_id);
+        let _ = self.storage.delete_graph_node(&file_node_id);
+
+        // Clean up in-memory graph
+        let mut graph = self.lock_graph()?;
+        for sym_id in &sym_ids {
+            let _ = graph.remove_node(sym_id);
+        }
+        // Remove chunk nodes from in-memory graph
+        let chunk_ids: Vec<String> = graph
+            .get_all_nodes()
+            .into_iter()
+            .filter(|n| n.id.starts_with(&format!("chunk:{file_path}:")))
+            .map(|n| n.id.clone())
+            .collect();
+        for chunk_id in &chunk_ids {
+            let _ = graph.remove_node(chunk_id);
+        }
+        let _ = graph.remove_node(&file_node_id);
+        drop(graph);
+
+        // Remove stale embeddings from vector index
+        let mut vec = self.lock_vector()?;
+        for sym_id in &sym_ids {
+            let _ = vec.remove(sym_id);
+        }
+        for chunk_id in &chunk_ids {
+            let _ = vec.remove(chunk_id);
+        }
+        drop(vec);
+
+        self.save_index();
+        Ok(())
+    }
+
+    /// Compare files on disk vs file nodes in the graph and clean up stale entries.
+    /// Call this after indexing or on watcher delete events.
+    pub fn cleanup_deleted_files(&self, dir_path: &str) -> Result<usize, CodememError> {
+        let dir = Path::new(dir_path);
+        if !dir.is_dir() {
+            return Ok(0);
+        }
+
+        // Collect file: nodes from the graph
+        let graph = self.lock_graph()?;
+        let file_nodes: Vec<String> = graph
+            .get_all_nodes()
+            .into_iter()
+            .filter(|n| n.kind == NodeKind::File && n.label.starts_with(dir_path))
+            .map(|n| n.label.clone())
+            .collect();
+        drop(graph);
+
+        let mut cleaned = 0usize;
+        for file_path in &file_nodes {
+            if !Path::new(file_path).exists() {
+                self.cleanup_file_nodes(file_path)?;
+                cleaned += 1;
+            }
+        }
+
+        if cleaned > 0 {
+            self.lock_graph()?.recompute_centrality();
+        }
+
+        Ok(cleaned)
+    }
+
+    // ── A4: Combined Index + Enrich Pipeline ────────────────────────────
+
+    /// Combined result from `index_and_enrich`.
+    /// Index a codebase and run all enrichment passes in one call.
+    pub fn index_and_enrich(
+        &self,
+        path: &str,
+        namespace: Option<&str>,
+        git_days: u64,
+    ) -> Result<IndexEnrichResult, CodememError> {
+        // 1. Index the codebase
+        let mut indexer = Indexer::new();
+        let index_results = indexer.index_and_resolve(Path::new(path))?;
+        let persist = self.persist_index_results(&index_results, namespace)?;
+
+        // 2. Enrich with git history
+        let git_result = match self.enrich_git_history(path, git_days, namespace) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                tracing::warn!("Git history enrichment failed: {e}");
+                None
+            }
+        };
+
+        // 3. Enrich with security analysis
+        let security_result = match self.enrich_security(namespace) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                tracing::warn!("Security enrichment failed: {e}");
+                None
+            }
+        };
+
+        // 4. Enrich with performance analysis
+        let perf_result = match self.enrich_performance(10, namespace) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                tracing::warn!("Performance enrichment failed: {e}");
+                None
+            }
+        };
+
+        // 5. Recompute centrality after all changes
+        self.lock_graph()?.recompute_centrality();
+
+        let total_insights = git_result.as_ref().map_or(0, |r| r.insights_stored)
+            + security_result.as_ref().map_or(0, |r| r.insights_stored)
+            + perf_result.as_ref().map_or(0, |r| r.insights_stored);
+
+        Ok(IndexEnrichResult {
+            files_indexed: persist.files_created,
+            symbols_stored: persist.symbols_stored,
+            chunks_stored: persist.chunks_stored,
+            edges_resolved: persist.edges_resolved,
+            symbols_embedded: persist.symbols_embedded,
+            chunks_embedded: persist.chunks_embedded,
+            total_insights,
+        })
+    }
+
+    // ── A8: Session Context Synthesis ───────────────────────────────────
+
+    /// Synthesize context for a new session: recent memories, pending analyses,
+    /// active patterns, and last session summary.
+    pub fn session_context(&self, namespace: Option<&str>) -> Result<SessionContext, CodememError> {
+        let now = chrono::Utc::now();
+        let cutoff_24h = now - chrono::Duration::hours(24);
+
+        // 1. Recent memories (last 24h)
+        let ids = match namespace {
+            Some(ns) => self.storage.list_memory_ids_for_namespace(ns)?,
+            None => self.storage.list_memory_ids()?,
+        };
+
+        let mut recent_memories = Vec::new();
+        let mut pending_analyses = Vec::new();
+
+        for id in ids.iter().rev().take(200) {
+            if let Ok(Some(m)) = self.storage.get_memory_no_touch(id) {
+                // Collect pending analyses
+                if m.tags.contains(&"pending-analysis".to_string()) {
+                    pending_analyses.push(m.clone());
+                }
+                // Collect recent memories from last 24h
+                if m.created_at >= cutoff_24h {
+                    recent_memories.push(m);
+                }
+                if recent_memories.len() >= 50 && pending_analyses.len() >= 10 {
+                    break;
+                }
+            }
+        }
+
+        // 2. Active patterns
+        let session_count = self.storage.session_count(namespace).unwrap_or(1).max(1);
+        let active_patterns = patterns::detect_patterns(
+            &*self.storage,
+            namespace,
+            2, // min_frequency
+            session_count,
+        )
+        .unwrap_or_default();
+
+        // 3. Last session summary
+        let last_session_summary = self
+            .storage
+            .list_sessions(namespace, 1)?
+            .into_iter()
+            .next()
+            .and_then(|s| s.summary);
+
+        Ok(SessionContext {
+            recent_memories,
+            pending_analyses,
+            active_patterns,
+            last_session_summary,
+        })
+    }
+}
+
+// ── Result Types ────────────────────────────────────────────────────────────
+
+/// Combined result from `index_and_enrich`.
+#[derive(Debug)]
+pub struct IndexEnrichResult {
+    pub files_indexed: usize,
+    pub symbols_stored: usize,
+    pub chunks_stored: usize,
+    pub edges_resolved: usize,
+    pub symbols_embedded: usize,
+    pub chunks_embedded: usize,
+    pub total_insights: usize,
+}
+
+/// Session context synthesized at session start.
+#[derive(Debug)]
+pub struct SessionContext {
+    /// Memories created in the last 24 hours.
+    pub recent_memories: Vec<MemoryNode>,
+    /// Memories tagged `pending-analysis` awaiting code-mapper review.
+    pub pending_analyses: Vec<MemoryNode>,
+    /// Cross-session patterns detected with sufficient frequency.
+    pub active_patterns: Vec<DetectedPattern>,
+    /// Summary text from the most recent session (if any).
+    pub last_session_summary: Option<String>,
 }

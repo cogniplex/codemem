@@ -11,7 +11,7 @@ fn handle_tools_call_store() {
     assert!(resp.result.is_some());
     assert!(resp.error.is_none());
 
-    // Verify it actually stored
+    // Verify it actually stored (codemem_stats is a legacy alias for codemem_status(include: ["stats"]))
     let stats_resp = server.handle_request(
         "tools/call",
         Some(&json!({"name": "codemem_stats", "arguments": {}})),
@@ -20,7 +20,7 @@ fn handle_tools_call_store() {
     let stats = stats_resp.result.unwrap();
     let text = stats["content"][0]["text"].as_str().unwrap();
     let parsed: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(parsed["storage"]["memories"], 1);
+    assert_eq!(parsed["stats"]["storage"]["memories"], 1);
 }
 
 #[test]

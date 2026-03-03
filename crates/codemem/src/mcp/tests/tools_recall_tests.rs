@@ -275,121 +275,26 @@ fn delete_namespace_with_confirm() {
     assert_eq!(stats_after["count"], 0);
 }
 
-// ── Export/Import Tests ─────────────────────────────────────────────
+// ── Removed Tool Tests ──────────────────────────────────────────────
 
 #[test]
-fn export_memories_empty() {
+fn export_memories_returns_removed_error() {
     let server = test_server();
     let params = json!({"name": "export_memories", "arguments": {}});
     let resp = server.handle_request("tools/call", Some(&params), json!(400));
     let result = resp.result.unwrap();
+    assert_eq!(result["isError"], true);
     let text = result["content"][0]["text"].as_str().unwrap();
-    let exported: Vec<Value> = serde_json::from_str(text).unwrap();
-    assert!(exported.is_empty());
+    assert!(text.contains("removed"));
 }
 
 #[test]
-fn import_and_export_roundtrip() {
+fn import_memories_returns_removed_error() {
     let server = test_server();
-
-    // Import 2 memories
-    let import_params = json!({
-        "name": "import_memories",
-        "arguments": {
-            "memories": [
-                {
-                    "content": "roundtrip memory one about rust",
-                    "memory_type": "insight",
-                    "importance": 0.8,
-                    "tags": ["rust", "test"]
-                },
-                {
-                    "content": "roundtrip memory two about python",
-                    "memory_type": "pattern",
-                    "tags": ["python"]
-                }
-            ]
-        }
-    });
-    let resp = server.handle_request("tools/call", Some(&import_params), json!(401));
+    let params = json!({"name": "import_memories", "arguments": {}});
+    let resp = server.handle_request("tools/call", Some(&params), json!(401));
     let result = resp.result.unwrap();
+    assert_eq!(result["isError"], true);
     let text = result["content"][0]["text"].as_str().unwrap();
-    let import_result: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(import_result["imported"], 2);
-    assert_eq!(import_result["skipped"], 0);
-    assert_eq!(import_result["ids"].as_array().unwrap().len(), 2);
-
-    // Export all memories
-    let export_params = json!({"name": "export_memories", "arguments": {}});
-    let resp = server.handle_request("tools/call", Some(&export_params), json!(402));
-    let result = resp.result.unwrap();
-    let text = result["content"][0]["text"].as_str().unwrap();
-    let exported: Vec<Value> = serde_json::from_str(text).unwrap();
-    assert_eq!(exported.len(), 2);
-
-    // Verify content matches
-    let contents: Vec<&str> = exported
-        .iter()
-        .filter_map(|e| e["content"].as_str())
-        .collect();
-    assert!(contents.contains(&"roundtrip memory one about rust"));
-    assert!(contents.contains(&"roundtrip memory two about python"));
-
-    // Verify memory types
-    let types: Vec<&str> = exported
-        .iter()
-        .filter_map(|e| e["memory_type"].as_str())
-        .collect();
-    assert!(types.contains(&"insight"));
-    assert!(types.contains(&"pattern"));
-}
-
-#[test]
-fn export_with_namespace_filter() {
-    let server = test_server();
-
-    // Import memories with different namespaces
-    let import_params = json!({
-        "name": "import_memories",
-        "arguments": {
-            "memories": [
-                {
-                    "content": "project-a memory about architecture",
-                    "memory_type": "decision",
-                    "namespace": "/projects/a"
-                },
-                {
-                    "content": "project-b memory about testing",
-                    "memory_type": "insight",
-                    "namespace": "/projects/b"
-                },
-                {
-                    "content": "project-a memory about patterns",
-                    "memory_type": "pattern",
-                    "namespace": "/projects/a"
-                }
-            ]
-        }
-    });
-    let resp = server.handle_request("tools/call", Some(&import_params), json!(403));
-    let result = resp.result.unwrap();
-    let text = result["content"][0]["text"].as_str().unwrap();
-    let import_result: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(import_result["imported"], 3);
-
-    // Export only namespace /projects/a
-    let export_params = json!({
-        "name": "export_memories",
-        "arguments": {"namespace": "/projects/a"}
-    });
-    let resp = server.handle_request("tools/call", Some(&export_params), json!(404));
-    let result = resp.result.unwrap();
-    let text = result["content"][0]["text"].as_str().unwrap();
-    let exported: Vec<Value> = serde_json::from_str(text).unwrap();
-    assert_eq!(exported.len(), 2);
-
-    // All exported should be from /projects/a
-    for mem in &exported {
-        assert_eq!(mem["namespace"].as_str().unwrap(), "/projects/a");
-    }
+    assert!(text.contains("removed"));
 }

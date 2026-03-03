@@ -170,6 +170,13 @@ impl super::AstGrepEngine {
             line_end: node.end_pos().line(),
             doc_comment,
             parent: receiver_type,
+            parameters: Vec::new(),
+            return_type: None,
+            is_async: false,
+            attributes: Vec::new(),
+            throws: Vec::new(),
+            generic_params: None,
+            is_abstract: false,
         })
     }
 
@@ -386,7 +393,7 @@ impl super::AstGrepEngine {
 
                         return Some(build_symbol(
                             name,
-                            SymbolKind::Constant,
+                            SymbolKind::Field,
                             signature,
                             visibility,
                             doc_comment,
@@ -567,7 +574,7 @@ impl super::AstGrepEngine {
 
                 return Some(build_symbol(
                     name,
-                    SymbolKind::Constant,
+                    SymbolKind::Field,
                     signature,
                     visibility,
                     doc_comment,
@@ -643,7 +650,7 @@ impl super::AstGrepEngine {
 
                         return Some(build_symbol(
                             clean_name.to_string(),
-                            SymbolKind::Constant,
+                            SymbolKind::Field,
                             signature,
                             visibility,
                             doc_comment,

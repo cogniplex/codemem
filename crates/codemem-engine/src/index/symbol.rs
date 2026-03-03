@@ -2,6 +2,17 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A function/method parameter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Parameter {
+    /// Parameter name.
+    pub name: String,
+    /// Type annotation, if present.
+    pub type_annotation: Option<String>,
+    /// Default value expression, if present.
+    pub default_value: Option<String>,
+}
+
 /// A code symbol extracted from source.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Symbol {
@@ -25,6 +36,27 @@ pub struct Symbol {
     pub doc_comment: Option<String>,
     /// Qualified name of the parent symbol (e.g., struct name for a method).
     pub parent: Option<String>,
+    /// Extracted parameters for functions/methods.
+    #[serde(default)]
+    pub parameters: Vec<Parameter>,
+    /// Return type annotation, if present.
+    #[serde(default)]
+    pub return_type: Option<String>,
+    /// Whether this is an async function/method.
+    #[serde(default)]
+    pub is_async: bool,
+    /// Attributes, decorators, or annotations (e.g., `#[derive(Debug)]`, `@Override`).
+    #[serde(default)]
+    pub attributes: Vec<String>,
+    /// Error/exception types this symbol can throw.
+    #[serde(default)]
+    pub throws: Vec<String>,
+    /// Generic type parameters (e.g., `<T: Display>`).
+    #[serde(default)]
+    pub generic_params: Option<String>,
+    /// Whether this is an abstract method (trait/interface method without body).
+    #[serde(default)]
+    pub is_abstract: bool,
 }
 
 /// The kind of a code symbol.
@@ -40,6 +72,12 @@ pub enum SymbolKind {
     Constant,
     Module,
     Test,
+    Field,       // struct/class field
+    Property,    // getter/setter property
+    Constructor, // __init__, constructor, new
+    EnumVariant, // individual enum variant/member
+    Macro,       // macro_rules!, C preprocessor macro
+    Decorator,   // Python decorator, Java annotation definition
 }
 
 impl std::fmt::Display for SymbolKind {
@@ -55,6 +93,12 @@ impl std::fmt::Display for SymbolKind {
             Self::Constant => write!(f, "constant"),
             Self::Module => write!(f, "module"),
             Self::Test => write!(f, "test"),
+            Self::Field => write!(f, "field"),
+            Self::Property => write!(f, "property"),
+            Self::Constructor => write!(f, "constructor"),
+            Self::EnumVariant => write!(f, "enum_variant"),
+            Self::Macro => write!(f, "macro"),
+            Self::Decorator => write!(f, "decorator"),
         }
     }
 }
@@ -95,7 +139,7 @@ pub struct Reference {
 }
 
 /// The kind of a reference between symbols.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ReferenceKind {
     Call,
     Import,
@@ -117,6 +161,12 @@ impl From<SymbolKind> for codemem_core::NodeKind {
             SymbolKind::Constant => codemem_core::NodeKind::Constant,
             SymbolKind::Module => codemem_core::NodeKind::Module,
             SymbolKind::Test => codemem_core::NodeKind::Test,
+            SymbolKind::Field => codemem_core::NodeKind::Constant,
+            SymbolKind::Property => codemem_core::NodeKind::Constant,
+            SymbolKind::Constructor => codemem_core::NodeKind::Method,
+            SymbolKind::EnumVariant => codemem_core::NodeKind::Constant,
+            SymbolKind::Macro => codemem_core::NodeKind::Function,
+            SymbolKind::Decorator => codemem_core::NodeKind::Function,
         }
     }
 }

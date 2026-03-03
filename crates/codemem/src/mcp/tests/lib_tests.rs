@@ -14,49 +14,48 @@ fn handle_initialize() {
 }
 
 #[test]
-fn handle_tools_list_returns_43_tools() {
+fn handle_tools_list_returns_28_tools() {
     let server = test_server();
     let resp = server.handle_request("tools/list", None, json!(2));
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 43);
+    assert_eq!(tools.len(), 28);
 
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    // Memory CRUD (7)
     assert!(names.contains(&"store_memory"));
-    assert!(names.contains(&"recall_memory"));
-    assert!(names.contains(&"graph_traverse"));
-    assert!(names.contains(&"codemem_health"));
-    assert!(names.contains(&"index_codebase"));
-    assert!(names.contains(&"search_symbols"));
-    assert!(names.contains(&"get_symbol_info"));
-    assert!(names.contains(&"get_dependencies"));
-    assert!(names.contains(&"get_impact"));
-    assert!(names.contains(&"get_clusters"));
-    assert!(names.contains(&"get_cross_repo"));
-    assert!(names.contains(&"get_pagerank"));
-    assert!(names.contains(&"search_code"));
-    assert!(names.contains(&"set_scoring_weights"));
-    assert!(names.contains(&"export_memories"));
-    assert!(names.contains(&"import_memories"));
-    assert!(names.contains(&"recall_with_expansion"));
-    assert!(names.contains(&"list_namespaces"));
-    assert!(names.contains(&"namespace_stats"));
-    assert!(names.contains(&"delete_namespace"));
-    assert!(names.contains(&"consolidate_decay"));
-    assert!(names.contains(&"consolidate_creative"));
-    assert!(names.contains(&"consolidate_cluster"));
-    assert!(names.contains(&"consolidate_forget"));
-    assert!(names.contains(&"consolidation_status"));
-    assert!(names.contains(&"recall_with_impact"));
-    assert!(names.contains(&"get_decision_chain"));
-    assert!(names.contains(&"detect_patterns"));
-    assert!(names.contains(&"pattern_insights"));
+    assert!(names.contains(&"recall"));
+    assert!(names.contains(&"delete_memory"));
+    assert!(names.contains(&"associate_memories"));
     assert!(names.contains(&"refine_memory"));
     assert!(names.contains(&"split_memory"));
     assert!(names.contains(&"merge_memories"));
-    assert!(names.contains(&"consolidate_summarize"));
-    assert!(names.contains(&"codemem_metrics"));
+    // Graph & Structure (10)
+    assert!(names.contains(&"graph_traverse"));
+    assert!(names.contains(&"summary_tree"));
+    assert!(names.contains(&"codemem_status"));
+    assert!(names.contains(&"index_codebase"));
+    assert!(names.contains(&"search_code"));
+    assert!(names.contains(&"get_symbol_info"));
+    assert!(names.contains(&"get_symbol_graph"));
+    assert!(names.contains(&"find_important_nodes"));
+    assert!(names.contains(&"find_related_groups"));
+    assert!(names.contains(&"get_cross_repo"));
+    // Consolidation & Patterns (3)
+    assert!(names.contains(&"consolidate"));
+    assert!(names.contains(&"detect_patterns"));
+    assert!(names.contains(&"get_decision_chain"));
+    // Namespace Management (3)
+    assert!(names.contains(&"list_namespaces"));
+    assert!(names.contains(&"namespace_stats"));
+    assert!(names.contains(&"delete_namespace"));
+    // Session & Context (2)
     assert!(names.contains(&"session_checkpoint"));
+    assert!(names.contains(&"session_context"));
+    // Enrichment (3)
+    assert!(names.contains(&"enrich_codebase"));
+    assert!(names.contains(&"analyze_codebase"));
+    assert!(names.contains(&"enrich_git_history"));
 }
 
 #[test]
@@ -72,4 +71,33 @@ fn handle_ping() {
     let server = test_server();
     let resp = server.handle_request("ping", None, json!(6));
     assert!(resp.result.is_some());
+}
+
+// ── Legacy Alias Tests ──────────────────────────────────────────────
+
+#[test]
+fn legacy_recall_memory_alias_works() {
+    let server = test_server();
+    // The old "recall_memory" name should dispatch to "recall"
+    let params = json!({"name": "recall_memory", "arguments": {"query": "test"}});
+    let resp = server.handle_request("tools/call", Some(&params), json!(10));
+    let result = resp.result.unwrap();
+    // Should not be an "unknown tool" error
+    assert_ne!(result["isError"], true);
+}
+
+#[test]
+fn removed_tools_return_error() {
+    let server = test_server();
+    for tool_name in &["set_scoring_weights", "export_memories", "import_memories"] {
+        let params = json!({"name": tool_name, "arguments": {}});
+        let resp = server.handle_request("tools/call", Some(&params), json!(20));
+        let result = resp.result.unwrap();
+        assert_eq!(result["isError"], true, "{tool_name} should return error");
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("removed"),
+            "{tool_name} error should mention 'removed'"
+        );
+    }
 }

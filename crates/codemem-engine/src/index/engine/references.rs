@@ -29,14 +29,20 @@ impl super::AstGrepEngine {
             "rust_use" => {
                 let text = node.text().to_string();
                 let trimmed = text.trim_start_matches("use ").trim_end_matches(';').trim();
-                push_ref(
-                    references,
-                    &source_qn,
-                    trimmed.to_string(),
-                    ReferenceKind::Import,
-                    file_path,
-                    node.start_pos().line(),
-                );
+                // R1: Decompose grouped imports like `std::collections::{HashMap, HashSet}`
+                // and nested groups like `std::{collections::HashMap, io::{Read, Write}}`
+                let paths = decompose_rust_use_path(trimmed);
+                let line = node.start_pos().line();
+                for path in paths {
+                    push_ref(
+                        references,
+                        &source_qn,
+                        path,
+                        ReferenceKind::Import,
+                        file_path,
+                        line,
+                    );
+                }
             }
             "rust_macro" => {
                 if let Some(macro_node) = node.field("macro") {
@@ -668,4 +674,111 @@ impl super::AstGrepEngine {
             }
         }
     }
+}
+
+/// R1: Decompose a Rust `use` path into individual fully-qualified paths.
+///
+/// Handles:
+/// - Simple paths: `std::collections::HashMap` -> `["std::collections::HashMap"]`
+/// - Grouped: `std::collections::{HashMap, HashSet}` -> `["std::collections::HashMap", "std::collections::HashSet"]`
+/// - Nested: `std::{collections::HashMap, io::{Read, Write}}` -> 4 paths
+/// - Self: `std::collections::{self, HashMap}` -> `["std::collections", "std::collections::HashMap"]`
+fn decompose_rust_use_path(path: &str) -> Vec<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return vec![];
+    }
+
+    // Find the first `{` that starts a group
+    if let Some(brace_pos) = find_top_level_brace(path) {
+        // prefix = everything before `::{`
+        let prefix = path[..brace_pos].trim_end_matches("::").trim().to_string();
+
+        // Find matching closing brace
+        let inner = &path[brace_pos + 1..];
+        if let Some(close_pos) = find_matching_brace(inner) {
+            let group_content = &inner[..close_pos];
+            let segments = split_top_level_commas(group_content);
+            let mut results = Vec::new();
+
+            for segment in segments {
+                let segment = segment.trim();
+                if segment.is_empty() {
+                    continue;
+                }
+                if segment == "self" {
+                    // `use foo::{self}` means `foo` itself
+                    if !prefix.is_empty() {
+                        results.push(prefix.clone());
+                    }
+                } else {
+                    // Recursively decompose each segment with the prefix
+                    let full = if prefix.is_empty() {
+                        segment.to_string()
+                    } else {
+                        format!("{}::{}", prefix, segment)
+                    };
+                    let sub = decompose_rust_use_path(&full);
+                    results.extend(sub);
+                }
+            }
+            return results;
+        }
+    }
+
+    // No group: return the path as-is
+    vec![path.to_string()]
+}
+
+/// Find the position of the first `{` that is not inside another brace group.
+fn find_top_level_brace(s: &str) -> Option<usize> {
+    let mut depth = 0;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '{' if depth == 0 => return Some(i),
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Find the position of the matching `}` for a string that starts right after `{`.
+fn find_matching_brace(s: &str) -> Option<usize> {
+    let mut depth = 0;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' if depth == 0 => return Some(i),
+            '}' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split a string by commas, but only at the top level (not inside `{}`).
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            ',' if depth == 0 => {
+                segments.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    // Push the last segment
+    if start < s.len() {
+        segments.push(&s[start..]);
+    }
+
+    segments
 }

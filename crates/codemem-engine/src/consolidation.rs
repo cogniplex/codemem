@@ -134,10 +134,12 @@ impl CodememEngine {
     }
 
     /// Consolidate creative: O(n log n) semantic creative consolidation.
-    /// Uses vector search to find cross-type neighbors and creates SHARES_THEME edges.
+    /// Uses vector KNN search per memory to find cross-type neighbors and creates
+    /// SHARES_THEME edges.
     ///
-    /// NOTE: Loads entire memory DB and all embeddings into RAM. For large databases,
-    /// this may use significant memory proportional to the number of stored memories.
+    /// Memory usage: O(K*768) per query instead of O(N*768) for all embeddings,
+    /// where K is the number of nearest neighbors searched (7). Only the memory
+    /// metadata (IDs + types) is kept in RAM, not the full embedding vectors.
     pub fn consolidate_creative(&self) -> Result<ConsolidationResult, CodememError> {
         // Load all memories with their types
         let parsed = self.storage.list_memories_for_creative()?;
@@ -167,9 +169,11 @@ impl CodememEngine {
             })
             .collect();
 
-        // H7: Load all embeddings directly into HashMap (needed for random access by ID)
-        let embedding_map: HashMap<String, Vec<f32>> =
-            self.storage.list_all_embeddings()?.into_iter().collect();
+        // X2: Instead of loading ALL embeddings into a HashMap (O(N*768) memory),
+        // we iterate over memory IDs and fetch each embedding individually from
+        // storage, then use vector KNN to find neighbors. This uses O(K*768)
+        // memory per query where K=7.
+        let memory_ids: Vec<String> = type_map.keys().cloned().collect();
 
         let now = chrono::Utc::now();
         let mut new_connections = 0usize;
@@ -177,14 +181,20 @@ impl CodememEngine {
         let mut graph = self.lock_graph()?;
         let vector = self.lock_vector()?;
 
-        // For each memory with an embedding, find 6 nearest neighbors
-        for (id, embedding) in &embedding_map {
+        // For each memory, load its embedding on demand and find 6 nearest neighbors
+        for id in &memory_ids {
             let my_type = match type_map.get(id) {
                 Some(t) => t,
                 None => continue,
             };
 
-            let neighbors = vector.search(embedding, 7).unwrap_or_default();
+            // Load embedding for this single memory from storage (not kept in RAM)
+            let embedding = match self.storage.get_embedding(id) {
+                Ok(Some(emb)) => emb,
+                _ => continue,
+            };
+
+            let neighbors = vector.search(&embedding, 7).unwrap_or_default();
 
             for (neighbor_id, sim) in &neighbors {
                 if neighbor_id == id {
@@ -277,11 +287,15 @@ impl CodememEngine {
         })
     }
 
-    /// Consolidate cluster: semantic deduplication using cosine similarity.
+    /// Consolidate cluster: semantic deduplication using vector KNN + cosine similarity.
     ///
-    /// Groups memories by namespace and memory_type for candidate grouping, then uses
-    /// pairwise cosine similarity + union-find to cluster transitively-similar
-    /// memories. Keeps the highest-importance memory per cluster.
+    /// Groups memories by namespace and memory_type for candidate grouping. Within each
+    /// group, uses vector KNN search to find candidate duplicates (avoiding O(n^2) pairwise
+    /// comparison), then verifies with cosine similarity + union-find to cluster
+    /// transitively-similar memories. Keeps the highest-importance memory per cluster.
+    ///
+    /// For small groups (<=50 members), falls back to pairwise comparison since the
+    /// overhead of KNN setup is not worth it.
     pub fn consolidate_cluster(
         &self,
         similarity_threshold: Option<f64>,
@@ -305,44 +319,113 @@ impl CodememEngine {
             groups.entry(key).or_default().push(idx);
         }
 
-        // Load all embeddings for semantic comparison
-        let embedding_map: HashMap<String, Vec<f32>> =
-            self.storage.list_all_embeddings()?.into_iter().collect();
-
         // Union-find for transitive clustering
         let n = memories.len();
         let mut uf = UnionFind::new(n);
+
+        // X3: For large groups, use vector KNN to find candidate duplicates
+        // instead of O(n^2) pairwise comparison. For small groups (<=50),
+        // pairwise is fine and avoids KNN overhead.
+        let vector = self.lock_vector()?;
+
+        // Build index from memory idx to id for quick lookup
+        let id_to_idx: HashMap<&str, usize> = memories
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.id.as_str(), i))
+            .collect();
 
         for member_indices in groups.values() {
             if member_indices.len() <= 1 {
                 continue;
             }
 
-            for i in 0..member_indices.len() {
-                for j in (i + 1)..member_indices.len() {
-                    let idx_a = member_indices[i];
-                    let idx_b = member_indices[j];
+            if member_indices.len() <= 50 {
+                // Small group: pairwise comparison (load embeddings on demand)
+                for i in 0..member_indices.len() {
+                    for j in (i + 1)..member_indices.len() {
+                        let idx_a = member_indices[i];
+                        let idx_b = member_indices[j];
 
-                    let id_a = &memories[idx_a].id;
-                    let id_b = &memories[idx_b].id;
+                        let id_a = &memories[idx_a].id;
+                        let id_b = &memories[idx_b].id;
 
-                    let sim = match (embedding_map.get(id_a), embedding_map.get(id_b)) {
-                        (Some(emb_a), Some(emb_b)) => cosine_similarity(emb_a, emb_b),
-                        _ => {
-                            if memories[idx_a].content_hash == memories[idx_b].content_hash {
-                                1.0
-                            } else {
-                                0.0
+                        let sim = match (
+                            self.storage.get_embedding(id_a).ok().flatten(),
+                            self.storage.get_embedding(id_b).ok().flatten(),
+                        ) {
+                            (Some(emb_a), Some(emb_b)) => cosine_similarity(&emb_a, &emb_b),
+                            _ => {
+                                if memories[idx_a].content_hash == memories[idx_b].content_hash {
+                                    1.0
+                                } else {
+                                    0.0
+                                }
                             }
+                        };
+
+                        if sim >= similarity_threshold {
+                            uf.union(idx_a, idx_b);
                         }
+                    }
+                }
+            } else {
+                // Large group: use vector KNN per member to find candidates
+                // Search for K nearest neighbors where K is small (e.g. 10)
+                let k_neighbors = 10.min(member_indices.len());
+
+                // Build a set of IDs in this group for filtering
+                let group_ids: HashSet<&str> = member_indices
+                    .iter()
+                    .map(|&idx| memories[idx].id.as_str())
+                    .collect();
+
+                for &idx_a in member_indices {
+                    let id_a = &memories[idx_a].id;
+                    let embedding = match self.storage.get_embedding(id_a).ok().flatten() {
+                        Some(e) => e,
+                        None => continue,
                     };
 
-                    if sim >= similarity_threshold {
-                        uf.union(idx_a, idx_b);
+                    // Use vector KNN to find nearest neighbors
+                    let neighbors = vector
+                        .search(&embedding, k_neighbors + 1)
+                        .unwrap_or_default();
+
+                    for (neighbor_id, _) in &neighbors {
+                        if neighbor_id == id_a {
+                            continue;
+                        }
+                        // Only consider neighbors within the same group
+                        if !group_ids.contains(neighbor_id.as_str()) {
+                            continue;
+                        }
+
+                        let idx_b = match id_to_idx.get(neighbor_id.as_str()) {
+                            Some(&idx) => idx,
+                            None => continue,
+                        };
+
+                        // Verify with cosine similarity
+                        let sim = match self.storage.get_embedding(neighbor_id).ok().flatten() {
+                            Some(emb_b) => cosine_similarity(&embedding, &emb_b),
+                            None => {
+                                if memories[idx_a].content_hash == memories[idx_b].content_hash {
+                                    1.0
+                                } else {
+                                    0.0
+                                }
+                            }
+                        };
+
+                        if sim >= similarity_threshold {
+                            uf.union(idx_a, idx_b);
+                        }
                     }
                 }
             }
         }
+        drop(vector);
 
         let clusters = uf.groups(n);
 

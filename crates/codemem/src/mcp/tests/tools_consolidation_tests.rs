@@ -255,31 +255,20 @@ fn consolidate_forget_keeps_accessed_memories() {
 }
 
 #[test]
-fn consolidation_status_shows_last_run() {
+fn consolidate_auto_runs_decay_and_creative() {
     let server = test_server();
 
-    // Status with no prior runs should return empty cycles
-    let params = json!({"name": "consolidation_status", "arguments": {}});
+    // Run auto consolidation (replaces old consolidation_status)
+    let params = json!({"name": "consolidate", "arguments": {"mode": "auto"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(1));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
     let parsed: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(parsed["cycles"], json!({}));
 
-    // Run a decay cycle
-    let params = json!({"name": "consolidate_decay", "arguments": {}});
-    server.handle_request("tools/call", Some(&params), json!(2));
-
-    // Now status should show decay
-    let params = json!({"name": "consolidation_status", "arguments": {}});
-    let resp = server.handle_request("tools/call", Some(&params), json!(3));
-    let result = resp.result.unwrap();
-    let text = result["content"][0]["text"].as_str().unwrap();
-    let parsed: Value = serde_json::from_str(text).unwrap();
-
-    assert!(parsed["cycles"]["decay"].is_object());
-    assert!(parsed["cycles"]["decay"]["last_run"].is_string());
-    assert!(parsed["cycles"]["decay"]["affected"].is_number());
+    // Auto mode runs decay and creative, and includes status
+    assert!(parsed["decay"].is_object());
+    assert!(parsed["creative"].is_object());
+    assert!(parsed["status"].is_object());
 }
 
 #[test]

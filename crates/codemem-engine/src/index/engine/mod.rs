@@ -15,7 +15,7 @@ use ast_grep_core::tree_sitter::StrDoc;
 use ast_grep_core::{Doc, Node};
 use ast_grep_language::SupportLang;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 /// Type alias for ast-grep nodes parameterized on SupportLang.
@@ -73,6 +73,17 @@ impl AstGrepEngine {
         file_path: &str,
     ) -> Vec<Symbol> {
         let root = lang.lang.ast_grep(source);
+        self.extract_symbols_from_tree(lang, &root, source, file_path)
+    }
+
+    /// C1: Extract symbols from a pre-parsed AST tree, avoiding re-parsing.
+    pub fn extract_symbols_from_tree(
+        &self,
+        lang: &LanguageRules,
+        root: &ast_grep_core::AstGrep<StrDoc<SupportLang>>,
+        source: &str,
+        file_path: &str,
+    ) -> Vec<Symbol> {
         let root_node = root.root();
         let mut symbols = Vec::new();
         let mut scope = Vec::new();
@@ -88,7 +99,8 @@ impl AstGrepEngine {
         symbols
     }
 
-    /// Parse source code and extract references.
+    /// Parse source code and extract references, deduplicating by
+    /// (source_qualified_name, target_name, reference_kind).
     pub fn extract_references(
         &self,
         lang: &LanguageRules,
@@ -96,6 +108,17 @@ impl AstGrepEngine {
         file_path: &str,
     ) -> Vec<Reference> {
         let root = lang.lang.ast_grep(source);
+        self.extract_references_from_tree(lang, &root, source, file_path)
+    }
+
+    /// C1: Extract references from a pre-parsed AST tree, avoiding re-parsing.
+    pub fn extract_references_from_tree(
+        &self,
+        lang: &LanguageRules,
+        root: &ast_grep_core::AstGrep<StrDoc<SupportLang>>,
+        source: &str,
+        file_path: &str,
+    ) -> Vec<Reference> {
         let root_node = root.root();
         let mut references = Vec::new();
         let mut scope = Vec::new();
@@ -107,6 +130,17 @@ impl AstGrepEngine {
             &mut scope,
             &mut references,
         );
+
+        // R3: Dedup references by (source_qualified_name, target_name, kind)
+        let mut seen = HashSet::new();
+        references.retain(|r| {
+            seen.insert((
+                r.source_qualified_name.clone(),
+                r.target_name.clone(),
+                r.kind,
+            ))
+        });
+
         references
     }
 
@@ -274,7 +308,10 @@ impl AstGrepEngine {
     {
         // Handle special cases first
         if let Some(ref special) = rule.special {
-            return self.handle_special_symbol(lang, special, node, source, file_path, scope);
+            let mut sym =
+                self.handle_special_symbol(lang, special, node, source, file_path, scope)?;
+            self.enrich_symbol_metadata(lang.name, node, &mut sym);
+            return Some(sym);
         }
 
         // Extract name
@@ -298,7 +335,7 @@ impl AstGrepEngine {
         let signature = self.extract_signature(lang.name, node, source);
         let doc_comment = self.extract_doc_comment(lang.name, node, source);
 
-        Some(build_symbol(
+        let mut sym = build_symbol(
             name,
             kind,
             signature,
@@ -309,7 +346,9 @@ impl AstGrepEngine {
             node.end_pos().line(),
             scope,
             lang.scope_separator,
-        ))
+        );
+        self.enrich_symbol_metadata(lang.name, node, &mut sym);
+        Some(sym)
     }
 
     // ── Reference Extraction ──────────────────────────────────────────
@@ -604,6 +643,13 @@ fn build_symbol(
         } else {
             Some(scope.join(scope_separator))
         },
+        parameters: Vec::new(),
+        return_type: None,
+        is_async: false,
+        attributes: Vec::new(),
+        throws: Vec::new(),
+        generic_params: None,
+        is_abstract: false,
     }
 }
 
@@ -645,6 +691,12 @@ fn parse_symbol_kind(s: &str) -> Option<SymbolKind> {
         "constant" => Some(SymbolKind::Constant),
         "module" => Some(SymbolKind::Module),
         "test" => Some(SymbolKind::Test),
+        "field" => Some(SymbolKind::Field),
+        "property" => Some(SymbolKind::Property),
+        "constructor" => Some(SymbolKind::Constructor),
+        "enum_variant" => Some(SymbolKind::EnumVariant),
+        "macro" => Some(SymbolKind::Macro),
+        "decorator" => Some(SymbolKind::Decorator),
         _ => None,
     }
 }

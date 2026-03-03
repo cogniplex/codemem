@@ -45,6 +45,8 @@ pub struct ChunkConfig {
     pub max_chunk_size: usize,
     /// Minimum chunk size in non-whitespace characters.
     pub min_chunk_size: usize,
+    /// Number of lines to overlap between adjacent chunks (0 = no overlap).
+    pub overlap_lines: usize,
 }
 
 impl Default for ChunkConfig {
@@ -52,6 +54,7 @@ impl Default for ChunkConfig {
         Self {
             max_chunk_size: 1500,
             min_chunk_size: 50,
+            overlap_lines: 0,
         }
     }
 }
@@ -100,12 +103,24 @@ where
     // Merge adjacent small chunks greedily
     let merged = merge_small_chunks(raw_chunks, source, config);
 
+    // C3: Apply overlap — prepend trailing lines from previous chunk
+    let merged = if config.overlap_lines > 0 {
+        apply_overlap(merged, source, config.overlap_lines)
+    } else {
+        merged
+    };
+
+    // C2: Build interval index once for O(log n) parent resolution per chunk
+    let interval_index = SymbolIntervalIndex::build(symbols);
+
     // Assign indices and resolve parent symbols
     merged
         .into_iter()
         .enumerate()
         .map(|(idx, raw)| {
-            let parent_symbol = resolve_parent_symbol(raw.line_start, raw.line_end, symbols);
+            let parent_symbol = interval_index
+                .resolve(raw.line_start, raw.line_end)
+                .map(|s| s.qualified_name.clone());
             CodeChunk {
                 index: idx,
                 text: raw.text,
@@ -192,7 +207,12 @@ fn merge_small_chunks(chunks: Vec<RawChunk>, source: &str, config: &ChunkConfig)
 
                 if merged_nws <= config.max_chunk_size {
                     last.text = merged_text;
-                    last.node_kind = "merged".to_string();
+                    // C4: Preserve individual node_kinds as comma-separated
+                    if last.node_kind.contains(&chunk.node_kind) {
+                        // Already contains this kind, no-op
+                    } else {
+                        last.node_kind = format!("{},{}", last.node_kind, chunk.node_kind);
+                    }
                     last.line_end = chunk.line_end;
                     last.byte_end = merged_end;
                     last.non_ws_chars = merged_nws;
@@ -206,23 +226,100 @@ fn merge_small_chunks(chunks: Vec<RawChunk>, source: &str, config: &ChunkConfig)
     result
 }
 
-/// Resolve the innermost parent symbol for a given line range.
-fn resolve_parent_symbol(line_start: usize, line_end: usize, symbols: &[Symbol]) -> Option<String> {
-    let mut best: Option<&Symbol> = None;
-    let mut best_span = usize::MAX;
-
-    for sym in symbols {
-        // Symbol must contain the chunk's line range
-        if sym.line_start <= line_start && sym.line_end >= line_end {
-            let span = sym.line_end - sym.line_start;
-            if span < best_span {
-                best_span = span;
-                best = Some(sym);
-            }
-        }
+/// C3: Apply overlap between adjacent chunks by prepending trailing lines
+/// from the previous chunk to the current one.
+fn apply_overlap(chunks: Vec<RawChunk>, source: &str, overlap_lines: usize) -> Vec<RawChunk> {
+    if chunks.len() <= 1 || overlap_lines == 0 {
+        return chunks;
     }
 
-    best.map(|s| s.qualified_name.clone())
+    let source_lines: Vec<&str> = source.lines().collect();
+    let mut result = Vec::with_capacity(chunks.len());
+
+    for (i, mut chunk) in chunks.into_iter().enumerate() {
+        if i > 0 && chunk.line_start > 0 {
+            // Prepend `overlap_lines` lines from before this chunk's start
+            let overlap_start = chunk.line_start.saturating_sub(overlap_lines);
+            if overlap_start < chunk.line_start && overlap_start < source_lines.len() {
+                let end = chunk.line_start.min(source_lines.len());
+                let prefix: String = source_lines[overlap_start..end].join("\n");
+                chunk.text = format!("{}\n{}", prefix, chunk.text);
+                chunk.line_start = overlap_start;
+                chunk.non_ws_chars = count_non_ws(&chunk.text);
+            }
+        }
+        result.push(chunk);
+    }
+
+    result
+}
+
+/// Pre-sorted symbol index for O(log n) parent resolution via binary search.
+struct SymbolIntervalIndex<'a> {
+    /// Symbols sorted by (line_start ASC, line_end DESC) — outermost first at each start.
+    sorted: Vec<&'a Symbol>,
+}
+
+impl<'a> SymbolIntervalIndex<'a> {
+    fn build(symbols: &'a [Symbol]) -> Self {
+        let mut sorted: Vec<&Symbol> = symbols.iter().collect();
+        sorted.sort_by(|a, b| {
+            a.line_start
+                .cmp(&b.line_start)
+                .then_with(|| b.line_end.cmp(&a.line_end))
+        });
+        Self { sorted }
+    }
+
+    /// Find the innermost symbol containing [line_start, line_end].
+    /// Uses binary search to find candidates starting at or before line_start,
+    /// then scans forward for the tightest containment.
+    fn resolve(&self, line_start: usize, line_end: usize) -> Option<&'a Symbol> {
+        if self.sorted.is_empty() {
+            return None;
+        }
+
+        // Binary search: find the rightmost symbol whose line_start <= line_start
+        let idx = match self
+            .sorted
+            .binary_search_by(|s| s.line_start.cmp(&line_start))
+        {
+            Ok(i) => i,
+            Err(i) => {
+                if i == 0 {
+                    return None;
+                }
+                i - 1
+            }
+        };
+
+        let mut best: Option<&Symbol> = None;
+        let mut best_span = usize::MAX;
+
+        // Scan backwards from idx (all candidates have line_start <= line_start)
+        for &sym in self.sorted[..=idx].iter().rev() {
+            if sym.line_start > line_start {
+                continue;
+            }
+            // Once we pass symbols that start too early and are too short, stop
+            if best.is_some() && sym.line_end < line_end {
+                // Symbols are sorted with largest span first at each start position,
+                // so once we see one that doesn't contain us and we already have
+                // a best, earlier symbols with the same start won't either.
+                // But symbols with smaller line_start may still contain us.
+                continue;
+            }
+            if sym.line_end >= line_end {
+                let span = sym.line_end - sym.line_start;
+                if span < best_span {
+                    best_span = span;
+                    best = Some(sym);
+                }
+            }
+        }
+
+        best
+    }
 }
 
 #[cfg(test)]

@@ -54,7 +54,104 @@ pub struct SymbolSearchResult {
     pub parent: Option<String>,
 }
 
+/// Extract code references from free-form text for use in auto-linking.
+///
+/// Recognizes:
+/// - CamelCase identifiers (likely type/class names): `ProcessRequest`, `HashMap`
+/// - Backtick-wrapped code: content from \`...\`
+/// - Function-like patterns: `word()` or `word::path`
+/// - Short file paths: patterns like `src/foo.rs`, `lib/bar.py`
+///
+/// Returns deduplicated references suitable for matching against graph node labels.
+pub fn extract_code_references(text: &str) -> Vec<String> {
+    use regex::Regex;
+    use std::collections::HashSet;
+    use std::sync::OnceLock;
+
+    static RE_CAMEL: OnceLock<Regex> = OnceLock::new();
+    static RE_BACKTICK: OnceLock<Regex> = OnceLock::new();
+    static RE_FUNC: OnceLock<Regex> = OnceLock::new();
+    static RE_PATH: OnceLock<Regex> = OnceLock::new();
+
+    let re_camel = RE_CAMEL.get_or_init(|| {
+        // CamelCase: at least two words, each starting uppercase, min 4 chars total
+        Regex::new(r"\b([A-Z][a-z]+(?:[A-Z][a-z0-9]*)+)\b").unwrap()
+    });
+    let re_backtick = RE_BACKTICK.get_or_init(|| {
+        // Content inside backticks (non-greedy, at least 2 chars)
+        Regex::new(r"`([^`]{2,})`").unwrap()
+    });
+    let re_func = RE_FUNC.get_or_init(|| {
+        // Function calls like word() or qualified paths like word::path
+        Regex::new(r"\b([a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)+)\b|\b([a-zA-Z_]\w*)\(\)").unwrap()
+    });
+    let re_path = RE_PATH.get_or_init(|| {
+        // File paths: word/word.ext patterns (2-4 segments, common extensions)
+        Regex::new(r"\b([a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_\-]+)*\.[a-zA-Z]{1,4})\b").unwrap()
+    });
+
+    let mut seen = HashSet::new();
+    let mut refs = Vec::new();
+
+    let mut add = |s: &str| {
+        let trimmed = s.trim();
+        if trimmed.len() >= 2 && seen.insert(trimmed.to_string()) {
+            refs.push(trimmed.to_string());
+        }
+    };
+
+    for cap in re_camel.captures_iter(text) {
+        if let Some(m) = cap.get(1) {
+            add(m.as_str());
+        }
+    }
+    for cap in re_backtick.captures_iter(text) {
+        if let Some(m) = cap.get(1) {
+            add(m.as_str());
+        }
+    }
+    for cap in re_func.captures_iter(text) {
+        // Group 1: qualified path (a::b::c), Group 2: function call (word())
+        if let Some(m) = cap.get(1) {
+            add(m.as_str());
+        }
+        if let Some(m) = cap.get(2) {
+            add(m.as_str());
+        }
+    }
+    for cap in re_path.captures_iter(text) {
+        if let Some(m) = cap.get(1) {
+            let path = m.as_str();
+            // Only include if it looks like a real file path (has a directory separator)
+            if path.contains('/') {
+                add(path);
+            }
+        }
+    }
+
+    refs
+}
+
 impl CodememEngine {
+    /// Estimate the approximate RAM usage of the in-memory graph.
+    ///
+    /// The graph engine (`GraphEngine`) keeps all nodes and edges in memory via
+    /// `HashMap`s plus a `petgraph::DiGraph`. Each node carries a `GraphNode` struct
+    /// (~200 bytes: id, kind, label, payload HashMap, centrality, optional memory_id
+    /// and namespace) plus a petgraph `NodeIndex`. Each edge carries an `Edge` struct
+    /// (~150 bytes: id, src, dst, relationship, weight, properties HashMap, timestamps)
+    /// plus petgraph edge weight storage and adjacency list entries.
+    ///
+    /// Returns an estimate in bytes. Actual usage may be higher due to HashMap overhead,
+    /// string heap allocations, and payload contents.
+    pub fn graph_memory_estimate(&self) -> usize {
+        let (node_count, edge_count) = match self.lock_graph() {
+            Ok(g) => (g.node_count(), g.edge_count()),
+            Err(_) => (0, 0),
+        };
+        node_count * 200 + edge_count * 150
+    }
+
     /// Semantic code search: embed query, vector search, filter to sym:/chunk: IDs,
     /// enrich with graph node data.
     pub fn search_code(

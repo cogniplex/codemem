@@ -212,7 +212,7 @@ fn write_tool_extracts_decision_memory() {
 #[test]
 fn unknown_tool_returns_none() {
     let payload_json = r#"{
-        "tool_name": "Bash",
+        "tool_name": "SomeCompletelyUnknownTool",
         "tool_input": {"command": "ls"},
         "tool_response": "file1.txt\nfile2.txt"
     }"#;
