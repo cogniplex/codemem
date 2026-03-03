@@ -20,6 +20,7 @@ use codemem_storage::Storage;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
+pub mod analysis;
 pub mod bm25;
 pub mod compress;
 pub mod consolidation;
@@ -31,6 +32,7 @@ pub mod patterns;
 pub mod persistence;
 pub mod recall;
 pub mod scoring;
+pub mod search;
 pub mod watch;
 
 // Re-export key index types at crate root for convenience
@@ -49,6 +51,17 @@ pub use enrichment::EnrichResult;
 
 // Re-export persistence types
 pub use persistence::{edge_weight_for, IndexPersistResult};
+
+// Re-export recall types
+pub use recall::{ExpandedResult, NamespaceStats};
+
+// Re-export search types
+pub use search::{CodeSearchResult, SummaryTreeNode, SymbolSearchResult};
+
+// Re-export analysis types
+pub use analysis::{
+    DecisionChain, DecisionConnection, DecisionEntry, ImpactResult, SessionCheckpointReport,
+};
 
 /// A part descriptor for `split_memory()`.
 #[derive(Debug, Clone)]

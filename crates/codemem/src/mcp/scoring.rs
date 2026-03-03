@@ -5,7 +5,8 @@ use codemem_core::SearchResult;
 use serde_json::{json, Value};
 use std::io::Write;
 
-// Re-export compute_score from engine so existing `crate::scoring::compute_score` paths work.
+// Re-export compute_score from engine so existing test paths work.
+#[cfg(test)]
 pub(crate) use codemem_engine::scoring::compute_score;
 
 /// Write a JSON-RPC response as a single line to stdout.

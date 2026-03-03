@@ -234,61 +234,34 @@ impl McpServer {
             Some(q) if !q.is_empty() => q,
             _ => return ToolResult::tool_error("Missing or empty 'query' parameter"),
         };
-
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
-
         let kind_filter: Option<&str> = args.get("kind").and_then(|v| v.as_str());
 
-        let cache = match self.lock_index_cache() {
-            Ok(c) => c,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
-        let symbols = match cache.as_ref() {
-            Some(c) => &c.symbols,
-            None => {
-                return ToolResult::tool_error("No codebase indexed yet. Run index_codebase first.")
+        match self.engine.search_symbols(query, limit, kind_filter) {
+            Ok(matches) if matches.is_empty() => ToolResult::text("No matching symbols found."),
+            Ok(matches) => {
+                let output: Vec<Value> = matches
+                    .iter()
+                    .map(|sym| {
+                        json!({
+                            "name": sym.name,
+                            "qualified_name": sym.qualified_name,
+                            "kind": sym.kind,
+                            "signature": sym.signature,
+                            "file_path": sym.file_path,
+                            "line_start": sym.line_start,
+                            "line_end": sym.line_end,
+                            "visibility": sym.visibility,
+                            "parent": sym.parent,
+                        })
+                    })
+                    .collect();
+                ToolResult::text(
+                    serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
+                )
             }
-        };
-
-        let query_lower = query.to_lowercase();
-
-        let matches: Vec<Value> = symbols
-            .iter()
-            .filter(|sym| {
-                let name_match = sym.name.to_lowercase().contains(&query_lower)
-                    || sym.qualified_name.to_lowercase().contains(&query_lower);
-                if !name_match {
-                    return false;
-                }
-                if let Some(kind_str) = kind_filter {
-                    let kind_lower = kind_str.to_lowercase();
-                    return sym.kind.to_string().to_lowercase() == kind_lower;
-                }
-                true
-            })
-            .take(limit)
-            .map(|sym| {
-                json!({
-                    "name": sym.name,
-                    "qualified_name": sym.qualified_name,
-                    "kind": sym.kind.to_string(),
-                    "signature": sym.signature,
-                    "file_path": sym.file_path,
-                    "line_start": sym.line_start,
-                    "line_end": sym.line_end,
-                    "visibility": sym.visibility.to_string(),
-                    "parent": sym.parent,
-                })
-            })
-            .collect();
-
-        if matches.is_empty() {
-            return ToolResult::text("No matching symbols found.");
+            Err(e) => ToolResult::tool_error(format!("{e}")),
         }
-
-        ToolResult::text(
-            serde_json::to_string_pretty(&matches).expect("JSON serialization of literal"),
-        )
     }
 
     pub(crate) fn tool_get_symbol_info(&self, args: &Value) -> ToolResult {
@@ -591,75 +564,49 @@ impl McpServer {
             Some(q) if !q.is_empty() => q,
             _ => return ToolResult::tool_error("Missing or empty 'query' parameter"),
         };
-
         let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
-        let results: Vec<(String, f32)> = if let Some(emb_guard) = match self.lock_embeddings() {
-            Ok(g) => g,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        } {
-            match emb_guard.embed(query) {
-                Ok(query_embedding) => {
-                    drop(emb_guard);
-                    let vec = match self.lock_vector() {
-                        Ok(v) => v,
-                        Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-                    };
-                    vec.search(&query_embedding, k * 3)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|(id, _)| id.starts_with("sym:") || id.starts_with("chunk:"))
-                        .take(k)
-                        .collect()
-                }
-                Err(e) => {
-                    return ToolResult::tool_error(format!("Embedding failed: {e}"));
-                }
+        match self.engine.search_code(query, k) {
+            Ok(results) if results.is_empty() => ToolResult::text("No matching code found."),
+            Ok(results) => {
+                // Format results to match the original JSON shape
+                let output: Vec<Value> = results
+                    .iter()
+                    .map(|r| {
+                        if r.kind == "chunk" {
+                            json!({
+                                "id": r.id,
+                                "kind": "chunk",
+                                "label": r.label,
+                                "similarity": format!("{:.4}", r.similarity),
+                                "file_path": r.file_path,
+                                "line_start": r.line_start,
+                                "line_end": r.line_end,
+                                "node_kind": r.node_kind,
+                                "parent_symbol": r.parent_symbol,
+                                "non_ws_chars": r.non_ws_chars,
+                            })
+                        } else {
+                            json!({
+                                "qualified_name": r.qualified_name,
+                                "kind": r.kind,
+                                "label": r.label,
+                                "similarity": format!("{:.4}", r.similarity),
+                                "file_path": r.file_path,
+                                "line_start": r.line_start,
+                                "line_end": r.line_end,
+                                "signature": r.signature,
+                                "doc_comment": r.doc_comment,
+                            })
+                        }
+                    })
+                    .collect();
+                ToolResult::text(
+                    serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
+                )
             }
-        } else {
-            return ToolResult::tool_error("Embedding service not available");
-        };
-
-        if results.is_empty() {
-            return ToolResult::text("No matching code found.");
+            Err(e) => ToolResult::tool_error(format!("{e}")),
         }
-
-        let mut output = Vec::new();
-        for (id, distance) in &results {
-            let similarity = 1.0 - *distance as f64;
-            if let Ok(Some(node)) = self.engine.storage.get_graph_node(id) {
-                if id.starts_with("chunk:") {
-                    output.push(json!({
-                        "id": id,
-                        "kind": "chunk",
-                        "label": node.label,
-                        "similarity": format!("{:.4}", similarity),
-                        "file_path": node.payload.get("file_path"),
-                        "line_start": node.payload.get("line_start"),
-                        "line_end": node.payload.get("line_end"),
-                        "node_kind": node.payload.get("node_kind"),
-                        "parent_symbol": node.payload.get("parent_symbol"),
-                        "non_ws_chars": node.payload.get("non_ws_chars"),
-                    }));
-                } else {
-                    output.push(json!({
-                        "qualified_name": id.strip_prefix("sym:").unwrap_or(id),
-                        "kind": node.kind.to_string(),
-                        "label": node.label,
-                        "similarity": format!("{:.4}", similarity),
-                        "file_path": node.payload.get("file_path"),
-                        "line_start": node.payload.get("line_start"),
-                        "line_end": node.payload.get("line_end"),
-                        "signature": node.payload.get("signature"),
-                        "doc_comment": node.payload.get("doc_comment"),
-                    }));
-                }
-            }
-        }
-
-        ToolResult::text(
-            serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
-        )
     }
 
     /// MCP tool: set_scoring_weights -- update the server's scoring weights at runtime.
@@ -751,7 +698,7 @@ impl McpServer {
     // ── Summary Tree Tool ────────────────────────────────────────────────
 
     /// Return a hierarchical summary tree starting from a given node.
-    /// Shows packages → files → symbols (no chunks unless explicitly requested).
+    /// Shows packages -> files -> symbols (no chunks unless explicitly requested).
     pub(crate) fn tool_summary_tree(&self, args: &Value) -> ToolResult {
         let start_id = match args.get("start_id").and_then(|v| v.as_str()) {
             Some(s) => s,
@@ -763,93 +710,14 @@ impl McpServer {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let graph = match self.lock_graph() {
-            Ok(g) => g,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
-
-        fn build_tree(
-            graph: &dyn GraphBackend,
-            node_id: &str,
-            depth: usize,
-            max_depth: usize,
-            include_chunks: bool,
-        ) -> Option<Value> {
-            if depth > max_depth {
-                return None;
-            }
-            let node = match graph.get_node(node_id) {
-                Ok(Some(n)) => n,
-                _ => return None,
-            };
-
-            let mut children: Vec<Value> = Vec::new();
-            if depth < max_depth {
-                // Find CONTAINS edges from this node
-                if let Ok(edges) = graph.get_edges(node_id) {
-                    let mut child_ids: Vec<String> = edges
-                        .iter()
-                        .filter(|e| {
-                            e.src == node_id && e.relationship == RelationshipType::Contains
-                        })
-                        .map(|e| e.dst.clone())
-                        .collect();
-                    child_ids.sort();
-
-                    for child_id in &child_ids {
-                        // Skip chunks unless requested
-                        if !include_chunks && child_id.starts_with("chunk:") {
-                            continue;
-                        }
-                        if let Some(child) =
-                            build_tree(graph, child_id, depth + 1, max_depth, include_chunks)
-                        {
-                            children.push(child);
-                        }
-                    }
-                }
-            }
-
-            let mut result = json!({
-                "id": node.id,
-                "kind": node.kind.to_string(),
-                "label": node.label,
-                "centrality": node.centrality,
-            });
-
-            // Add summary metadata for files
-            if node.kind == NodeKind::File {
-                let symbol_count = children
-                    .iter()
-                    .filter(|c| {
-                        let k = c.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-                        k != "chunk" && k != "package" && k != "file"
-                    })
-                    .count();
-                let chunk_count = if include_chunks {
-                    children
-                        .iter()
-                        .filter(|c| c.get("kind").and_then(|v| v.as_str()) == Some("chunk"))
-                        .count()
-                } else {
-                    0
-                };
-                result["symbol_count"] = json!(symbol_count);
-                result["chunk_count"] = json!(chunk_count);
-            }
-
-            if !children.is_empty() {
-                result["children"] = json!(children);
-            }
-
-            Some(result)
-        }
-
-        match build_tree(&*graph, start_id, 0, max_depth, include_chunks) {
-            Some(tree) => {
+        match self
+            .engine
+            .summary_tree(start_id, max_depth, include_chunks)
+        {
+            Ok(tree) => {
                 ToolResult::text(serde_json::to_string_pretty(&tree).expect("JSON serialization"))
             }
-            None => ToolResult::tool_error(format!("Node not found: {start_id}")),
+            Err(e) => ToolResult::tool_error(format!("{e}")),
         }
     }
 }

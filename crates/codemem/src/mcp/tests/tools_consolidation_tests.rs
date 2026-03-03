@@ -1,7 +1,8 @@
 use super::*;
 use crate::mcp::test_helpers::*;
-use codemem_core::VectorBackend;
+use codemem_core::{MemoryNode, MemoryType, VectorBackend};
 use codemem_storage::Storage;
+use std::collections::HashMap;
 
 /// Helper: call a tool and return the result Value.
 fn call_tool(server: &McpServer, tool_name: &str, arguments: Value) -> Value {

@@ -103,12 +103,6 @@ impl McpServer {
         self.engine.lock_graph()
     }
 
-    pub(crate) fn lock_bm25(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, bm25::Bm25Index>, CodememError> {
-        self.engine.lock_bm25()
-    }
-
     pub(crate) fn lock_embeddings(
         &self,
     ) -> Result<
@@ -122,12 +116,6 @@ impl McpServer {
         &self,
     ) -> Result<std::sync::MutexGuard<'_, Option<IndexCache>>, CodememError> {
         self.engine.lock_index_cache()
-    }
-
-    pub(crate) fn scoring_weights(
-        &self,
-    ) -> Result<std::sync::RwLockReadGuard<'_, codemem_core::ScoringWeights>, CodememError> {
-        self.engine.scoring_weights()
     }
 
     pub(crate) fn scoring_weights_mut(
