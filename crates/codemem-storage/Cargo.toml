@@ -19,3 +19,5 @@ tracing = { workspace = true }
 sha2 = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+usearch = { workspace = true }
+petgraph = { workspace = true }

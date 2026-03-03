@@ -1,4 +1,4 @@
-use crate::GraphEngine;
+use crate::graph::GraphEngine;
 use codemem_core::{Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
 use std::collections::HashMap;
 

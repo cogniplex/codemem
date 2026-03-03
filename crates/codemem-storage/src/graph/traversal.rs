@@ -1,4 +1,4 @@
-use crate::GraphEngine;
+use super::GraphEngine;
 use codemem_core::{
     CodememError, Edge, GraphBackend, GraphNode, GraphStats, NodeKind, RelationshipType,
 };
@@ -366,5 +366,5 @@ impl GraphBackend for GraphEngine {
 }
 
 #[cfg(test)]
-#[path = "tests/traversal_tests.rs"]
+#[path = "../tests/graph_traversal_tests.rs"]
 mod tests;

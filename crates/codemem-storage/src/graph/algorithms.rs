@@ -1,4 +1,4 @@
-use crate::GraphEngine;
+use super::GraphEngine;
 use codemem_core::{Edge, GraphNode, NodeKind};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
@@ -613,5 +613,5 @@ impl GraphEngine {
 }
 
 #[cfg(test)]
-#[path = "tests/algorithms_tests.rs"]
+#[path = "../tests/graph_algorithms_tests.rs"]
 mod tests;

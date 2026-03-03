@@ -10,10 +10,15 @@ use std::path::Path;
 use std::sync::Mutex;
 
 mod backend;
+pub mod graph;
 mod graph_persistence;
 mod memory;
 mod migrations;
 mod queries;
+pub mod vector;
+
+pub use graph::GraphEngine;
+pub use vector::HnswIndex;
 
 /// SQLite-backed storage for Codemem memories, embeddings, and graph data.
 ///

@@ -222,5 +222,5 @@ struct IdMappingOwned {
 }
 
 #[cfg(test)]
-#[path = "tests/lib_tests.rs"]
+#[path = "tests/vector_tests.rs"]
 mod tests;

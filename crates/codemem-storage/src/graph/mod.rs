@@ -320,5 +320,5 @@ impl GraphEngine {
 }
 
 #[cfg(test)]
-#[path = "tests/lib_tests.rs"]
+#[path = "../tests/graph_tests.rs"]
 mod tests;

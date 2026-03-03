@@ -108,6 +108,30 @@ pub struct GraphStats {
     pub relationship_type_counts: HashMap<String, usize>,
 }
 
+// ── Embedding Provider Trait ────────────────────────────────────────────────
+
+/// Trait for pluggable embedding providers.
+pub trait EmbeddingProvider: Send + Sync {
+    /// Embedding vector dimensions.
+    fn dimensions(&self) -> usize;
+
+    /// Embed a single text string.
+    fn embed(&self, text: &str) -> Result<Vec<f32>, crate::CodememError>;
+
+    /// Embed a batch of texts (default: sequential).
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, crate::CodememError> {
+        texts.iter().map(|t| self.embed(t)).collect()
+    }
+
+    /// Provider name for display.
+    fn name(&self) -> &str;
+
+    /// Cache statistics: (current_size, capacity). Returns (0, 0) if no cache.
+    fn cache_stats(&self) -> (usize, usize) {
+        (0, 0)
+    }
+}
+
 // ── Storage Stats & Consolidation Types ─────────────────────────────────
 
 /// Database statistics.
