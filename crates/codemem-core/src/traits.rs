@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{CodememError, Edge, GraphNode, MemoryNode, Session};
+use crate::{CodememError, Edge, GraphNode, MemoryNode, NodeKind, RelationshipType, Session};
 
 // ── Traits ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +63,34 @@ pub trait GraphBackend: Send + Sync {
 
     /// DFS traversal from a start node up to max_depth.
     fn dfs(&self, start_id: &str, max_depth: usize) -> Result<Vec<GraphNode>, CodememError>;
+
+    /// BFS traversal with filtering: exclude certain node kinds and optionally
+    /// restrict to specific relationship types.
+    fn bfs_filtered(
+        &self,
+        start_id: &str,
+        max_depth: usize,
+        exclude_kinds: &[NodeKind],
+        include_relationships: Option<&[RelationshipType]>,
+    ) -> Result<Vec<GraphNode>, CodememError> {
+        // Default implementation falls back to unfiltered BFS
+        let _ = (exclude_kinds, include_relationships);
+        self.bfs(start_id, max_depth)
+    }
+
+    /// DFS traversal with filtering: exclude certain node kinds and optionally
+    /// restrict to specific relationship types.
+    fn dfs_filtered(
+        &self,
+        start_id: &str,
+        max_depth: usize,
+        exclude_kinds: &[NodeKind],
+        include_relationships: Option<&[RelationshipType]>,
+    ) -> Result<Vec<GraphNode>, CodememError> {
+        // Default implementation falls back to unfiltered DFS
+        let _ = (exclude_kinds, include_relationships);
+        self.dfs(start_id, max_depth)
+    }
 
     /// Shortest path between two nodes.
     fn shortest_path(&self, from: &str, to: &str) -> Result<Vec<String>, CodememError>;

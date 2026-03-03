@@ -321,12 +321,12 @@ impl ScoreBreakdown {
     /// Compute the weighted total score using default weights.
     pub fn total(&self) -> f64 {
         self.vector_similarity * 0.25
-            + self.graph_strength * 0.25
+            + self.graph_strength * 0.20
             + self.token_overlap * 0.15
             + self.temporal * 0.10
-            + self.tag_matching * 0.10
-            + self.importance * 0.05
-            + self.confidence * 0.05
+            + self.tag_matching * 0.05
+            + self.importance * 0.10
+            + self.confidence * 0.10
             + self.recency * 0.05
     }
 
@@ -364,12 +364,12 @@ impl Default for ScoringWeights {
     fn default() -> Self {
         Self {
             vector_similarity: 0.25,
-            graph_strength: 0.25,
+            graph_strength: 0.20,
             token_overlap: 0.15,
             temporal: 0.10,
-            tag_matching: 0.10,
-            importance: 0.05,
-            confidence: 0.05,
+            tag_matching: 0.05,
+            importance: 0.10,
+            confidence: 0.10,
             recency: 0.05,
         }
     }
@@ -442,6 +442,12 @@ pub enum DistanceMetric {
 pub struct GraphConfig {
     pub max_expansion_hops: usize,
     pub bridge_similarity_threshold: f64,
+    /// Default edge weight for CONTAINS relationship (structural, low).
+    pub contains_edge_weight: f64,
+    /// Default edge weight for CALLS relationship (high signal).
+    pub calls_edge_weight: f64,
+    /// Default edge weight for IMPORTS relationship.
+    pub imports_edge_weight: f64,
 }
 
 impl Default for GraphConfig {
@@ -449,6 +455,9 @@ impl Default for GraphConfig {
         Self {
             max_expansion_hops: 2,
             bridge_similarity_threshold: 0.8,
+            contains_edge_weight: 0.1,
+            calls_edge_weight: 1.0,
+            imports_edge_weight: 0.5,
         }
     }
 }

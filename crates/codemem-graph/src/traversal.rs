@@ -1,8 +1,9 @@
 use crate::GraphEngine;
-use codemem_core::{CodememError, Edge, GraphBackend, GraphNode, GraphStats};
+use codemem_core::{CodememError, Edge, GraphBackend, GraphNode, GraphStats, NodeKind, RelationshipType};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
-use std::collections::{HashMap, HashSet};
+use petgraph::Direction;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 impl Default for GraphEngine {
     fn default() -> Self {
@@ -151,6 +152,141 @@ impl GraphBackend for GraphEngine {
                 if !visited.contains(&neighbor) {
                     stack.push((neighbor, depth + 1));
                 }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn bfs_filtered(
+        &self,
+        start_id: &str,
+        max_depth: usize,
+        exclude_kinds: &[NodeKind],
+        include_relationships: Option<&[RelationshipType]>,
+    ) -> Result<Vec<GraphNode>, CodememError> {
+        let start_idx = self
+            .id_to_index
+            .get(start_id)
+            .ok_or_else(|| CodememError::NotFound(format!("Node {start_id}")))?;
+
+        let mut visited = HashSet::new();
+        let mut result = Vec::new();
+        let mut queue: VecDeque<(NodeIndex, usize)> = VecDeque::new();
+        queue.push_back((*start_idx, 0));
+        visited.insert(*start_idx);
+
+        while let Some((node_idx, depth)) = queue.pop_front() {
+            // Add current node to results if not excluded
+            if let Some(node_id) = self.graph.node_weight(node_idx) {
+                if let Some(node) = self.nodes.get(node_id) {
+                    if !exclude_kinds.contains(&node.kind) {
+                        result.push(node.clone());
+                    }
+                }
+            }
+
+            if depth >= max_depth {
+                continue;
+            }
+
+            // Explore outgoing edges with filtering
+            for neighbor_idx in self.graph.neighbors_directed(node_idx, Direction::Outgoing) {
+                if visited.contains(&neighbor_idx) {
+                    continue;
+                }
+
+                // Check relationship filter if set
+                if let Some(allowed_rels) = include_relationships {
+                    let src_id = self.graph.node_weight(node_idx).cloned().unwrap_or_default();
+                    let dst_id = self.graph.node_weight(neighbor_idx).cloned().unwrap_or_default();
+                    let edge_matches = self.edges.values().any(|e| {
+                        e.src == src_id && e.dst == dst_id && allowed_rels.contains(&e.relationship)
+                    });
+                    if !edge_matches {
+                        continue;
+                    }
+                }
+
+                // Check if neighbor's kind is excluded
+                if let Some(neighbor_id) = self.graph.node_weight(neighbor_idx) {
+                    if let Some(neighbor_node) = self.nodes.get(neighbor_id) {
+                        if exclude_kinds.contains(&neighbor_node.kind) {
+                            continue;
+                        }
+                    }
+                }
+
+                visited.insert(neighbor_idx);
+                queue.push_back((neighbor_idx, depth + 1));
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn dfs_filtered(
+        &self,
+        start_id: &str,
+        max_depth: usize,
+        exclude_kinds: &[NodeKind],
+        include_relationships: Option<&[RelationshipType]>,
+    ) -> Result<Vec<GraphNode>, CodememError> {
+        let start_idx = self
+            .id_to_index
+            .get(start_id)
+            .ok_or_else(|| CodememError::NotFound(format!("Node {start_id}")))?;
+
+        let mut visited = HashSet::new();
+        let mut result = Vec::new();
+        let mut stack: Vec<(NodeIndex, usize)> = vec![(*start_idx, 0)];
+
+        while let Some((node_idx, depth)) = stack.pop() {
+            if !visited.insert(node_idx) {
+                continue;
+            }
+
+            // Add current node to results if not excluded
+            if let Some(node_id) = self.graph.node_weight(node_idx) {
+                if let Some(node) = self.nodes.get(node_id) {
+                    if !exclude_kinds.contains(&node.kind) {
+                        result.push(node.clone());
+                    }
+                }
+            }
+
+            if depth >= max_depth {
+                continue;
+            }
+
+            // Explore outgoing edges with filtering
+            for neighbor_idx in self.graph.neighbors_directed(node_idx, Direction::Outgoing) {
+                if visited.contains(&neighbor_idx) {
+                    continue;
+                }
+
+                // Check relationship filter if set
+                if let Some(allowed_rels) = include_relationships {
+                    let src_id = self.graph.node_weight(node_idx).cloned().unwrap_or_default();
+                    let dst_id = self.graph.node_weight(neighbor_idx).cloned().unwrap_or_default();
+                    let edge_matches = self.edges.values().any(|e| {
+                        e.src == src_id && e.dst == dst_id && allowed_rels.contains(&e.relationship)
+                    });
+                    if !edge_matches {
+                        continue;
+                    }
+                }
+
+                // Check if neighbor's kind is excluded
+                if let Some(neighbor_id) = self.graph.node_weight(neighbor_idx) {
+                    if let Some(neighbor_node) = self.nodes.get(neighbor_id) {
+                        if exclude_kinds.contains(&neighbor_node.kind) {
+                            continue;
+                        }
+                    }
+                }
+
+                stack.push((neighbor_idx, depth + 1));
             }
         }
 

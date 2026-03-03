@@ -227,6 +227,67 @@ impl GraphEngine {
         self.cached_betweenness.get(node_id).copied().unwrap_or(0.0)
     }
 
+    /// Compute graph strength for a memory node by bridging to code-graph centrality.
+    ///
+    /// Memory nodes (UUIDs) and code nodes (`sym:`, `file:`) exist in disconnected
+    /// ID spaces. This method looks up a memory node's neighbors and collects
+    /// centrality data from any connected code-graph nodes to produce a meaningful
+    /// graph_strength score.
+    pub fn graph_strength_for_memory(&self, memory_id: &str) -> f64 {
+        let idx = match self.id_to_index.get(memory_id) {
+            Some(idx) => *idx,
+            None => return 0.0,
+        };
+
+        let mut max_pagerank = 0.0_f64;
+        let mut max_betweenness = 0.0_f64;
+        let mut code_neighbor_count = 0_usize;
+        let mut total_edge_weight = 0.0_f64;
+
+        // Iterate both outgoing and incoming neighbors
+        for direction in &[Direction::Outgoing, Direction::Incoming] {
+            for neighbor_idx in self.graph.neighbors_directed(idx, *direction) {
+                if let Some(neighbor_id) = self.graph.node_weight(neighbor_idx) {
+                    // Only consider code-graph nodes (sym:, file:, chunk:, pkg:)
+                    if neighbor_id.starts_with("sym:")
+                        || neighbor_id.starts_with("file:")
+                        || neighbor_id.starts_with("chunk:")
+                        || neighbor_id.starts_with("pkg:")
+                    {
+                        code_neighbor_count += 1;
+                        let pr = self.cached_pagerank.get(neighbor_id).copied().unwrap_or(0.0);
+                        let bt = self
+                            .cached_betweenness
+                            .get(neighbor_id)
+                            .copied()
+                            .unwrap_or(0.0);
+                        max_pagerank = max_pagerank.max(pr);
+                        max_betweenness = max_betweenness.max(bt);
+
+                        // Collect edge weight from our edge metadata
+                        for edge in self.edges.values() {
+                            if (edge.src == memory_id && edge.dst == *neighbor_id)
+                                || (edge.dst == memory_id && edge.src == *neighbor_id)
+                            {
+                                total_edge_weight += edge.weight;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if code_neighbor_count == 0 {
+            return 0.0;
+        }
+
+        let connectivity_bonus = (code_neighbor_count as f64 / 5.0).min(1.0);
+        let edge_weight_bonus = (total_edge_weight / code_neighbor_count as f64).min(1.0);
+
+        (0.4 * max_pagerank + 0.3 * max_betweenness + 0.2 * connectivity_bonus + 0.1 * edge_weight_bonus).min(1.0)
+    }
+
     /// Get the maximum degree (in + out) across all nodes in the graph.
     /// Returns 1.0 if the graph has fewer than 2 nodes to avoid division by zero.
     pub fn max_degree(&self) -> f64 {
