@@ -97,7 +97,9 @@ impl CodememEngine {
             return Ok(vec![]);
         }
 
-        let graph = self.lock_graph()?;
+        let mut graph = self.lock_graph()?;
+        // C1: Ensure betweenness is computed before reading centrality values.
+        graph.ensure_betweenness_computed();
 
         let output: Vec<ImpactResult> = results
             .into_iter()

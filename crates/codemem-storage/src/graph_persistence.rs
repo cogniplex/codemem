@@ -286,7 +286,13 @@ impl Storage {
         let edges = stmt
             .query_map(params![node_id], extract_edge_tuple)
             .map_err(|e| CodememError::Storage(e.to_string()))?
-            .filter_map(|r| r.ok())
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!("Failed to process edge row: {e}");
+                    None
+                }
+            })
             .filter_map(edge_from_row)
             .collect();
 
@@ -303,7 +309,13 @@ impl Storage {
         let edges = stmt
             .query_map([], extract_edge_tuple)
             .map_err(|e| CodememError::Storage(e.to_string()))?
-            .filter_map(|r| r.ok())
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!("Failed to process edge row: {e}");
+                    None
+                }
+            })
             .filter_map(edge_from_row)
             .collect();
 
@@ -338,7 +350,13 @@ impl Storage {
         let edges = stmt
             .query_map(params![namespace], extract_edge_tuple)
             .map_err(|e| CodememError::Storage(e.to_string()))?
-            .filter_map(|r| r.ok())
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!("Failed to process edge row: {e}");
+                    None
+                }
+            })
             .filter_map(edge_from_row)
             .collect();
 

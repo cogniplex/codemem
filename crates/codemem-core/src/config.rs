@@ -20,14 +20,108 @@ pub struct CodememConfig {
 }
 
 impl CodememConfig {
-    /// Load configuration from the given path.
+    /// Load configuration from the given path. Validates after loading.
     pub fn load(path: &Path) -> Result<Self, CodememError> {
         let content = std::fs::read_to_string(path)?;
-        toml::from_str(&content).map_err(|e| CodememError::Config(e.to_string()))
+        let config: Self =
+            toml::from_str(&content).map_err(|e| CodememError::Config(e.to_string()))?;
+        config.validate()?;
+        Ok(config)
     }
 
-    /// Save configuration to the given path.
+    /// Validate configuration values.
+    ///
+    /// Checks that scoring weights are non-negative, dimensions and cache sizes
+    /// are positive, chunk size bounds are consistent, and dedup threshold is
+    /// in the valid range.
+    pub fn validate(&self) -> Result<(), CodememError> {
+        // M5: Scoring weights must be finite and non-negative.
+        // Check is_finite() first to reject NaN/Inf, then < 0.0 for negatives.
+        let w = &self.scoring;
+        let weights = [
+            w.vector_similarity,
+            w.graph_strength,
+            w.token_overlap,
+            w.temporal,
+            w.tag_matching,
+            w.importance,
+            w.confidence,
+            w.recency,
+        ];
+        if weights.iter().any(|v| !v.is_finite() || *v < 0.0) {
+            return Err(CodememError::Config(
+                "All scoring weights must be finite and non-negative".to_string(),
+            ));
+        }
+
+        // Embedding dimensions must be positive
+        if self.embedding.dimensions == 0 {
+            return Err(CodememError::Config(
+                "Embedding dimensions must be > 0".to_string(),
+            ));
+        }
+
+        // Vector dimensions must be positive
+        if self.vector.dimensions == 0 {
+            return Err(CodememError::Config(
+                "Vector dimensions must be > 0".to_string(),
+            ));
+        }
+
+        // Cache capacity must be positive
+        if self.embedding.cache_capacity == 0 {
+            return Err(CodememError::Config(
+                "Embedding cache capacity must be > 0".to_string(),
+            ));
+        }
+
+        // Chunk size bounds
+        if self.chunking.min_chunk_size >= self.chunking.max_chunk_size {
+            return Err(CodememError::Config(
+                "min_chunk_size must be less than max_chunk_size".to_string(),
+            ));
+        }
+
+        // Dedup threshold in [0.0, 1.0] (also rejects NaN via range check)
+        if !(0.0..=1.0).contains(&self.enrichment.dedup_similarity_threshold) {
+            return Err(CodememError::Config(
+                "dedup_similarity_threshold must be between 0.0 and 1.0".to_string(),
+            ));
+        }
+
+        // Enrichment confidence in [0.0, 1.0]
+        if !(0.0..=1.0).contains(&self.enrichment.insight_confidence) {
+            return Err(CodememError::Config(
+                "insight_confidence must be between 0.0 and 1.0".to_string(),
+            ));
+        }
+
+        // Chunking score thresholds in [0.0, 1.0]
+        let thresholds = [
+            (
+                self.chunking.min_chunk_score_threshold,
+                "min_chunk_score_threshold",
+            ),
+            (
+                self.chunking.min_symbol_score_threshold,
+                "min_symbol_score_threshold",
+            ),
+        ];
+        for (val, name) in &thresholds {
+            if !(0.0..=1.0).contains(val) {
+                return Err(CodememError::Config(format!(
+                    "{name} must be between 0.0 and 1.0"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Save configuration to the given path. Validates before saving.
     pub fn save(&self, path: &Path) -> Result<(), CodememError> {
+        // M5: Validate before saving to prevent persisting invalid config.
+        self.validate()?;
         let content =
             toml::to_string_pretty(self).map_err(|e| CodememError::Config(e.to_string()))?;
         if let Some(parent) = path.parent() {
@@ -41,7 +135,13 @@ impl CodememConfig {
     pub fn load_or_default() -> Self {
         let path = Self::default_path();
         if path.exists() {
-            Self::load(&path).unwrap_or_default()
+            match Self::load(&path) {
+                Ok(config) => config,
+                Err(e) => {
+                    tracing::warn!("Failed to load config: {e}, using defaults");
+                    CodememConfig::default()
+                }
+            }
         } else {
             Self::default()
         }

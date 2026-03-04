@@ -1,6 +1,7 @@
 //! Hybrid scoring for memory recall.
 
 use crate::bm25;
+use chrono::{DateTime, Utc};
 use codemem_core::{MemoryNode, ScoreBreakdown};
 use codemem_storage::graph::GraphEngine;
 
@@ -48,33 +49,37 @@ pub fn truncate_content(s: &str, max: usize) -> String {
 /// The `graph` parameter is used to look up edge counts for graph strength scoring.
 /// The `bm25` parameter provides BM25-based token overlap scoring; if the memory
 /// is in the index it uses the indexed score, otherwise falls back to `score_text`.
+/// The `now` parameter makes scoring deterministic and testable by avoiding internal clock reads.
 pub fn compute_score(
     memory: &MemoryNode,
-    query: &str,
     query_tokens: &[&str],
     vector_similarity: f64,
     graph: &GraphEngine,
     bm25: &bm25::Bm25Index,
+    now: DateTime<Utc>,
 ) -> ScoreBreakdown {
     // BM25 token overlap (replaces naive split+intersect)
-    let token_overlap = if query.is_empty() {
+    // Use pre-tokenized query tokens to avoid re-tokenizing per document.
+    let token_overlap = if query_tokens.is_empty() {
         0.0
     } else {
         // Try indexed score first (memory already in the BM25 index),
         // fall back to scoring against raw text for unindexed documents.
-        let indexed_score = bm25.score(query, &memory.id);
+        let indexed_score = bm25.score_with_tokens_str(query_tokens, &memory.id);
         if indexed_score > 0.0 {
             indexed_score
         } else {
-            bm25.score_text(query, &memory.content)
+            bm25.score_text_with_tokens_str(query_tokens, &memory.content)
         }
     };
 
     // Temporal: how recently updated (exponential decay over 30 days)
-    let age_hours = (chrono::Utc::now() - memory.updated_at).num_hours().max(0) as f64;
+    let age_hours = (now - memory.updated_at).num_hours().max(0) as f64;
     let temporal = (-age_hours / (30.0 * 24.0)).exp();
 
-    // Tag matching: fraction of query tokens found in tags
+    // Tag matching: fraction of query tokens found in tags.
+    // Per-memory `tags.join().to_lowercase()` is O(tags) which is typically <10 strings,
+    // so allocation is negligible.
     let tag_matching = if !query_tokens.is_empty() {
         let tag_str: String = memory.tags.join(" ").to_lowercase();
         let matches = query_tokens
@@ -87,9 +92,7 @@ pub fn compute_score(
     };
 
     // Recency: based on last access time (decay over 7 days)
-    let access_hours = (chrono::Utc::now() - memory.last_accessed_at)
-        .num_hours()
-        .max(0) as f64;
+    let access_hours = (now - memory.last_accessed_at).num_hours().max(0) as f64;
     let recency = (-access_hours / (7.0 * 24.0)).exp();
 
     // Enhanced graph scoring: bridge memory UUIDs to code-graph centrality.
@@ -109,3 +112,7 @@ pub fn compute_score(
         recency,
     }
 }
+
+#[cfg(test)]
+#[path = "tests/scoring_tests.rs"]
+mod tests;

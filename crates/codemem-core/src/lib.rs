@@ -6,8 +6,24 @@ pub mod metrics;
 pub mod traits;
 pub mod types;
 
-pub use config::*;
-pub use error::*;
-pub use metrics::*;
-pub use traits::*;
-pub use types::*;
+// ── config ──────────────────────────────────────────────────────────────────
+pub use config::{ChunkingConfig, CodememConfig, EmbeddingConfig, EnrichmentConfig, StorageConfig};
+
+// ── error ───────────────────────────────────────────────────────────────────
+pub use error::CodememError;
+
+// ── metrics ─────────────────────────────────────────────────────────────────
+pub use metrics::{LatencyStats, Metrics, MetricsSnapshot, NoopMetrics};
+
+// ── traits ──────────────────────────────────────────────────────────────────
+pub use traits::{
+    ConsolidationLogEntry, EmbeddingProvider, GraphBackend, GraphStats, StorageBackend,
+    StorageStats, VectorBackend, VectorStats,
+};
+
+// ── types ───────────────────────────────────────────────────────────────────
+pub use types::{
+    content_hash, DetectedPattern, DistanceMetric, Edge, GraphConfig, GraphNode, MemoryNode,
+    MemoryType, NodeKind, PatternType, RelationshipType, Repository, ScoreBreakdown,
+    ScoringWeights, SearchResult, Session, SessionActivitySummary, VectorConfig,
+};

@@ -51,6 +51,14 @@ impl StorageBackend for Storage {
     delegate_storage!(get_memory_no_touch(&self, id: &str) -> Result<Option<MemoryNode>, CodememError>);
     delegate_storage!(update_memory(&self, id: &str, content: &str, importance: Option<f64>) -> Result<(), CodememError>);
     delegate_storage!(delete_memory(&self, id: &str) -> Result<bool, CodememError>);
+
+    /// M1: Override with transactional cascade delete.
+    fn delete_memory_cascade(&self, id: &str) -> Result<bool, CodememError> {
+        // Delegates to Storage::delete_memory_cascade which wraps all
+        // deletes (memory + graph nodes/edges + embedding) in a single transaction.
+        Storage::delete_memory_cascade(self, id)
+    }
+
     delegate_storage!(list_memory_ids(&self) -> Result<Vec<String>, CodememError>);
     delegate_storage!(list_memory_ids_for_namespace(&self, namespace: &str) -> Result<Vec<String>, CodememError>);
     delegate_storage!(list_namespaces(&self) -> Result<Vec<String>, CodememError>);
@@ -448,7 +456,13 @@ impl StorageBackend for Storage {
         let edges = stmt
             .query_map(params![node_id, timestamp], extract_edge_tuple)
             .map_err(|e| CodememError::Storage(e.to_string()))?
-            .filter_map(|r| r.ok())
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!("Failed to process edge row: {e}");
+                    None
+                }
+            })
             .filter_map(edge_from_row)
             .collect();
 
@@ -553,13 +567,18 @@ impl StorageBackend for Storage {
         limit: usize,
     ) -> Result<Vec<GraphNode>, CodememError> {
         let conn = self.conn()?;
-        let pattern = format!("%{}%", query.to_lowercase());
+        let escaped = query
+            .to_lowercase()
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{escaped}%");
 
         let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
             if let Some(ns) = namespace {
                 (
                     "SELECT id, kind, label, payload, centrality, memory_id, namespace \
-                 FROM graph_nodes WHERE LOWER(label) LIKE ?1 AND namespace = ?2 \
+                 FROM graph_nodes WHERE LOWER(label) LIKE ?1 ESCAPE '\\' AND namespace = ?2 \
                  ORDER BY centrality DESC LIMIT ?3"
                         .to_string(),
                     vec![
@@ -571,7 +590,7 @@ impl StorageBackend for Storage {
             } else {
                 (
                     "SELECT id, kind, label, payload, centrality, memory_id, namespace \
-                 FROM graph_nodes WHERE LOWER(label) LIKE ?1 \
+                 FROM graph_nodes WHERE LOWER(label) LIKE ?1 ESCAPE '\\' \
                  ORDER BY centrality DESC LIMIT ?2"
                         .to_string(),
                     vec![

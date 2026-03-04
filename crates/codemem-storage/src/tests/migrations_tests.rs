@@ -10,7 +10,7 @@ fn migrations_run_on_fresh_db() {
     let count: u32 = conn
         .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(count, 6);
+    assert_eq!(count, 7);
 
     // Verify memories table has session_id column
     let has_session_id: bool = conn
@@ -35,5 +35,5 @@ fn migrations_are_idempotent() {
     let count: u32 = conn
         .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(count, 6);
+    assert_eq!(count, 7);
 }

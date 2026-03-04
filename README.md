@@ -45,7 +45,7 @@ Downloads the local embedding model (~440MB, one-time), registers lifecycle hook
 
 ### That's it
 
-Codemem now automatically captures context, injects prior knowledge at session start, and provides 43 MCP tools to your assistant.
+Codemem now automatically captures context, injects prior knowledge at session start, and provides 28 MCP tools to your assistant.
 
 ### Map your codebase (optional)
 
@@ -59,10 +59,10 @@ Then use the built-in [code-mapper agent](examples/agents/code-mapper.md) to ana
 
 ```
 # In your AI assistant, the code-mapper agent runs these MCP tools:
-get_pagerank { "top_k": 20 }              # Find most important symbols
-get_clusters { "resolution": 1.0 }        # Detect architectural modules
-get_impact { "qualified_name": "...", "depth": 2 }  # Blast radius analysis
-search_code { "query": "database connection" }       # Semantic code search
+find_important_nodes { "top_k": 20 }              # Find most important symbols
+find_related_groups { "resolution": 1.0 }          # Detect architectural modules
+get_symbol_graph { "qualified_name": "...", "depth": 2 }  # Blast radius analysis
+search_code { "query": "database connection" }              # Semantic code search
 ```
 
 See [`examples/agents/code-mapper.md`](examples/agents/code-mapper.md) for the full workflow.
@@ -70,16 +70,16 @@ See [`examples/agents/code-mapper.md`](examples/agents/code-mapper.md) for the f
 ## Key Features
 
 - **Graph-vector hybrid architecture** -- HNSW vector search (768-dim) + petgraph knowledge graph with 25 algorithms (PageRank, Louvain, betweenness centrality, BFS/DFS, and more)
-- **43 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (git history, security, performance), consolidation, impact analysis, metrics, and pattern detection over JSON-RPC
+- **28 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (14 enrichment types), consolidation, impact analysis, session context, pattern detection over JSON-RPC (legacy tool names still accepted)
 - **4 lifecycle hooks** -- Automatic context injection (SessionStart), prompt capture (UserPromptSubmit), observation capture (PostToolUse), and session summaries (Stop)
 - **9-component hybrid scoring** -- Vector similarity, graph strength, BM25 token overlap, temporal alignment, tag matching, importance, confidence, and recency
-- **Code-aware indexing** -- tree-sitter structural extraction for 13 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform)
+- **Code-aware indexing** -- tree-sitter structural extraction for 14 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) with manifest parsing (Cargo.toml, package.json, go.mod, pyproject.toml)
 - **Contextual embeddings** -- Metadata and graph context enriched before embedding for higher recall precision
 - **Pluggable embeddings** -- Candle (local BERT, default), Ollama, or any OpenAI-compatible API
 - **Cross-session intelligence** -- Pattern detection, file hotspot tracking, decision chains, and session continuity
 - **Memory consolidation** -- 5 neuroscience-inspired cycles: Decay (power-law), Creative/REM (semantic KNN), Cluster (cosine + union-find), Summarize (LLM-powered), Forget
 - **Self-editing memory** -- Refine, split, and merge memories with full provenance tracking via temporal graph edges
-- **Operational metrics** -- Per-tool latency percentiles (p50/p95/p99), call counters, and gauges via `codemem_metrics` tool
+- **Operational metrics** -- Per-tool latency percentiles (p50/p95/p99), call counters, and gauges via `codemem_status` tool
 - **Real-time file watching** -- notify-based watcher with <50ms debounce and .gitignore support
 - **Persistent config** -- TOML-based configuration at `~/.codemem/config.toml`
 - **Production hardened** -- Zero `.unwrap()` in production code, safe concurrency, versioned schema migrations
@@ -115,7 +115,7 @@ graph LR
 | Confidence | 5% |
 | Recency | 5% |
 
-Weights are configurable at runtime via the `set_scoring_weights` MCP tool and persist in `config.toml`.
+Weights are configurable via `codemem config set scoring.<key> <value>` and persist in `~/.codemem/config.toml`.
 
 ## Configuration
 
@@ -148,19 +148,17 @@ Scoring weights, vector/graph tuning, and storage settings persist in `~/.codeme
 
 ## MCP Tools
 
-43 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
+28 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation. Legacy tool names from v0.7.0 are still accepted.
 
 | Category | Tools |
 |----------|-------|
-| Core Memory (9) | `store_memory`, `recall_memory`, `update_memory`, `delete_memory`, `associate_memories`, `graph_traverse`, `summary_tree`, `codemem_stats`, `codemem_health` |
-| Self-Editing (3) | `refine_memory`, `split_memory`, `merge_memories` |
-| Structural Index (10) | `index_codebase`, `search_symbols`, `get_symbol_info`, `get_dependencies`, `get_impact`, `get_clusters`, `get_cross_repo`, `get_pagerank`, `search_code`, `set_scoring_weights` |
-| Export/Import (2) | `export_memories`, `import_memories` |
-| Recall & Namespace (4) | `recall_with_expansion`, `list_namespaces`, `namespace_stats`, `delete_namespace` |
-| Consolidation (6) | `consolidate_decay`, `consolidate_creative`, `consolidate_cluster`, `consolidate_forget`, `consolidate_summarize`, `consolidation_status` |
-| Impact & Patterns (4) | `recall_with_impact`, `get_decision_chain`, `detect_patterns`, `pattern_insights` |
-| Enrichment (3) | `enrich_git_history`, `enrich_security`, `enrich_performance` |
-| Observability (2) | `codemem_metrics`, `session_checkpoint` |
+| Memory CRUD (7) | `store_memory`, `recall`, `delete_memory`, `associate_memories`, `refine_memory`, `split_memory`, `merge_memories` |
+| Graph & Structure (7) | `graph_traverse`, `summary_tree`, `codemem_status`, `index_codebase`, `search_code`, `get_symbol_info`, `get_symbol_graph` |
+| Graph Analysis (3) | `find_important_nodes`, `find_related_groups`, `get_cross_repo` |
+| Consolidation & Patterns (3) | `consolidate`, `detect_patterns`, `get_decision_chain` |
+| Namespace (3) | `list_namespaces`, `namespace_stats`, `delete_namespace` |
+| Session & Context (2) | `session_checkpoint`, `session_context` |
+| Enrichment (3) | `enrich_codebase`, `analyze_codebase`, `enrich_git_history` |
 
 ## CLI
 
@@ -194,7 +192,7 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 ## Documentation
 
 - [Architecture](docs/architecture.md) -- System design, data flow diagrams, storage schema
-- [MCP Tools Reference](docs/mcp-tools.md) -- All 43 tools with parameters and examples
+- [MCP Tools Reference](docs/mcp-tools.md) -- All 28 tools with parameters and examples
 - [CLI Reference](docs/cli-reference.md) -- All 18 commands
 - [Comparison](docs/comparison.md) -- vs Mem0, Zep/Graphiti, Letta, claude-mem, and more
 

@@ -1,8 +1,15 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 use crate::CodememError;
+
+/// Compute a SHA-256 content hash for deduplication.
+pub fn content_hash(content: &str) -> String {
+    let hash = Sha256::digest(content.as_bytes());
+    format!("{:x}", hash)
+}
 
 // ── Memory Types ────────────────────────────────────────────────────────────
 
@@ -288,6 +295,28 @@ pub struct GraphNode {
     pub namespace: Option<String>,
 }
 
+impl GraphNode {
+    /// Get the file path from the node's payload metadata.
+    pub fn file_path(&self) -> Option<&str> {
+        self.payload.get("file_path").and_then(|v| v.as_str())
+    }
+
+    /// Get the programming language from the node's payload metadata.
+    pub fn language(&self) -> Option<&str> {
+        self.payload.get("language").and_then(|v| v.as_str())
+    }
+
+    /// Get the visibility (pub/private/etc.) from the node's payload metadata.
+    pub fn visibility(&self) -> Option<&str> {
+        self.payload.get("visibility").and_then(|v| v.as_str())
+    }
+
+    /// Get the function/method signature from the node's payload metadata.
+    pub fn signature(&self) -> Option<&str> {
+        self.payload.get("signature").and_then(|v| v.as_str())
+    }
+}
+
 /// A search result with hybrid scoring.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -301,17 +330,17 @@ pub struct SearchResult {
 pub struct ScoreBreakdown {
     /// Vector cosine similarity (25%)
     pub vector_similarity: f64,
-    /// Graph relationship strength (25%)
+    /// Graph relationship strength (20%)
     pub graph_strength: f64,
     /// Content token overlap (15%)
     pub token_overlap: f64,
     /// Temporal alignment (10%)
     pub temporal: f64,
-    /// Tag matching (10%)
+    /// Tag matching (5%)
     pub tag_matching: f64,
-    /// Importance score (5%)
+    /// Importance score (10%)
     pub importance: f64,
-    /// Memory confidence (5%)
+    /// Memory confidence (10%)
     pub confidence: f64,
     /// Recency boost (5%)
     pub recency: f64,
@@ -523,6 +552,11 @@ pub struct Session {
 // ── Repository ──────────────────────────────────────────────────────────
 
 /// A registered repository tracked by the control plane.
+///
+/// The `created_at` and `last_indexed_at` fields are stored as RFC 3339
+/// strings for SQLite compatibility. Use [`Repository::created_at_parsed`]
+/// and [`Repository::last_indexed_at_parsed`] to obtain typed
+/// `DateTime<Utc>` values.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repository {
     pub id: String,
@@ -532,6 +566,24 @@ pub struct Repository {
     pub created_at: String,
     pub last_indexed_at: Option<String>,
     pub status: String,
+}
+
+impl Repository {
+    /// Parse `created_at` into a typed `DateTime<Utc>`.
+    pub fn created_at_parsed(&self) -> Option<DateTime<Utc>> {
+        chrono::DateTime::parse_from_rfc3339(&self.created_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok()
+    }
+
+    /// Parse `last_indexed_at` into a typed `DateTime<Utc>`.
+    pub fn last_indexed_at_parsed(&self) -> Option<DateTime<Utc>> {
+        self.last_indexed_at.as_deref().and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .ok()
+        })
+    }
 }
 
 // ── Session Activity ─────────────────────────────────────────────────

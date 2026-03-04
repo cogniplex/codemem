@@ -2,6 +2,7 @@
 
 use crate::scoring::compute_score;
 use crate::CodememEngine;
+use chrono::Utc;
 use codemem_core::{
     CodememError, GraphBackend, MemoryNode, MemoryType, NodeKind, SearchResult, VectorBackend,
 };
@@ -63,11 +64,21 @@ impl CodememEngine {
             vec![]
         };
 
-        let query_lower = query.to_lowercase();
-        let query_tokens: Vec<&str> = query_lower.split_whitespace().collect();
+        // H1: Use code-aware tokenizer for query tokens so that compound identifiers
+        // like "parseFunction" are split into ["parse", "function"] — matching the
+        // tokenization used when documents were added to the BM25 index.
+        let query_tokens: Vec<String> = crate::bm25::tokenize(query);
+        let query_token_refs: Vec<&str> = query_tokens.iter().map(|s| s.as_str()).collect();
 
-        let graph = self.lock_graph()?;
+        // Graph and BM25 intentionally load different data: graph stores structural relationships
+        // (nodes/edges), while BM25 indexes memory content for text search. This is by design,
+        // not duplication.
+        let mut graph = self.lock_graph()?;
+        // C1: Lazily compute betweenness centrality before scoring so the
+        // betweenness component (30% of graph_strength) is not permanently zero.
+        graph.ensure_betweenness_computed();
         let bm25 = self.lock_bm25()?;
+        let now = Utc::now();
 
         let mut results: Vec<SearchResult> = Vec::new();
         let weights = self.scoring_weights()?;
@@ -96,7 +107,7 @@ impl CodememEngine {
                     }
                 }
 
-                let breakdown = compute_score(&memory, query, &query_tokens, 0.0, &graph, &bm25);
+                let breakdown = compute_score(&memory, &query_token_refs, 0.0, &graph, &bm25, now);
                 let score = breakdown.total_with_weights(&weights);
                 if score > 0.01 {
                     results.push(SearchResult {
@@ -149,7 +160,7 @@ impl CodememEngine {
 
                 let similarity = sim_map.get(memory.id.as_str()).copied().unwrap_or(0.0);
                 let breakdown =
-                    compute_score(&memory, query, &query_tokens, similarity, &graph, &bm25);
+                    compute_score(&memory, &query_token_refs, similarity, &graph, &bm25, now);
                 let score = breakdown.total_with_weights(&weights);
                 if score > 0.01 {
                     results.push(SearchResult {
@@ -182,8 +193,9 @@ impl CodememEngine {
         expansion_depth: usize,
         namespace_filter: Option<&str>,
     ) -> Result<Vec<ExpandedResult>, CodememError> {
-        let query_lower = query.to_lowercase();
-        let query_tokens: Vec<&str> = query_lower.split_whitespace().collect();
+        // H1: Code-aware tokenization for consistent BM25 scoring
+        let query_tokens: Vec<String> = crate::bm25::tokenize(query);
+        let query_token_refs: Vec<&str> = query_tokens.iter().map(|s| s.as_str()).collect();
 
         // Step 1: Run normal vector search (or text fallback)
         let vector_results: Vec<(String, f32)> = if let Some(emb_guard) = self.lock_embeddings()? {
@@ -202,8 +214,11 @@ impl CodememEngine {
             vec![]
         };
 
-        let graph = self.lock_graph()?;
+        let mut graph = self.lock_graph()?;
+        // C1: Lazily compute betweenness centrality before scoring
+        graph.ensure_betweenness_computed();
         let bm25 = self.lock_bm25()?;
+        let now = Utc::now();
 
         // Collect initial seed memories with their vector similarity
         struct ScoredMemory {
@@ -223,7 +238,7 @@ impl CodememEngine {
             let weights = self.scoring_weights()?;
 
             for memory in all {
-                let breakdown = compute_score(&memory, query, &query_tokens, 0.0, &graph, &bm25);
+                let breakdown = compute_score(&memory, &query_token_refs, 0.0, &graph, &bm25, now);
                 let score = breakdown.total_with_weights(&weights);
                 if score > 0.01 {
                     seen_ids.insert(memory.id.clone());
@@ -265,7 +280,6 @@ impl CodememEngine {
         // A7: BFS traverses through ALL node kinds (including code nodes like
         // File, Function, etc.) as intermediaries, but only COLLECTS Memory nodes.
         // A6: Apply temporal edge filtering — skip edges whose valid_to < now.
-        let now = chrono::Utc::now();
         let direct_ids: Vec<String> = all_memories.iter().map(|m| m.memory.id.clone()).collect();
 
         for direct_id in &direct_ids {
@@ -339,11 +353,11 @@ impl CodememEngine {
             .map(|sm| {
                 let breakdown = compute_score(
                     &sm.memory,
-                    query,
-                    &query_tokens,
+                    &query_token_refs,
                     sm.vector_sim,
                     &graph,
                     &bm25,
+                    now,
                 );
                 let score = breakdown.total_with_weights(&weights);
                 ExpandedResult {
@@ -394,30 +408,34 @@ impl CodememEngine {
         let mut newest: Option<chrono::DateTime<chrono::Utc>> = None;
         let mut count = 0usize;
 
-        for id in &ids {
-            if let Ok(Some(memory)) = self.storage.get_memory_no_touch(id) {
-                count += 1;
-                total_importance += memory.importance;
-                total_confidence += memory.confidence;
+        // M2: Batch-fetch all memories in one query instead of per-ID get_memory_no_touch.
+        // get_memories_batch does not increment access_count (pure SELECT), so it is
+        // equivalent to get_memory_no_touch for stats purposes.
+        let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+        let memories = self.storage.get_memories_batch(&id_refs)?;
 
-                *type_distribution
-                    .entry(memory.memory_type.to_string())
-                    .or_insert(0) += 1;
+        for memory in &memories {
+            count += 1;
+            total_importance += memory.importance;
+            total_confidence += memory.confidence;
 
-                for tag in &memory.tags {
-                    *tag_frequency.entry(tag.clone()).or_insert(0) += 1;
-                }
+            *type_distribution
+                .entry(memory.memory_type.to_string())
+                .or_insert(0) += 1;
 
-                match oldest {
-                    None => oldest = Some(memory.created_at),
-                    Some(ref o) if memory.created_at < *o => oldest = Some(memory.created_at),
-                    _ => {}
-                }
-                match newest {
-                    None => newest = Some(memory.created_at),
-                    Some(ref n) if memory.created_at > *n => newest = Some(memory.created_at),
-                    _ => {}
-                }
+            for tag in &memory.tags {
+                *tag_frequency.entry(tag.clone()).or_insert(0) += 1;
+            }
+
+            match oldest {
+                None => oldest = Some(memory.created_at),
+                Some(ref o) if memory.created_at < *o => oldest = Some(memory.created_at),
+                _ => {}
+            }
+            match newest {
+                None => newest = Some(memory.created_at),
+                Some(ref n) if memory.created_at > *n => newest = Some(memory.created_at),
+                _ => {}
             }
         }
 

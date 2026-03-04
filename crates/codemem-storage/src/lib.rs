@@ -99,6 +99,7 @@ impl Storage {
     }
 
     /// Compute SHA-256 hash of content for deduplication.
+    // TODO: Delegate to `codemem_core::content_hash()` once it is added to codemem-core.
     pub fn content_hash(content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());

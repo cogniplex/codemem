@@ -187,6 +187,46 @@ impl Storage {
         Ok(rows > 0)
     }
 
+    /// Delete a memory and all related data (embeddings, graph nodes/edges) atomically.
+    /// Returns true if the memory existed and was deleted.
+    pub fn delete_memory_cascade(&self, id: &str) -> Result<bool, CodememError> {
+        let mut conn = self.conn()?;
+        // L2: Use IMMEDIATE transaction to acquire write lock upfront,
+        // avoiding potential deadlock with DEFERRED transaction.
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        // Delete edges that reference graph nodes linked to this memory
+        tx.execute(
+            "DELETE FROM graph_edges WHERE src IN (SELECT id FROM graph_nodes WHERE memory_id = ?1)
+             OR dst IN (SELECT id FROM graph_nodes WHERE memory_id = ?1)",
+            params![id],
+        )
+        .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        // Delete graph nodes linked to this memory
+        tx.execute("DELETE FROM graph_nodes WHERE memory_id = ?1", params![id])
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        // Delete embedding
+        tx.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id = ?1",
+            params![id],
+        )
+        .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        // Delete the memory itself
+        let rows = tx
+            .execute("DELETE FROM memories WHERE id = ?1", params![id])
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        tx.commit()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(rows > 0)
+    }
+
     /// List all memory IDs with an optional limit.
     pub fn list_memory_ids(&self) -> Result<Vec<String>, CodememError> {
         self.list_memory_ids_limited(None)
@@ -287,23 +327,37 @@ impl Storage {
 
         let repos = stmt
             .query_map([], |row| {
-                Ok(Repository {
-                    id: row.get(0)?,
-                    path: row.get(1)?,
-                    name: row.get(2)?,
-                    namespace: row.get(3)?,
-                    created_at: row.get(4)?,
-                    last_indexed_at: row.get(5)?,
-                    status: row
-                        .get::<_, Option<String>>(6)?
+                let created_ts: String = row.get(4)?;
+                let indexed_ts: Option<String> = row.get(5)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    created_ts,
+                    indexed_ts,
+                    row.get::<_, Option<String>>(6)?
                         .unwrap_or_else(|| "idle".to_string()),
-                })
+                ))
             })
             .map_err(|e| CodememError::Storage(e.to_string()))?
-            .collect::<Result<Vec<Repository>, _>>()
+            .collect::<Result<Vec<_>, _>>()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
-        Ok(repos)
+        let mut result = Vec::new();
+        for (id, path, name, namespace, created_at, last_indexed_at, status) in repos {
+            result.push(Repository {
+                id,
+                path,
+                name,
+                namespace,
+                created_at,
+                last_indexed_at,
+                status,
+            });
+        }
+
+        Ok(result)
     }
 
     /// Add a new repository.
@@ -342,20 +396,34 @@ impl Storage {
                 "SELECT id, path, name, namespace, created_at, last_indexed_at, status FROM repositories WHERE id = ?1",
                 params![id],
                 |row| {
-                    Ok(Repository {
-                        id: row.get(0)?,
-                        path: row.get(1)?,
-                        name: row.get(2)?,
-                        namespace: row.get(3)?,
-                        created_at: row.get(4)?,
-                        last_indexed_at: row.get(5)?,
-                        status: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "idle".to_string()),
-                    })
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "idle".to_string()),
+                    ))
                 },
             )
             .optional()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
-        Ok(result)
+
+        match result {
+            Some((id, path, name, namespace, created_at, last_indexed_at, status)) => {
+                Ok(Some(Repository {
+                    id,
+                    path,
+                    name,
+                    namespace,
+                    created_at,
+                    last_indexed_at,
+                    status,
+                }))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Update a repository's status and optionally last_indexed_at.

@@ -395,6 +395,7 @@ impl super::CodememEngine {
         // channel-based work queue to decouple embedding from persistence.
         let mut symbols_embedded = 0usize;
         let mut chunks_embedded = 0usize;
+        // H3: Acquire embeddings lock, embed batch, drop lock before acquiring vector lock.
         if let Some(emb) = self.lock_embeddings()? {
             let sym_texts: Vec<(String, String)> = all_symbols
                 .iter()
@@ -436,15 +437,23 @@ impl super::CodememEngine {
             let sym_count = sym_texts.len();
             for (i, (id, _)) in sym_texts.into_iter().enumerate() {
                 if let Some(embedding) = all_embeddings.get(i) {
-                    let _ = self.storage.store_embedding(&id, embedding);
-                    let _ = vec.insert(&id, embedding);
+                    if let Err(e) = self.storage.store_embedding(&id, embedding) {
+                        tracing::warn!("Failed to store embedding for {id}: {e}");
+                    }
+                    if let Err(e) = vec.insert(&id, embedding) {
+                        tracing::warn!("Failed to insert {id} into vector index: {e}");
+                    }
                     symbols_embedded += 1;
                 }
             }
             for (i, (id, _)) in chunk_texts.into_iter().enumerate() {
                 if let Some(embedding) = all_embeddings.get(sym_count + i) {
-                    let _ = self.storage.store_embedding(&id, embedding);
-                    let _ = vec.insert(&id, embedding);
+                    if let Err(e) = self.storage.store_embedding(&id, embedding) {
+                        tracing::warn!("Failed to store embedding for {id}: {e}");
+                    }
+                    if let Err(e) = vec.insert(&id, embedding) {
+                        tracing::warn!("Failed to insert {id} into vector index: {e}");
+                    }
                     chunks_embedded += 1;
                 }
             }
@@ -628,9 +637,15 @@ impl super::CodememEngine {
                 if i >= k || *score < chunk_score_threshold {
                     self.transfer_chunk_ranges_to_parent(graph, chunk_id);
 
-                    let _ = self.storage.delete_graph_edges_for_node(chunk_id);
-                    let _ = self.storage.delete_graph_node(chunk_id);
-                    let _ = graph.remove_node(chunk_id);
+                    if let Err(e) = self.storage.delete_graph_edges_for_node(chunk_id) {
+                        tracing::warn!("Failed to delete graph edges for chunk {chunk_id}: {e}");
+                    }
+                    if let Err(e) = self.storage.delete_graph_node(chunk_id) {
+                        tracing::warn!("Failed to delete graph node for chunk {chunk_id}: {e}");
+                    }
+                    if let Err(e) = graph.remove_node(chunk_id) {
+                        tracing::warn!("Failed to remove chunk {chunk_id} from graph: {e}");
+                    }
                     chunks_pruned += 1;
                 }
             }
@@ -854,9 +869,15 @@ impl super::CodememEngine {
 
                 self.transfer_symbol_ranges_to_file(graph, sym_id);
 
-                let _ = self.storage.delete_graph_edges_for_node(sym_id);
-                let _ = self.storage.delete_graph_node(sym_id);
-                let _ = graph.remove_node(sym_id);
+                if let Err(e) = self.storage.delete_graph_edges_for_node(sym_id) {
+                    tracing::warn!("Failed to delete graph edges for symbol {sym_id}: {e}");
+                }
+                if let Err(e) = self.storage.delete_graph_node(sym_id) {
+                    tracing::warn!("Failed to delete graph node for symbol {sym_id}: {e}");
+                }
+                if let Err(e) = graph.remove_node(sym_id) {
+                    tracing::warn!("Failed to remove symbol {sym_id} from graph: {e}");
+                }
                 symbols_pruned += 1;
             }
         }

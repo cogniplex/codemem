@@ -155,10 +155,28 @@ pub struct ConsolidationLogEntry {
 
 /// Pluggable storage backend trait for all persistence operations.
 ///
-/// This trait unifies memory CRUD, embedding persistence, graph node/edge
-/// storage, sessions, consolidation, and pattern detection behind a single
-/// interface. Implementations include SQLite (default) and can be extended
-/// for SurrealDB, FalkorDB, or other backends.
+/// This trait unifies every persistence concern behind a single interface so
+/// that the engine layer (`CodememEngine`) remains backend-agnostic.
+///
+/// # Method groups
+///
+/// | Group | Methods | Purpose |
+/// |-------|---------|---------|
+/// | **Memory CRUD** | `insert_memory`, `get_memory`, `update_memory`, `delete_memory`, `list_memory_ids`, … | Create, read, update, delete memory nodes |
+/// | **Embedding persistence** | `store_embedding`, `get_embedding`, `delete_embedding`, `list_all_embeddings` | Persist and retrieve embedding vectors |
+/// | **Graph node/edge storage** | `insert_graph_node`, `get_graph_node`, `all_graph_nodes`, `insert_graph_edge`, … | Persist the knowledge graph structure |
+/// | **Sessions** | `start_session`, `end_session`, `list_sessions`, `session_count` | Track interaction sessions |
+/// | **Consolidation** | `insert_consolidation_log`, `last_consolidation_runs` | Record and query memory consolidation runs |
+/// | **Pattern detection** | `get_repeated_searches`, `get_file_hotspots`, `get_tool_usage_stats`, `get_decision_chains` | Cross-session pattern queries |
+/// | **Bulk/batch operations** | `insert_memories_batch`, `store_embeddings_batch`, `insert_graph_nodes_batch`, `insert_graph_edges_batch` | Efficient multi-row inserts |
+/// | **Decay & forgetting** | `decay_stale_memories`, `find_forgettable`, `get_stale_memories_for_decay`, `batch_update_importance` | Power-law decay and garbage collection |
+/// | **Query helpers** | `find_unembedded_memories`, `search_graph_nodes`, `list_memories_filtered`, `find_hash_duplicates` | Filtered searches and dedup |
+/// | **File hash tracking** | `load_file_hashes`, `save_file_hashes` | Incremental indexing support |
+/// | **Session activity** | `record_session_activity`, `get_session_activity_summary`, `get_session_hot_directories`, … | Fine-grained activity tracking |
+/// | **Stats** | `stats` | Database-level statistics |
+///
+/// Implementations include SQLite (default) and can be extended for
+/// SurrealDB, FalkorDB, or other backends.
 pub trait StorageBackend: Send + Sync {
     // ── Memory CRUD ─────────────────────────────────────────────────
 
@@ -188,6 +206,19 @@ pub trait StorageBackend: Send + Sync {
 
     /// Delete a memory by ID. Returns true if a row was deleted.
     fn delete_memory(&self, id: &str) -> Result<bool, CodememError>;
+
+    /// Delete a memory and all related data (graph nodes/edges, embeddings) atomically.
+    /// Returns true if the memory existed and was deleted.
+    /// Default falls back to individual deletes (non-transactional) for backwards compatibility.
+    fn delete_memory_cascade(&self, id: &str) -> Result<bool, CodememError> {
+        let deleted = self.delete_memory(id)?;
+        if deleted {
+            let _ = self.delete_graph_edges_for_node(id);
+            let _ = self.delete_graph_node(id);
+            let _ = self.delete_embedding(id);
+        }
+        Ok(deleted)
+    }
 
     /// List all memory IDs, ordered by created_at descending.
     fn list_memory_ids(&self) -> Result<Vec<String>, CodememError>;

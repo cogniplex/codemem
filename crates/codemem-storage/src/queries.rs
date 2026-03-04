@@ -31,27 +31,31 @@ impl Storage {
 
     // ── Stats ───────────────────────────────────────────────────────────
 
-    /// Get database statistics.
+    /// Get database statistics in a single query.
     pub fn stats(&self) -> Result<StorageStats, CodememError> {
-        let memory_count = self.memory_count()?;
         let conn = self.conn()?;
 
-        let embedding_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM memory_embeddings", [], |row| {
-                row.get(0)
-            })
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
-
-        let node_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM graph_nodes", [], |row| row.get(0))
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
-
-        let edge_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM graph_edges", [], |row| row.get(0))
+        let (memory_count, embedding_count, node_count, edge_count) = conn
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM memories) AS memory_count,
+                    (SELECT COUNT(*) FROM memory_embeddings) AS embedding_count,
+                    (SELECT COUNT(*) FROM graph_nodes) AS node_count,
+                    (SELECT COUNT(*) FROM graph_edges) AS edge_count",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         Ok(StorageStats {
-            memory_count,
+            memory_count: memory_count as usize,
             embedding_count: embedding_count as usize,
             node_count: node_count as usize,
             edge_count: edge_count as usize,

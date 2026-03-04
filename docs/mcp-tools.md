@@ -1,7 +1,9 @@
 # Codemem MCP Tools API Reference
 
-Codemem exposes 43 tools over JSON-RPC 2.0 (stdio transport). All requests use the
+Codemem exposes 28 tools over JSON-RPC 2.0 (stdio transport). All requests use the
 `tools/call` method with `{"name": "<tool>", "arguments": {...}}` as params.
+
+Legacy tool names (from v0.7.0 and earlier) are still accepted and transparently mapped to the new unified tools.
 
 ---
 
@@ -45,7 +47,7 @@ Codemem exposes 43 tools over JSON-RPC 2.0 (stdio transport). All requests use t
 }
 ```
 
-### recall_memory -- request
+### recall -- request
 
 ```json
 {
@@ -53,7 +55,7 @@ Codemem exposes 43 tools over JSON-RPC 2.0 (stdio transport). All requests use t
   "id": 2,
   "method": "tools/call",
   "params": {
-    "name": "recall_memory",
+    "name": "recall",
     "arguments": {
       "query": "which web framework did we choose?",
       "k": 3,
@@ -63,7 +65,7 @@ Codemem exposes 43 tools over JSON-RPC 2.0 (stdio transport). All requests use t
 }
 ```
 
-### recall_memory -- response
+### recall -- response
 
 ```json
 {
@@ -83,11 +85,11 @@ Codemem exposes 43 tools over JSON-RPC 2.0 (stdio transport). All requests use t
 
 ---
 
-## Core Memory Tools (8)
+## Memory CRUD (7 tools)
 
 ### store_memory
 
-Store a new memory with auto-embedding, type classification, and graph linking.
+Store a new memory with auto-embedding, type classification, and graph linking. Automatically links to code nodes mentioned in content.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -97,6 +99,7 @@ Store a new memory with auto-embedding, type classification, and graph linking.
 | `tags` | string[] | no | `[]` | Searchable tags |
 | `namespace` | string | no | -- | Project scope (e.g. working directory path) |
 | `links` | string[] | no | `[]` | IDs of existing graph nodes to create RELATES_TO edges to |
+| `auto_link` | boolean | no | `true` | Auto-link to code nodes mentioned in content |
 
 ```json
 {
@@ -113,9 +116,9 @@ Store a new memory with auto-embedding, type classification, and graph linking.
 
 ---
 
-### recall_memory
+### recall
 
-Semantic search using 9-component hybrid scoring with graph expansion and bridge discovery.
+Unified memory search: 9-component hybrid scoring with optional graph expansion and impact analysis. Replaces the former `recall_memory`, `recall_with_expansion`, and `recall_with_impact` tools.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -123,42 +126,23 @@ Semantic search using 9-component hybrid scoring with graph expansion and bridge
 | `k` | integer | no | `10` | Number of results to return |
 | `memory_type` | string | no | -- | Filter by memory type |
 | `namespace` | string | no | -- | Filter results to a specific namespace |
-| `exclude_tags` | string[] | no | `[]` | Exclude memories with any of these tags (e.g., `["static-analysis"]`) |
+| `exclude_tags` | string[] | no | `[]` | Exclude memories with any of these tags |
 | `min_importance` | number | no | -- | Only return memories above this importance threshold |
 | `min_confidence` | number | no | -- | Only return memories above this confidence threshold |
+| `expand` | boolean | no | `false` | Enable graph expansion to discover related memories |
+| `expansion_depth` | integer | no | `1` | Max graph hops for expansion (when `expand=true`) |
+| `include_impact` | boolean | no | `false` | Include PageRank, centrality, connected decisions, dependent files |
 
 ```json
 {
-  "name": "recall_memory",
+  "name": "recall",
   "arguments": {
     "query": "error handling patterns",
     "k": 5,
     "memory_type": "pattern",
     "exclude_tags": ["static-analysis"],
-    "min_importance": 0.3
-  }
-}
-```
-
----
-
-### update_memory
-
-Update an existing memory's content and re-embed.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | string | yes | -- | Memory ID (UUID) |
-| `content` | string | yes | -- | New content (replaces existing, triggers re-embedding) |
-| `importance` | number | no | -- | New importance score, 0.0 to 1.0 |
-
-```json
-{
-  "name": "update_memory",
-  "arguments": {
-    "id": "a1b2c3d4-5678-9abc-def0-123456789abc",
-    "content": "Updated: use Axum 0.8 with Tower middleware",
-    "importance": 0.9
+    "expand": true,
+    "include_impact": true
   }
 }
 ```
@@ -186,7 +170,7 @@ Delete a memory by ID, removing it from the vector index, graph, and storage.
 
 ### associate_memories
 
-Create a typed relationship between two memories in the knowledge graph.
+Create a typed relationship between two nodes in the knowledge graph.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -209,732 +193,17 @@ Create a typed relationship between two memories in the knowledge graph.
 
 ---
 
-### graph_traverse
-
-Multi-hop graph traversal from a start node for reasoning and bridge discovery.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `start_id` | string | yes | -- | Starting node ID |
-| `max_depth` | integer | no | `2` | Maximum traversal depth |
-| `algorithm` | string | no | `"bfs"` | Traversal algorithm: `bfs` or `dfs` |
-
-```json
-{
-  "name": "graph_traverse",
-  "arguments": {
-    "start_id": "aaa-111",
-    "max_depth": 3,
-    "algorithm": "dfs"
-  }
-}
-```
-
----
-
-### codemem_stats
-
-Get database and index statistics: memory count, graph node/edge counts, vector index size, and cache stats.
-
-No parameters.
-
-```json
-{
-  "name": "codemem_stats",
-  "arguments": {}
-}
-```
-
----
-
-### codemem_health
-
-Health check across all Codemem subsystems (storage, vector, graph, embeddings).
-
-No parameters.
-
-```json
-{
-  "name": "codemem_health",
-  "arguments": {}
-}
-```
-
----
-
-## Structural Index Tools (10)
-
-### index_codebase
-
-Index a codebase directory to extract symbols and references using ast-grep, populating the structural knowledge graph. Supports Rust, TypeScript, Python, Go, C/C++, and Java.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | yes | -- | Absolute path to the codebase directory to index |
-
-```json
-{
-  "name": "index_codebase",
-  "arguments": {
-    "path": "/Users/dev/myproject"
-  }
-}
-```
-
----
-
-### search_symbols
-
-Search indexed code symbols by name substring, optionally filtering by kind.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | string | yes | -- | Substring to search for in symbol names |
-| `kind` | string | no | -- | Filter by kind: `function`, `method`, `class`, `struct`, `enum`, `interface`, `type`, `constant`, `module`, `test` |
-| `limit` | integer | no | `20` | Maximum number of results |
-
-```json
-{
-  "name": "search_symbols",
-  "arguments": {
-    "query": "handle_request",
-    "kind": "method",
-    "limit": 10
-  }
-}
-```
-
----
-
-### get_symbol_info
-
-Get full details of a symbol by qualified name, including signature, file path, doc comment, and parent.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `qualified_name` | string | yes | -- | Fully qualified name (e.g. `module::Struct::method`) |
-
-```json
-{
-  "name": "get_symbol_info",
-  "arguments": {
-    "qualified_name": "codemem_mcp::McpServer::handle_request"
-  }
-}
-```
-
----
-
-### get_dependencies
-
-Get graph edges (calls, imports, extends, etc.) connected to a symbol.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `qualified_name` | string | yes | -- | Fully qualified name of the symbol |
-| `direction` | string | no | `"both"` | Direction: `incoming`, `outgoing`, or `both` |
-
-```json
-{
-  "name": "get_dependencies",
-  "arguments": {
-    "qualified_name": "codemem_storage::Storage::open",
-    "direction": "incoming"
-  }
-}
-```
-
----
-
-### get_impact
-
-Impact analysis: find all graph nodes reachable from a symbol within N hops. Answers "what breaks if this changes?"
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `qualified_name` | string | yes | -- | Fully qualified name of the symbol to analyze |
-| `depth` | integer | no | `2` | Maximum BFS depth for reachability |
-
-```json
-{
-  "name": "get_impact",
-  "arguments": {
-    "qualified_name": "codemem_core::MemoryNode",
-    "depth": 3
-  }
-}
-```
-
----
-
-### get_clusters
-
-Run Louvain community detection on the knowledge graph to find clusters of related symbols.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `resolution` | number | no | `1.0` | Louvain resolution parameter (higher = more, smaller clusters) |
-
-```json
-{
-  "name": "get_clusters",
-  "arguments": {
-    "resolution": 1.5
-  }
-}
-```
-
----
-
-### get_cross_repo
-
-Scan for workspace manifests (Cargo.toml, package.json) and report workspace structure and cross-package dependencies.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | no | -- | Path to scan (defaults to the last indexed codebase root) |
-
-```json
-{
-  "name": "get_cross_repo",
-  "arguments": {
-    "path": "/Users/dev/monorepo"
-  }
-}
-```
-
----
-
-### get_pagerank
-
-Run PageRank on the full knowledge graph to find the most important/central nodes.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `top_k` | integer | no | `20` | Number of top-ranked nodes to return |
-| `damping` | number | no | `0.85` | PageRank damping factor |
-
-```json
-{
-  "name": "get_pagerank",
-  "arguments": {
-    "top_k": 10,
-    "damping": 0.85
-  }
-}
-```
-
----
-
-### search_code
-
-Semantic search over indexed code symbols using signature embeddings. Finds functions, types, and methods by meaning rather than exact name match.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | string | yes | -- | Natural language description of the code (e.g. "parse JSON config", "HTTP request handler") |
-| `k` | integer | no | `10` | Number of results to return |
-
-```json
-{
-  "name": "search_code",
-  "arguments": {
-    "query": "parse JSON config file",
-    "k": 5
-  }
-}
-```
-
----
-
-### set_scoring_weights
-
-Update the 9-component hybrid scoring weights at runtime. Weights are normalized to sum to 1.0. Omitted weights retain their current values.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `vector_similarity` | number | no | `0.25` | Weight for vector cosine similarity |
-| `graph_strength` | number | no | `0.20` | Weight for graph relationship strength |
-| `token_overlap` | number | no | `0.15` | Weight for content token overlap |
-| `temporal` | number | no | `0.10` | Weight for temporal alignment |
-| `importance` | number | no | `0.10` | Weight for importance score |
-| `confidence` | number | no | `0.10` | Weight for memory confidence |
-| `tag_matching` | number | no | `0.05` | Weight for tag matching |
-| `recency` | number | no | `0.05` | Weight for recency boost |
-
-```json
-{
-  "name": "set_scoring_weights",
-  "arguments": {
-    "vector_similarity": 0.4,
-    "graph_strength": 0.3,
-    "token_overlap": 0.1
-  }
-}
-```
-
----
-
-## Export/Import Tools (2)
-
-### export_memories
-
-Export memories as a JSON array with optional namespace and type filters. Returns memory objects with their graph edges.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `namespace` | string | no | -- | Filter by namespace |
-| `memory_type` | string | no | -- | Filter by type: `decision`, `pattern`, `preference`, `style`, `habit`, `insight`, `context` |
-| `limit` | integer | no | `100` | Maximum number of memories to export |
-
-```json
-{
-  "name": "export_memories",
-  "arguments": {
-    "namespace": "/Users/dev/myproject",
-    "memory_type": "decision",
-    "limit": 50
-  }
-}
-```
-
----
-
-### import_memories
-
-Import memories from a JSON array. Each object must have at least a `content` field. Auto-deduplicates by content hash.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `memories` | array | yes | -- | Array of memory objects (see schema below) |
-
-Each memory object in the array:
-
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `content` | string | yes | -- | The memory content |
-| `memory_type` | string | no | `"context"` | Memory type |
-| `importance` | number | no | `0.5` | Importance score, 0.0 to 1.0 |
-| `confidence` | number | no | `1.0` | Confidence score, 0.0 to 1.0 |
-| `tags` | string[] | no | `[]` | Searchable tags |
-| `namespace` | string | no | -- | Namespace scope |
-| `metadata` | object | no | -- | Arbitrary key-value metadata |
-
-```json
-{
-  "name": "import_memories",
-  "arguments": {
-    "memories": [
-      {
-        "content": "Always run clippy before committing",
-        "memory_type": "habit",
-        "importance": 0.7,
-        "tags": ["workflow", "rust", "linting"]
-      },
-      {
-        "content": "The auth module uses JWT with RS256",
-        "memory_type": "context",
-        "namespace": "/Users/dev/myproject"
-      }
-    ]
-  }
-}
-```
-
----
-
-## Graph-Expanded Recall & Namespace Tools (4)
-
-### recall_with_expansion
-
-Semantic search with graph expansion: finds memories via vector similarity then expands through the knowledge graph to discover related memories up to N hops away.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | string | yes | -- | Natural language search query |
-| `k` | integer | no | `5` | Number of results to return |
-| `expansion_depth` | integer | no | `1` | Maximum graph hops for expansion (0 = no expansion) |
-| `namespace` | string | no | -- | Filter results to a specific namespace |
-
-```json
-{
-  "name": "recall_with_expansion",
-  "arguments": {
-    "query": "authentication flow",
-    "k": 5,
-    "expansion_depth": 2,
-    "namespace": "/Users/dev/myproject"
-  }
-}
-```
-
----
-
-### list_namespaces
-
-List all namespaces with their memory counts.
-
-No parameters.
-
-```json
-{
-  "name": "list_namespaces",
-  "arguments": {}
-}
-```
-
----
-
-### namespace_stats
-
-Get detailed statistics for a specific namespace: count, average importance/confidence, type distribution, tag frequency, and date range.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `namespace` | string | yes | -- | Namespace to get stats for |
-
-```json
-{
-  "name": "namespace_stats",
-  "arguments": {
-    "namespace": "/Users/dev/myproject"
-  }
-}
-```
-
----
-
-### delete_namespace
-
-Delete all memories in a namespace. This is destructive and requires explicit confirmation.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `namespace` | string | yes | -- | Namespace to delete |
-| `confirm` | boolean | yes | -- | Must be `true` to confirm deletion |
-
-```json
-{
-  "name": "delete_namespace",
-  "arguments": {
-    "namespace": "/Users/dev/old-project",
-    "confirm": true
-  }
-}
-```
-
----
-
-## Consolidation Tools (5)
-
-### consolidate_decay
-
-Run decay consolidation: reduce importance by 10% for memories not accessed within the threshold period.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `threshold_days` | integer | no | `30` | Memories not accessed in this many days will decay |
-
-```json
-{
-  "name": "consolidate_decay",
-  "arguments": {
-    "threshold_days": 14
-  }
-}
-```
-
----
-
-### consolidate_creative
-
-Run creative consolidation: find pairs of memories with overlapping tags but different types and create RELATES_TO edges between them. Inspired by REM-sleep creative association.
-
-No parameters.
-
-```json
-{
-  "name": "consolidate_creative",
-  "arguments": {}
-}
-```
-
----
-
-### consolidate_cluster
-
-Run cluster consolidation: group memories by content hash prefix, keep the highest-importance memory per group, and delete duplicates.
-
-No parameters.
-
-```json
-{
-  "name": "consolidate_cluster",
-  "arguments": {}
-}
-```
-
----
-
-### consolidate_forget
-
-Run forget consolidation: delete memories with importance below the threshold and zero access count. Supports tag-aware bulk cleanup.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `importance_threshold` | number | no | `0.1` | Delete memories with importance below this value (0.0 to 1.0) |
-| `target_tags` | string[] | no | `[]` | Only target memories with these tags (e.g., `["static-analysis"]`) |
-| `max_access_count` | integer | no | `0` | Also forget rarely-accessed memories with access count at or below this value |
-
-```json
-{
-  "name": "consolidate_forget",
-  "arguments": {
-    "importance_threshold": 0.15,
-    "target_tags": ["static-analysis"],
-    "max_access_count": 1
-  }
-}
-```
-
----
-
-### consolidation_status
-
-Show the last run timestamp and affected count for each consolidation cycle type.
-
-No parameters.
-
-```json
-{
-  "name": "consolidation_status",
-  "arguments": {}
-}
-```
-
----
-
-## Relationship Types Reference
-
-The following relationship types are available for `associate_memories` and appear in graph traversal results:
-
-| Type | Category | Description |
-|------|----------|-------------|
-| `RELATES_TO` | General | Generic association |
-| `LEADS_TO` | General | Causal or sequential link |
-| `PART_OF` | General | Containment/membership |
-| `REINFORCES` | Knowledge | Supports or strengthens |
-| `CONTRADICTS` | Knowledge | Conflicts with |
-| `EVOLVED_INTO` | Knowledge | Superseded version |
-| `DERIVED_FROM` | Knowledge | Created from |
-| `INVALIDATED_BY` | Knowledge | Made obsolete by |
-| `DEPENDS_ON` | Code | Runtime/build dependency |
-| `IMPORTS` | Code | Import/use relationship |
-| `EXTENDS` | Code | Inheritance or trait impl |
-| `CALLS` | Code | Function/method invocation |
-| `CONTAINS` | Code | Parent contains child |
-| `SUPERSEDES` | Code | Replaces a previous version |
-| `BLOCKS` | Code | Prevents or blocks |
-| `IMPLEMENTS` | Code | Implements an interface/trait |
-| `INHERITS` | Code | Class inheritance |
-| `SIMILAR_TO` | Semantic | Semantically similar |
-| `PRECEDED_BY` | Temporal | Came before |
-| `EXEMPLIFIES` | Knowledge | Serves as example of |
-| `EXPLAINS` | Knowledge | Provides explanation for |
-| `SHARES_THEME` | Semantic | Shares a common theme |
-| `SUMMARIZES` | Knowledge | Summary of |
-| `CO_CHANGED` | Temporal | Files that frequently change together in git commits |
-
-## Memory Types Reference
-
-| Type | Description |
-|------|-------------|
-| `decision` | A choice or decision made during development |
-| `pattern` | A recurring code pattern or practice |
-| `preference` | A stated preference (library, style, approach) |
-| `style` | Code style or formatting convention |
-| `habit` | A repeated workflow or behavioral habit |
-| `insight` | A non-obvious finding or realization |
-| `context` | General contextual information (default) |
-
-## Hybrid Scoring Components
-
-The 9-component scoring system used by `recall_memory` and `recall_with_expansion`:
-
-| Component | Default Weight | Description |
-|-----------|---------------|-------------|
-| Vector similarity | 0.25 | Cosine similarity between query and memory embeddings |
-| Graph strength | 0.20 | Multi-factor: PageRank (40%) + betweenness centrality (30%) + normalized degree (20%) + cluster bonus (10%) |
-| BM25 token overlap | 0.15 | Okapi BM25 scoring with code-aware tokenizer (camelCase/snake_case splitting) |
-| Temporal | 0.10 | Temporal alignment with query context |
-| Importance | 0.10 | The memory's stored importance score |
-| Confidence | 0.10 | The memory's confidence score |
-| Tag matching | 0.05 | Overlap between query-derived tags and memory tags |
-| Recency | 0.05 | Boost for recently accessed/created memories |
-
-Weights can be adjusted at runtime via `set_scoring_weights`.
-
----
-
-## Impact & Pattern Tools (4)
-
-### recall_with_impact
-
-Semantic recall enriched with graph impact data. Each result includes PageRank score, betweenness centrality, connected Decision memories, dependent files, and modification count.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | string | yes | -- | Natural language search query |
-| `k` | integer | no | `10` | Number of results |
-| `namespace` | string | no | -- | Filter by namespace |
-
-```json
-{
-  "name": "recall_with_impact",
-  "arguments": {
-    "query": "authentication middleware",
-    "k": 5
-  }
-}
-```
-
----
-
-### get_decision_chain
-
-Get a chronologically ordered chain of Decision memories for a file or topic, linked through EVOLVED_INTO, LEADS_TO, and DERIVED_FROM edges.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `file_path` | string | no | -- | Filter by file path (at least one of `file_path` or `topic` required) |
-| `topic` | string | no | -- | Filter by topic keyword |
-
-```json
-{
-  "name": "get_decision_chain",
-  "arguments": {
-    "file_path": "src/auth.rs"
-  }
-}
-```
-
----
-
-### detect_patterns
-
-Detect cross-session patterns: repeated searches, file hotspots, decision chains, and tool preferences.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `min_frequency` | integer | no | `3` | Minimum occurrences before flagging a pattern |
-| `namespace` | string | no | -- | Filter by namespace |
-
-```json
-{
-  "name": "detect_patterns",
-  "arguments": {
-    "min_frequency": 2,
-    "namespace": "/Users/dev/myproject"
-  }
-}
-```
-
----
-
-### pattern_insights
-
-Generate human-readable markdown insights from detected patterns. Groups findings by type (file hotspots, repeated searches, decision chains, tool preferences).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `min_frequency` | integer | no | `2` | Minimum occurrences before including a pattern |
-| `namespace` | string | no | -- | Filter by namespace |
-
-```json
-{
-  "name": "pattern_insights",
-  "arguments": {
-    "min_frequency": 2
-  }
-}
-```
-
----
-
-## Enrichment Tools (3)
-
-### enrich_git_history
-
-Analyze git commit history for a repository. Annotates file nodes with commit counts, authors, churn rates, and last-modified timestamps. Creates `CO_CHANGED` edges between files that frequently change together. Stores activity insights as Insight memories tagged `track:activity`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | yes | -- | Absolute path to the git repository root |
-| `days` | integer | no | `90` | Number of days of git history to analyze |
-
-```json
-{
-  "name": "enrich_git_history",
-  "arguments": {
-    "path": "/Users/dev/myproject",
-    "days": 180
-  }
-}
-```
-
----
-
-### enrich_security
-
-Scan graph nodes for security-sensitive patterns (auth, secrets, credentials, tokens, encryption, etc.). Annotates matching nodes with `security_flags` in their payload. Stores security findings as Insight memories tagged `track:security` with severity levels.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `namespace` | string | no | -- | Filter to a specific namespace |
-
-```json
-{
-  "name": "enrich_security",
-  "arguments": {
-    "namespace": "/Users/dev/myproject"
-  }
-}
-```
-
----
-
-### enrich_performance
-
-Compute coupling scores, dependency depth, critical path (PageRank), and file complexity for graph nodes. Annotates nodes with `coupling_score`, `dependency_layer`, `critical_path_rank`, and `symbol_count`. Stores performance findings as Insight memories tagged `track:performance`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `namespace` | string | no | -- | Filter to a specific namespace |
-| `top` | integer | no | `10` | Number of top results per category |
-
-```json
-{
-  "name": "enrich_performance",
-  "arguments": {
-    "namespace": "/Users/dev/myproject",
-    "top": 20
-  }
-}
-```
-
----
-
-## Self-Editing Tools (3)
-
 ### refine_memory
 
-Refine an existing memory's content in-place. Creates an EVOLVED_INTO provenance chain from the old version to the refined version, preserving full edit history.
+Refine an existing memory. Default: creates a new version linked via EVOLVED_INTO. With `destructive=true`: updates in-place (replaces the old `update_memory`).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | string | yes | -- | Memory ID to refine |
-| `content` | string | yes | -- | New refined content |
+| `content` | string | no | -- | New refined content (optional unless `destructive=true`) |
 | `importance` | number | no | -- | New importance score (0.0-1.0) |
+| `tags` | string[] | no | -- | Updated tags |
+| `destructive` | boolean | no | `false` | When true, update in-place instead of creating a new version |
 
 ```json
 {
@@ -951,12 +220,12 @@ Refine an existing memory's content in-place. Creates an EVOLVED_INTO provenance
 
 ### split_memory
 
-Split a memory into multiple smaller, focused parts. Creates PART_OF edges from each new memory back to the original. The original memory is preserved.
+Split a memory into multiple parts, each linked to the original via PART_OF edges. The original memory is preserved.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | string | yes | -- | Memory ID to split |
-| `parts` | array | yes | -- | Array of objects with `content` and optional `memory_type`, `importance`, `tags` |
+| `parts` | array | yes | -- | Array of objects with `content` and optional `tags`, `importance` |
 
 ```json
 {
@@ -964,8 +233,8 @@ Split a memory into multiple smaller, focused parts. Creates PART_OF edges from 
   "arguments": {
     "id": "a1b2c3d4-5678-9abc-def0-123456789abc",
     "parts": [
-      { "content": "Use Axum for HTTP routing", "memory_type": "decision" },
-      { "content": "Use Tower middleware for rate limiting", "memory_type": "decision" }
+      { "content": "Use Axum for HTTP routing", "tags": ["routing"] },
+      { "content": "Use Tower middleware for rate limiting", "tags": ["middleware"] }
     ]
   }
 }
@@ -975,20 +244,21 @@ Split a memory into multiple smaller, focused parts. Creates PART_OF edges from 
 
 ### merge_memories
 
-Merge multiple memories into a single consolidated memory. Creates SUMMARIZES edges from the merged memory to each source. Source memories are preserved.
+Merge multiple memories into a single summary memory linked via SUMMARIZES edges. Source memories are preserved.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `ids` | string[] | yes | -- | Array of memory IDs to merge |
-| `content` | string | yes | -- | Content for the merged memory |
-| `memory_type` | string | no | `"insight"` | Type for the merged memory |
-| `importance` | number | no | -- | Importance score for the merged memory |
+| `source_ids` | string[] | yes | -- | Array of memory IDs to merge (min 2) |
+| `content` | string | yes | -- | Content for the merged summary memory |
+| `memory_type` | string | no | -- | Type for the merged memory |
+| `importance` | number | no | `0.7` | Importance score |
+| `tags` | string[] | no | `[]` | Tags for the merged memory |
 
 ```json
 {
   "name": "merge_memories",
   "arguments": {
-    "ids": ["aaa-111", "bbb-222", "ccc-333"],
+    "source_ids": ["aaa-111", "bbb-222", "ccc-333"],
     "content": "API layer uses Axum 0.8 with Tower middleware for routing, rate limiting, and auth",
     "memory_type": "insight",
     "importance": 0.8
@@ -998,11 +268,38 @@ Merge multiple memories into a single consolidated memory. Creates SUMMARIZES ed
 
 ---
 
-## Graph Browser Tools (1)
+## Graph & Structure (7 tools)
+
+### graph_traverse
+
+Multi-hop graph traversal from a start node with optional filtering by node kind and relationship type.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `start_id` | string | yes | -- | Starting node ID |
+| `max_depth` | integer | no | `2` | Maximum traversal depth |
+| `algorithm` | string | no | `"bfs"` | Traversal algorithm: `bfs` or `dfs` |
+| `exclude_kinds` | string[] | no | -- | Node kinds to exclude from results and traversal |
+| `include_relationships` | string[] | no | -- | Only follow edges of these relationship types |
+
+```json
+{
+  "name": "graph_traverse",
+  "arguments": {
+    "start_id": "aaa-111",
+    "max_depth": 3,
+    "algorithm": "dfs",
+    "exclude_kinds": ["chunk"],
+    "include_relationships": ["CALLS", "IMPORTS"]
+  }
+}
+```
+
+---
 
 ### summary_tree
 
-Return a hierarchical summary tree (packages → files → symbols). Start from a `pkg:` node to browse the directory structure of an indexed codebase.
+Hierarchical summary tree (packages -> files -> symbols). Start from a `pkg:` node to browse the directory structure.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1023,57 +320,501 @@ Return a hierarchical summary tree (packages → files → symbols). Start from 
 
 ---
 
-## Additional Consolidation Tools (1)
+### codemem_status
 
-### consolidate_summarize
-
-LLM-powered consolidation that finds connected components in the memory graph, summarizes large clusters into Insight memories linked via SUMMARIZES edges. Requires `CODEMEM_COMPRESS_PROVIDER` to be configured.
+Unified status: database stats, health check, and operational metrics. Replaces the former `codemem_stats`, `codemem_health`, and `codemem_metrics` tools.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `cluster_size` | integer | no | `5` | Minimum cluster size to summarize |
+| `include` | string[] | no | all | Sections to include: `"stats"`, `"health"`, `"metrics"` |
 
 ```json
 {
-  "name": "consolidate_summarize",
+  "name": "codemem_status",
   "arguments": {
-    "cluster_size": 3
+    "include": ["stats", "health"]
   }
 }
 ```
 
 ---
 
-## Session & Metrics Tools (2)
+### index_codebase
 
-### session_checkpoint
-
-Save a mid-session checkpoint with current context. Stores the checkpoint as a memory with session metadata for later resumption.
+Index a codebase directory to extract symbols and references using tree-sitter. Supports 14 languages.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `summary` | string | no | -- | Optional summary of the current session state |
+| `path` | string | yes | -- | Absolute path to the codebase directory to index |
 
 ```json
 {
-  "name": "session_checkpoint",
+  "name": "index_codebase",
   "arguments": {
-    "summary": "Halfway through refactoring auth module"
+    "path": "/Users/dev/myproject"
   }
 }
 ```
 
 ---
 
-### codemem_metrics
+### search_code
 
-Get operational metrics: tool call counts, latencies, error rates, and other runtime statistics.
+Search code by meaning or name. Replaces the former `search_symbols` tool (use `mode=text`).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | string | yes | -- | Search query (natural language for semantic, substring for text) |
+| `k` | integer | no | `10` | Number of results |
+| `mode` | string | no | `"semantic"` | Search mode: `semantic` (vector search), `text` (symbol name), `hybrid` (both) |
+| `kind` | string | no | -- | Filter by symbol kind (text/hybrid modes): `function`, `method`, `class`, `struct`, `enum`, `interface`, `type`, `constant`, `module`, `test` |
+
+```json
+{
+  "name": "search_code",
+  "arguments": {
+    "query": "parse JSON config file",
+    "k": 5,
+    "mode": "hybrid"
+  }
+}
+```
+
+---
+
+### get_symbol_info
+
+Get full details of a symbol by qualified name, optionally including graph dependencies.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `qualified_name` | string | yes | -- | Fully qualified name (e.g. `module::Struct::method`) |
+| `include_dependencies` | boolean | no | `false` | Include graph edges (calls, imports, etc.) |
+
+```json
+{
+  "name": "get_symbol_info",
+  "arguments": {
+    "qualified_name": "codemem_engine::CodememEngine::recall",
+    "include_dependencies": true
+  }
+}
+```
+
+---
+
+### get_symbol_graph
+
+Get symbol dependency graph. Replaces the former `get_dependencies` and `get_impact` tools.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `qualified_name` | string | yes | -- | Fully qualified name of the symbol |
+| `depth` | integer | no | `1` | 1 = direct deps, >1 = impact analysis (BFS reachability) |
+| `direction` | string | no | `"both"` | Direction: `incoming`, `outgoing`, or `both` |
+
+```json
+{
+  "name": "get_symbol_graph",
+  "arguments": {
+    "qualified_name": "codemem_storage::Storage::open",
+    "depth": 2,
+    "direction": "incoming"
+  }
+}
+```
+
+---
+
+### find_important_nodes
+
+Run PageRank to find the most important/central nodes. Replaces the former `get_pagerank` tool.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `top_k` | integer | no | `20` | Number of top-ranked nodes to return |
+| `damping` | number | no | `0.85` | PageRank damping factor |
+
+```json
+{
+  "name": "find_important_nodes",
+  "arguments": {
+    "top_k": 10,
+    "damping": 0.85
+  }
+}
+```
+
+---
+
+### find_related_groups
+
+Run Louvain community detection to find clusters of related symbols. Replaces the former `get_clusters` tool.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `resolution` | number | no | `1.0` | Louvain resolution parameter (higher = more, smaller clusters) |
+
+```json
+{
+  "name": "find_related_groups",
+  "arguments": {
+    "resolution": 1.5
+  }
+}
+```
+
+---
+
+### get_cross_repo
+
+Scan workspace manifests (Cargo.toml, package.json, go.mod, pyproject.toml) and report cross-package dependencies.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | no | -- | Path to scan (defaults to the last indexed codebase root) |
+
+```json
+{
+  "name": "get_cross_repo",
+  "arguments": {
+    "path": "/Users/dev/monorepo"
+  }
+}
+```
+
+---
+
+## Consolidation & Patterns (3 tools)
+
+### consolidate
+
+Unified consolidation tool. Replaces the former `consolidate_decay`, `consolidate_creative`, `consolidate_cluster`, `consolidate_forget`, `consolidate_summarize`, and `consolidation_status` tools.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `mode` | string | no | `"auto"` | `auto` (runs all cycles), `decay`, `creative`, `cluster`, `forget`, `summarize` |
+| `threshold_days` | integer | no | `30` | For decay mode |
+| `similarity_threshold` | number | no | `0.92` | For cluster mode |
+| `importance_threshold` | number | no | `0.1` | For forget mode |
+| `target_tags` | string[] | no | `[]` | For forget mode: only target memories with these tags |
+| `max_access_count` | integer | no | `0` | For forget mode |
+| `cluster_size` | integer | no | `5` | For summarize mode: minimum cluster size |
+
+```json
+{
+  "name": "consolidate",
+  "arguments": {
+    "mode": "forget",
+    "importance_threshold": 0.15,
+    "target_tags": ["static-analysis"],
+    "max_access_count": 1
+  }
+}
+```
+
+---
+
+### detect_patterns
+
+Detect cross-session patterns: repeated searches, file hotspots, decision chains, tool preferences. Replaces the former `detect_patterns` + `pattern_insights` tools.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `min_frequency` | integer | no | `3` | Minimum occurrences before flagging a pattern |
+| `namespace` | string | no | -- | Filter by namespace |
+| `format` | string | no | `"json"` | Output format: `json`, `markdown`, `both` |
+
+```json
+{
+  "name": "detect_patterns",
+  "arguments": {
+    "min_frequency": 2,
+    "format": "markdown"
+  }
+}
+```
+
+---
+
+### get_decision_chain
+
+Follow decision evolution through the knowledge graph via EVOLVED_INTO/LEADS_TO/DERIVED_FROM edges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `file_path` | string | no | -- | Filter by file path (at least one of `file_path` or `topic` required) |
+| `topic` | string | no | -- | Filter by topic keyword |
+
+```json
+{
+  "name": "get_decision_chain",
+  "arguments": {
+    "file_path": "src/auth.rs"
+  }
+}
+```
+
+---
+
+## Namespace Management (3 tools)
+
+### list_namespaces
+
+List all namespaces with inline stats (counts, avg importance, type distribution, date range).
 
 No parameters.
 
 ```json
 {
-  "name": "codemem_metrics",
+  "name": "list_namespaces",
   "arguments": {}
 }
 ```
+
+---
+
+### namespace_stats
+
+Detailed statistics for a specific namespace.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `namespace` | string | yes | -- | Namespace to get stats for |
+
+```json
+{
+  "name": "namespace_stats",
+  "arguments": {
+    "namespace": "/Users/dev/myproject"
+  }
+}
+```
+
+---
+
+### delete_namespace
+
+Delete all memories in a namespace (requires `confirm=true`).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `namespace` | string | yes | -- | Namespace to delete |
+| `confirm` | boolean | yes | -- | Must be `true` to confirm deletion |
+
+```json
+{
+  "name": "delete_namespace",
+  "arguments": {
+    "namespace": "/Users/dev/old-project",
+    "confirm": true
+  }
+}
+```
+
+---
+
+## Session & Context (2 tools)
+
+### session_checkpoint
+
+Mid-session progress report with activity summary, pattern detection, and focus areas.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `session_id` | string | yes | -- | Active session ID |
+| `namespace` | string | no | -- | Filter by namespace |
+
+```json
+{
+  "name": "session_checkpoint",
+  "arguments": {
+    "session_id": "abc-123"
+  }
+}
+```
+
+---
+
+### session_context
+
+Get session context: recent memories, pending analyses, active patterns, and focus areas.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `namespace` | string | no | -- | Filter by namespace |
+| `k` | integer | no | `10` | Number of recent memories to include |
+
+```json
+{
+  "name": "session_context",
+  "arguments": {
+    "namespace": "/Users/dev/myproject",
+    "k": 20
+  }
+}
+```
+
+---
+
+## Enrichment (3 tools)
+
+### enrich_codebase
+
+Composite enrichment: runs git history, security, and performance analysis in one call. Select which analyses to run via the `analyses` parameter.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | yes | -- | Absolute path to the git repository root |
+| `days` | integer | no | `90` | Number of days of git history to analyze |
+| `namespace` | string | no | -- | Namespace scope |
+| `analyses` | string[] | no | all | Which analyses to run: `"git"`, `"security"`, `"performance"` |
+
+```json
+{
+  "name": "enrich_codebase",
+  "arguments": {
+    "path": "/Users/dev/myproject",
+    "days": 180,
+    "analyses": ["git", "security"]
+  }
+}
+```
+
+---
+
+### analyze_codebase
+
+Full pipeline: index -> enrich (git+security+performance) -> PageRank -> clusters -> summary. One-shot command to fully analyze a codebase.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | yes | -- | Absolute path to the codebase |
+| `namespace` | string | no | -- | Namespace scope |
+| `days` | integer | no | `90` | Days of git history |
+
+```json
+{
+  "name": "analyze_codebase",
+  "arguments": {
+    "path": "/Users/dev/myproject"
+  }
+}
+```
+
+---
+
+### enrich_git_history
+
+Enrich the knowledge graph with git history: commit counts, churn rate, CO_CHANGED edges, activity insights.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | yes | -- | Absolute path to the git repository root |
+| `days` | integer | no | `90` | Number of days of git history to analyze |
+| `namespace` | string | no | -- | Namespace scope |
+
+```json
+{
+  "name": "enrich_git_history",
+  "arguments": {
+    "path": "/Users/dev/myproject",
+    "days": 180
+  }
+}
+```
+
+---
+
+## Legacy Tool Aliases
+
+The following old tool names are still accepted for backwards compatibility. They are transparently mapped to the new unified tools:
+
+| Legacy Name | Maps To | Notes |
+|-------------|---------|-------|
+| `recall_memory` | `recall` | Direct alias |
+| `recall_with_expansion` | `recall` | Sets `expand=true` |
+| `recall_with_impact` | `recall` | Sets `include_impact=true` |
+| `update_memory` | `refine_memory` | Sets `destructive=true` |
+| `codemem_stats` | `codemem_status` | Sets `include=["stats"]` |
+| `codemem_health` | `codemem_status` | Sets `include=["health"]` |
+| `codemem_metrics` | `codemem_status` | Sets `include=["metrics"]` |
+| `consolidate_decay` | `consolidate` | Sets `mode="decay"` |
+| `consolidate_creative` | `consolidate` | Sets `mode="creative"` |
+| `consolidate_cluster` | `consolidate` | Sets `mode="cluster"` |
+| `consolidate_forget` | `consolidate` | Sets `mode="forget"` |
+| `consolidate_summarize` | `consolidate` | Sets `mode="summarize"` |
+| `consolidation_status` | `consolidate` | Sets `mode="auto"` |
+| `pattern_insights` | `detect_patterns` | Sets `format="markdown"` |
+| `search_symbols` | `search_code` | Sets `mode="text"` |
+| `get_dependencies` | `get_symbol_graph` | Direct alias |
+| `get_impact` | `get_symbol_graph` | Direct alias |
+| `get_clusters` | `find_related_groups` | Direct alias |
+| `get_pagerank` | `find_important_nodes` | Direct alias |
+| `enrich_security` | via `enrich_codebase` | Legacy pass-through |
+| `enrich_performance` | via `enrich_codebase` | Legacy pass-through |
+
+**Removed tools** (return error if called):
+- `set_scoring_weights` — Use `codemem config set scoring.<key> <value>` CLI or config.toml
+- `export_memories` — Use `codemem export` CLI
+- `import_memories` — Use `codemem import` CLI
+
+---
+
+## Reference Tables
+
+### Relationship Types (24)
+
+| Type | Category | Description |
+|------|----------|-------------|
+| `RELATES_TO` | General | Generic association |
+| `LEADS_TO` | General | Causal or sequential link |
+| `PART_OF` | General | Containment/membership |
+| `REINFORCES` | Knowledge | Supports or strengthens |
+| `CONTRADICTS` | Knowledge | Conflicts with |
+| `EVOLVED_INTO` | Knowledge | Superseded version |
+| `DERIVED_FROM` | Knowledge | Created from |
+| `INVALIDATED_BY` | Knowledge | Made obsolete by |
+| `DEPENDS_ON` | Code | Runtime/build dependency |
+| `IMPORTS` | Code | Import statement |
+| `EXTENDS` | Code | Extension or mixin |
+| `CALLS` | Code | Function/method invocation |
+| `CONTAINS` | Code | Parent contains child |
+| `SUPERSEDES` | Code | Replaces a previous version |
+| `BLOCKS` | Code | Prevents or blocks |
+| `IMPLEMENTS` | Structural | Implements interface/trait |
+| `INHERITS` | Structural | Class inheritance |
+| `SIMILAR_TO` | Semantic | Semantically similar |
+| `PRECEDED_BY` | Temporal | Came before |
+| `EXEMPLIFIES` | Knowledge | Serves as example of |
+| `EXPLAINS` | Knowledge | Provides explanation for |
+| `SHARES_THEME` | Semantic | High similarity across types (consolidation) |
+| `SUMMARIZES` | Knowledge | Summary of |
+| `CO_CHANGED` | Temporal | Files that frequently change together in git commits |
+
+### Memory Types (7)
+
+| Type | Description |
+|------|-------------|
+| `decision` | A choice or decision made during development |
+| `pattern` | A recurring code pattern or practice |
+| `preference` | A stated preference (library, style, approach) |
+| `style` | Code style or formatting convention |
+| `habit` | A repeated workflow or behavioral habit |
+| `insight` | A non-obvious finding or realization |
+| `context` | General contextual information (default) |
+
+### Hybrid Scoring Components (9)
+
+| Component | Default Weight | Description |
+|-----------|---------------|-------------|
+| Vector similarity | 0.25 | Cosine similarity between query and memory embeddings |
+| Graph strength | 0.20 | Multi-factor: PageRank (40%) + betweenness centrality (30%) + normalized degree (20%) + cluster bonus (10%) |
+| BM25 token overlap | 0.15 | Okapi BM25 scoring with code-aware tokenizer (camelCase/snake_case splitting) |
+| Temporal | 0.10 | Temporal alignment with query context |
+| Importance | 0.10 | The memory's stored importance score |
+| Confidence | 0.10 | The memory's confidence score |
+| Tag matching | 0.05 | Overlap between query-derived tags and memory tags |
+| Recency | 0.05 | Boost for recently accessed/created memories |
+
+Weights are configurable via `codemem config set scoring.<key> <value>` and persist in `~/.codemem/config.toml`.

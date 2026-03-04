@@ -104,7 +104,7 @@ codemem stats
 
 ## `codemem serve`
 
-Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 43 MCP tools.
+Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 28 MCP tools (plus legacy aliases for backwards compatibility).
 
 **Syntax**
 
@@ -122,7 +122,7 @@ codemem serve
 
 ## `codemem ingest`
 
-Process a PostToolUse hook payload from stdin. This command is called automatically by the configured hooks whenever an AI assistant uses a tool (Read, Glob, Grep, Edit, Write). It extracts relevant information, optionally compresses via LLM, and stores it as a memory with embeddings and graph nodes.
+Process a PostToolUse hook payload from stdin. This command is called automatically by the configured hooks whenever an AI assistant uses a tool (Read, Glob, Grep, Edit, Write, Bash, WebFetch, WebSearch, Agent, SendMessage, ListDir). It extracts relevant information, optionally compresses via LLM, and stores it as a memory with embeddings and graph nodes.
 
 Uses the embedding provider configured via `CODEMEM_EMBED_*` env vars (see [Global Environment Variables](#global-environment-variables)). Compression is configured via `CODEMEM_COMPRESS_*` env vars.
 

@@ -19,6 +19,7 @@ use codemem_storage::HnswIndex;
 use codemem_storage::Storage;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub mod analysis;
@@ -35,6 +36,10 @@ pub mod recall;
 pub mod scoring;
 pub mod search;
 pub mod watch;
+
+#[cfg(test)]
+#[path = "tests/engine_integration_tests.rs"]
+mod integration_tests;
 
 // Re-export key index types at crate root for convenience
 pub use index::{
@@ -88,7 +93,19 @@ pub struct IndexCache {
 /// This struct contains all the business logic for the Codemem memory system.
 /// Transport layers (MCP, REST API, CLI) hold a `CodememEngine` and delegate
 /// domain operations to it, keeping transport concerns separate.
+///
+/// **Concrete types are intentional**: `CodememEngine` uses concrete backend types
+/// (`Storage`, `HnswIndex`, `GraphEngine`) rather than trait objects (`dyn StorageBackend`,
+/// `dyn VectorBackend`, `dyn GraphBackend`) for performance. This enables monomorphization
+/// (the compiler generates specialized code for each concrete type), eliminates vtable
+/// indirection overhead on every call, and provides predictable memory layout for
+/// cache-friendly access patterns. The trait abstractions exist for testing and
+/// alternative implementations, but the engine itself benefits from static dispatch.
 pub struct CodememEngine {
+    // TODO(C7): Fields should be `pub(crate)` with accessor methods, but many files
+    // in `crates/codemem/src/` (a different crate) access these fields directly
+    // (e.g., `engine.storage`, `engine.graph.lock()`, `engine.metrics`). These must
+    // remain `pub` until all external callers are migrated to use accessor methods.
     pub storage: Box<dyn StorageBackend>,
     pub vector: Mutex<HnswIndex>,
     pub graph: Mutex<GraphEngine>,
@@ -106,6 +123,9 @@ pub struct CodememEngine {
     pub config: CodememConfig,
     /// Operational metrics collector.
     pub metrics: Arc<InMemoryMetrics>,
+    /// Dirty flag for batch saves: set after `persist_memory_no_save()`,
+    /// cleared by `save_index()`.
+    dirty: AtomicBool,
 }
 
 impl CodememEngine {
@@ -128,6 +148,7 @@ impl CodememEngine {
             bm25_index: Mutex::new(Bm25Index::new()),
             config,
             metrics: Arc::new(InMemoryMetrics::new()),
+            dirty: AtomicBool::new(false),
         }
     }
 
@@ -142,6 +163,31 @@ impl CodememEngine {
             vector.load(&index_path)?;
         }
 
+        // C6: Vector index consistency check — compare vector index count vs DB embedding count.
+        // If they mismatch, rebuild the vector index from SQLite embeddings.
+        let vector_count = vector.stats().count;
+        let db_stats = storage.stats()?;
+        let db_embed_count = db_stats.embedding_count;
+        if vector_count != db_embed_count {
+            tracing::warn!(
+                "Vector index ({vector_count}) out of sync with DB ({db_embed_count}), rebuilding..."
+            );
+            // Rebuild: create a fresh index and re-insert all embeddings from DB
+            let mut fresh_vector = HnswIndex::with_defaults()?;
+            if let Ok(embeddings) = storage.list_all_embeddings() {
+                for (id, embedding) in &embeddings {
+                    if let Err(e) = fresh_vector.insert(id, embedding) {
+                        tracing::warn!("Failed to re-insert embedding {id}: {e}");
+                    }
+                }
+            }
+            vector = fresh_vector;
+            // Save the rebuilt index
+            if let Err(e) = vector.save(&index_path) {
+                tracing::warn!("Failed to save rebuilt vector index: {e}");
+            }
+        }
+
         // Load graph from storage
         let graph = GraphEngine::from_storage(&storage)?;
 
@@ -151,8 +197,11 @@ impl CodememEngine {
         let mut engine = Self::new(Box::new(storage), vector, graph, embeddings);
         engine.db_path = Some(db_path.to_path_buf());
 
-        // Recompute centrality metrics on startup
-        engine.lock_graph()?.recompute_centrality();
+        // H7: Only compute PageRank at startup; betweenness is computed lazily
+        // via `ensure_betweenness_computed()` when first needed.
+        engine
+            .lock_graph()?
+            .recompute_centrality_with_options(false);
 
         // Populate BM25 index from all existing memories (batch load)
         if let Ok(ids) = engine.storage.list_memory_ids() {
@@ -185,6 +234,7 @@ impl CodememEngine {
             bm25_index: Mutex::new(Bm25Index::new()),
             config,
             metrics: Arc::new(InMemoryMetrics::new()),
+            dirty: AtomicBool::new(false),
         }
     }
 
@@ -244,6 +294,57 @@ impl CodememEngine {
         self.scoring_weights
             .write()
             .map_err(|e| CodememError::LockPoisoned(format!("scoring_weights write: {e}")))
+    }
+
+    // ── Accessor Methods ─────────────────────────────────────────────────────
+    // C7: Accessor methods for fields. Once external callers in `crates/codemem/`
+    // are migrated from direct field access to these methods, fields can be
+    // changed to `pub(crate)`.
+
+    /// Access the storage backend.
+    pub fn storage(&self) -> &dyn StorageBackend {
+        &*self.storage
+    }
+
+    /// Access the graph engine mutex.
+    pub fn graph(&self) -> &Mutex<GraphEngine> {
+        &self.graph
+    }
+
+    /// Access the vector index mutex.
+    pub fn vector(&self) -> &Mutex<HnswIndex> {
+        &self.vector
+    }
+
+    /// Access the embeddings provider mutex (if configured).
+    pub fn embeddings(&self) -> Option<&Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
+        self.embeddings.as_ref()
+    }
+
+    /// Access the BM25 index mutex.
+    pub fn bm25_index(&self) -> &Mutex<Bm25Index> {
+        &self.bm25_index
+    }
+
+    /// Access the database path.
+    pub fn db_path(&self) -> Option<&Path> {
+        self.db_path.as_deref()
+    }
+
+    /// Access the loaded configuration.
+    pub fn config(&self) -> &CodememConfig {
+        &self.config
+    }
+
+    /// Access the operational metrics collector.
+    pub fn metrics(&self) -> &Arc<InMemoryMetrics> {
+        &self.metrics
+    }
+
+    /// Check if the engine has unsaved changes (dirty flag is set).
+    #[cfg(test)]
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::Acquire)
     }
 
     // ── Contextual Enrichment ────────────────────────────────────────────────
@@ -438,14 +539,42 @@ impl CodememEngine {
 
     /// Persist a memory without saving the vector index to disk.
     /// Use this in batch operations, then call `save_index()` once at the end.
-    fn persist_memory_no_save(&self, memory: &MemoryNode) -> Result<(), CodememError> {
+    pub(crate) fn persist_memory_no_save(&self, memory: &MemoryNode) -> Result<(), CodememError> {
         self.persist_memory_inner(memory, false)
     }
 
     /// Inner persist implementation with optional index save.
+    ///
+    /// H3: Lock ordering is enforced to prevent deadlocks:
+    /// 1. Embeddings lock (acquire, embed, drop)
+    /// 2. BM25 lock
+    /// 3. Graph lock
+    /// 4. Vector lock
     fn persist_memory_inner(&self, memory: &MemoryNode, save: bool) -> Result<(), CodememError> {
         // 1. Store in SQLite
         self.storage.insert_memory(memory)?;
+
+        // H3: Step 1 — Acquire embeddings lock first, embed, save result, drop lock.
+        // This prevents holding the embeddings lock while acquiring vector/graph locks.
+        let embedding_result = match self.lock_embeddings() {
+            Ok(Some(emb)) => {
+                let enriched = self.enrich_memory_text(
+                    &memory.content,
+                    memory.memory_type,
+                    &memory.tags,
+                    memory.namespace.as_deref(),
+                    Some(&memory.id),
+                );
+                let result = emb.embed(&enriched).ok();
+                drop(emb);
+                result
+            }
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!("Embeddings lock failed during persist: {e}");
+                None
+            }
+        };
 
         // 2. Update BM25 index
         match self.lock_bm25() {
@@ -455,7 +584,7 @@ impl CodememEngine {
             Err(e) => tracing::warn!("BM25 lock failed during persist: {e}"),
         }
 
-        // 3. Add memory node to graph
+        // 3. Add memory node to graph (separate lock scope)
         match self.lock_graph() {
             Ok(mut graph) => {
                 let node = codemem_core::GraphNode {
@@ -467,36 +596,37 @@ impl CodememEngine {
                     memory_id: Some(memory.id.clone()),
                     namespace: memory.namespace.clone(),
                 };
-                let _ = self.storage.insert_graph_node(&node);
-                let _ = graph.add_node(node);
+                if let Err(e) = self.storage.insert_graph_node(&node) {
+                    tracing::warn!("Failed to insert graph node for memory {}: {e}", memory.id);
+                }
+                if let Err(e) = graph.add_node(node) {
+                    tracing::warn!(
+                        "Failed to add graph node in-memory for memory {}: {e}",
+                        memory.id
+                    );
+                }
             }
             Err(e) => tracing::warn!("Graph lock failed during persist: {e}"),
         }
 
-        // 4. Embed and store in vector index
-        match self.lock_embeddings() {
-            Ok(Some(emb)) => {
-                let enriched = self.enrich_memory_text(
-                    &memory.content,
-                    memory.memory_type,
-                    &memory.tags,
-                    memory.namespace.as_deref(),
-                    Some(&memory.id),
-                );
-                if let Ok(vec) = emb.embed(&enriched) {
-                    if let Ok(mut vi) = self.lock_vector() {
-                        let _ = vi.insert(&memory.id, &vec);
-                    }
-                    let _ = self.storage.store_embedding(&memory.id, &vec);
+        // H3: Step 4 — Insert embedding into vector index (separate lock scope from embeddings).
+        if let Some(vec) = &embedding_result {
+            if let Ok(mut vi) = self.lock_vector() {
+                if let Err(e) = vi.insert(&memory.id, vec) {
+                    tracing::warn!("Failed to insert into vector index for {}: {e}", memory.id);
                 }
             }
-            Ok(None) => {} // No embeddings provider configured
-            Err(e) => tracing::warn!("Embeddings lock failed during persist: {e}"),
+            if let Err(e) = self.storage.store_embedding(&memory.id, vec) {
+                tracing::warn!("Failed to store embedding for {}: {e}", memory.id);
+            }
         }
 
-        // 5. Save vector index to disk (if requested)
+        // C5: Set dirty flag instead of calling save_index() after each persist.
+        // Callers should use flush_if_dirty() to batch save the index.
         if save {
-            self.save_index();
+            self.save_index(); // save_index() clears dirty flag
+        } else {
+            self.dirty.store(true, Ordering::Release);
         }
 
         Ok(())
@@ -754,11 +884,14 @@ impl CodememEngine {
         if let Ok(mut graph) = self.lock_graph() {
             if let Ok(Some(mut node)) = graph.get_node(id) {
                 node.label = scoring::truncate_content(content, 80);
-                let _ = graph.add_node(node);
+                if let Err(e) = graph.add_node(node) {
+                    tracing::warn!("Failed to update graph node for {id}: {e}");
+                }
             }
         }
 
         // Re-embed with contextual enrichment
+        // H3: Acquire embeddings lock, embed, drop lock before acquiring vector lock.
         if let Some(emb_guard) = self.lock_embeddings()? {
             let (mem_type, tags, namespace) =
                 if let Ok(Some(mem)) = self.storage.get_memory_no_touch(id) {
@@ -771,10 +904,16 @@ impl CodememEngine {
             let emb_result = emb_guard.embed(&enriched);
             drop(emb_guard);
             if let Ok(embedding) = emb_result {
-                let _ = self.storage.store_embedding(id, &embedding);
+                if let Err(e) = self.storage.store_embedding(id, &embedding) {
+                    tracing::warn!("Failed to store embedding for {id}: {e}");
+                }
                 let mut vec = self.lock_vector()?;
-                let _ = vec.remove(id);
-                let _ = vec.insert(id, &embedding);
+                if let Err(e) = vec.remove(id) {
+                    tracing::warn!("Failed to remove old vector for {id}: {e}");
+                }
+                if let Err(e) = vec.insert(id, &embedding) {
+                    tracing::warn!("Failed to insert new vector for {id}: {e}");
+                }
             }
         }
 
@@ -783,35 +922,43 @@ impl CodememEngine {
     }
 
     /// Delete a memory from all subsystems.
+    ///
+    /// M1: Uses `delete_memory_cascade` on the storage backend to wrap all
+    /// SQLite deletes (memory + graph nodes/edges + embedding) in a single
+    /// transaction when the backend supports it. In-memory structures
+    /// (vector, graph, BM25) are cleaned up separately with proper lock ordering.
     pub fn delete_memory(&self, id: &str) -> Result<bool, CodememError> {
-        match self.storage.delete_memory(id)? {
-            true => {
-                // Remove from vector index
-                let mut vec = self.lock_vector()?;
-                let _ = vec.remove(id);
-                drop(vec);
-                // Remove from in-memory graph
-                let mut graph = self.lock_graph()?;
-                let _ = graph.remove_node(id);
-                drop(graph);
-                // Remove graph node and edges from SQLite
-                let _ = self.storage.delete_graph_edges_for_node(id);
-                let _ = self.storage.delete_graph_node(id);
-                // Remove embedding from SQLite
-                let _ = self.storage.delete_embedding(id);
-                // Remove from BM25 index
-                self.lock_bm25()?.remove_document(id);
-                // Persist vector index to disk
-                self.save_index();
-                Ok(true)
-            }
-            false => Ok(false),
+        // Use cascade delete for all storage-side operations in a single transaction.
+        let deleted = self.storage.delete_memory_cascade(id)?;
+        if !deleted {
+            return Ok(false);
         }
+
+        // Clean up in-memory structures with proper lock ordering:
+        // vector first, then graph, then BM25.
+        let mut vec = self.lock_vector()?;
+        if let Err(e) = vec.remove(id) {
+            tracing::warn!("Failed to remove {id} from vector index: {e}");
+        }
+        drop(vec);
+
+        let mut graph = self.lock_graph()?;
+        if let Err(e) = graph.remove_node(id) {
+            tracing::warn!("Failed to remove {id} from in-memory graph: {e}");
+        }
+        drop(graph);
+
+        self.lock_bm25()?.remove_document(id);
+
+        // Persist vector index to disk
+        self.save_index();
+        Ok(true)
     }
 
     // ── Index Persistence ────────────────────────────────────────────────
 
     /// Save the vector index to disk if a db_path is configured.
+    /// Always clears the dirty flag so `flush_if_dirty()` won't double-save.
     pub fn save_index(&self) {
         if let Some(ref db_path) = self.db_path {
             let idx_path = db_path.with_extension("idx");
@@ -821,6 +968,7 @@ impl CodememEngine {
                 }
             }
         }
+        self.dirty.store(false, Ordering::Release);
     }
 
     /// Reload the in-memory graph from the database.
@@ -910,7 +1058,9 @@ impl CodememEngine {
 
         // Remove all chunk nodes for this file
         let chunk_prefix = format!("chunk:{file_path}:");
-        let _ = self.storage.delete_graph_nodes_by_prefix(&chunk_prefix);
+        if let Err(e) = self.storage.delete_graph_nodes_by_prefix(&chunk_prefix) {
+            tracing::warn!("Failed to delete chunk nodes for {file_path}: {e}");
+        }
 
         // Remove symbol nodes for this file by checking graph
         let graph = self.lock_graph()?;
@@ -926,19 +1076,31 @@ impl CodememEngine {
         drop(graph);
 
         for sym_id in &sym_ids {
-            let _ = self.storage.delete_graph_edges_for_node(sym_id);
-            let _ = self.storage.delete_graph_node(sym_id);
-            let _ = self.storage.delete_embedding(sym_id);
+            if let Err(e) = self.storage.delete_graph_edges_for_node(sym_id) {
+                tracing::warn!("Failed to delete graph edges for {sym_id}: {e}");
+            }
+            if let Err(e) = self.storage.delete_graph_node(sym_id) {
+                tracing::warn!("Failed to delete graph node {sym_id}: {e}");
+            }
+            if let Err(e) = self.storage.delete_embedding(sym_id) {
+                tracing::warn!("Failed to delete embedding {sym_id}: {e}");
+            }
         }
 
         // Remove file node itself
-        let _ = self.storage.delete_graph_edges_for_node(&file_node_id);
-        let _ = self.storage.delete_graph_node(&file_node_id);
+        if let Err(e) = self.storage.delete_graph_edges_for_node(&file_node_id) {
+            tracing::warn!("Failed to delete graph edges for {file_node_id}: {e}");
+        }
+        if let Err(e) = self.storage.delete_graph_node(&file_node_id) {
+            tracing::warn!("Failed to delete graph node {file_node_id}: {e}");
+        }
 
         // Clean up in-memory graph
         let mut graph = self.lock_graph()?;
         for sym_id in &sym_ids {
-            let _ = graph.remove_node(sym_id);
+            if let Err(e) = graph.remove_node(sym_id) {
+                tracing::warn!("Failed to remove {sym_id} from in-memory graph: {e}");
+            }
         }
         // Remove chunk nodes from in-memory graph
         let chunk_ids: Vec<String> = graph
@@ -948,18 +1110,26 @@ impl CodememEngine {
             .map(|n| n.id.clone())
             .collect();
         for chunk_id in &chunk_ids {
-            let _ = graph.remove_node(chunk_id);
+            if let Err(e) = graph.remove_node(chunk_id) {
+                tracing::warn!("Failed to remove {chunk_id} from in-memory graph: {e}");
+            }
         }
-        let _ = graph.remove_node(&file_node_id);
+        if let Err(e) = graph.remove_node(&file_node_id) {
+            tracing::warn!("Failed to remove {file_node_id} from in-memory graph: {e}");
+        }
         drop(graph);
 
         // Remove stale embeddings from vector index
         let mut vec = self.lock_vector()?;
         for sym_id in &sym_ids {
-            let _ = vec.remove(sym_id);
+            if let Err(e) = vec.remove(sym_id) {
+                tracing::warn!("Failed to remove {sym_id} from vector index: {e}");
+            }
         }
         for chunk_id in &chunk_ids {
-            let _ = vec.remove(chunk_id);
+            if let Err(e) = vec.remove(chunk_id) {
+                tracing::warn!("Failed to remove {chunk_id} from vector index: {e}");
+            }
         }
         drop(vec);
 

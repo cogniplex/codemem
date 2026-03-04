@@ -29,21 +29,57 @@ pub struct RawGraphMetrics {
     pub total_edge_weight: f64,
 }
 
-/// In-memory graph backed by petgraph, synced to SQLite via codemem-storage.
+/// In-memory graph engine backed by petgraph, synced to SQLite via codemem-storage.
+///
+/// # Design: intentional in-memory architecture
+///
+/// All graph data (nodes, edges, adjacency) is held entirely in memory using
+/// `HashMap`-based structures. This is deliberate: graph traversals, centrality
+/// algorithms, and multi-hop expansions benefit enormously from avoiding disk
+/// I/O on every edge follow. The trade-off is higher memory usage, which is
+/// acceptable for the typical code-graph sizes this engine targets.
+///
+/// # Memory characteristics
+///
+/// - **`nodes`**: `HashMap<String, GraphNode>` — ~200 bytes per node (ID, kind,
+///   label, namespace, metadata, centrality).
+/// - **`edges`**: `HashMap<String, Edge>` — ~150 bytes per edge (ID, src, dst,
+///   relationship, weight, properties, timestamps).
+/// - **`edge_adj`**: `HashMap<String, Vec<String>>` — adjacency index mapping
+///   node IDs to incident edge IDs for O(degree) lookups.
+/// - **`id_to_index`**: maps string IDs to petgraph `NodeIndex` values.
+/// - **`cached_pagerank` / `cached_betweenness`**: centrality caches populated
+///   by [`recompute_centrality()`](Self::recompute_centrality).
+///
+/// Use [`CodememEngine::graph_memory_estimate()`](../../codemem_engine) for a
+/// byte-level sizing estimate based on current node and edge counts.
+///
+/// # Thread safety
+///
+/// `GraphEngine` is **not** `Sync` — it stores mutable graph state without
+/// internal locking. Callers in codemem-engine wrap it in `Mutex<GraphEngine>`
+/// (via `lock_graph()`) to ensure exclusive access. All public `&mut self`
+/// methods (e.g., `add_node`, `recompute_centrality`) require the caller to
+/// hold the lock.
 pub struct GraphEngine {
     pub(crate) graph: DiGraph<String, f64>,
-    /// Map from string node IDs to petgraph NodeIndex.
+    /// Map from string node IDs to petgraph `NodeIndex`.
     pub(crate) id_to_index: HashMap<String, NodeIndex>,
     /// Node data by ID.
     pub(crate) nodes: HashMap<String, GraphNode>,
     /// Edge data by ID.
     pub(crate) edges: HashMap<String, Edge>,
     /// Edge adjacency index: maps node IDs to the IDs of edges incident on that node.
+    ///
     /// Maintained alongside `edges` to allow O(degree) edge lookups instead of O(E).
+    /// The string duplication (~40 bytes/edge for source+target node ID copies) is
+    /// intentional: using `Arc<str>` for shared ownership would be too invasive for
+    /// the marginal memory savings, and the adjacency index is critical for
+    /// performance in `get_edges()`, `bfs_filtered()`, and `raw_graph_metrics_for_memory()`.
     pub(crate) edge_adj: HashMap<String, Vec<String>>,
-    /// Cached PageRank scores (populated by `recompute_centrality()`).
+    /// Cached PageRank scores (populated by [`recompute_centrality()`](Self::recompute_centrality)).
     pub(crate) cached_pagerank: HashMap<String, f64>,
-    /// Cached betweenness centrality scores (populated by `recompute_centrality()`).
+    /// Cached betweenness centrality scores (populated by [`recompute_centrality()`](Self::recompute_centrality)).
     pub(crate) cached_betweenness: HashMap<String, f64>,
 }
 
@@ -228,13 +264,65 @@ impl GraphEngine {
         self.nodes.values().cloned().collect()
     }
 
+    /// Return references to all node IDs without cloning.
+    pub fn get_all_node_ids(&self) -> Vec<&str> {
+        self.nodes.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Return a reference to a node without cloning. Returns `None` if not found.
+    pub fn get_node_ref(&self, id: &str) -> Option<&GraphNode> {
+        self.nodes.get(id)
+    }
+
+    /// Return references to edges incident on a node without cloning.
+    ///
+    /// This is the zero-copy variant of [`GraphBackend::get_edges()`] — same
+    /// lookup logic via `edge_adj`, but returns `&Edge` instead of owned `Edge`.
+    pub fn get_edges_ref(&self, node_id: &str) -> Vec<&Edge> {
+        self.edge_adj
+            .get(node_id)
+            .map(|edge_ids| {
+                edge_ids
+                    .iter()
+                    .filter_map(|eid| self.edges.get(eid))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Recompute and cache PageRank and betweenness centrality scores.
     ///
     /// This should be called after loading the graph (e.g., on server start)
     /// and periodically when the graph changes significantly.
     pub fn recompute_centrality(&mut self) {
+        self.recompute_centrality_with_options(true);
+    }
+
+    /// Recompute centrality caches with control over which algorithms run.
+    ///
+    /// PageRank is always computed. Betweenness centrality is only computed
+    /// when `include_betweenness` is true, since it is O(V * E) and can be
+    /// expensive on large graphs.
+    pub fn recompute_centrality_with_options(&mut self, include_betweenness: bool) {
         self.cached_pagerank = self.pagerank(0.85, 100, 1e-6);
-        self.cached_betweenness = self.betweenness_centrality();
+        if include_betweenness {
+            self.cached_betweenness = self.betweenness_centrality();
+        } else {
+            // L1: Clear stale betweenness cache so ensure_betweenness_computed()
+            // knows it needs to recompute when lazily invoked.
+            self.cached_betweenness.clear();
+        }
+    }
+
+    /// Lazily ensure betweenness centrality has been computed.
+    ///
+    /// If `cached_betweenness` is empty (e.g., after `recompute_centrality_with_options(false)`),
+    /// this method computes and caches betweenness centrality on demand. If the
+    /// cache is already populated, this is a no-op.
+    pub fn ensure_betweenness_computed(&mut self) {
+        if self.cached_betweenness.is_empty() && self.graph.node_count() > 0 {
+            self.cached_betweenness = self.betweenness_centrality();
+        }
     }
 
     /// Get the cached PageRank score for a node. Returns 0.0 if not found.

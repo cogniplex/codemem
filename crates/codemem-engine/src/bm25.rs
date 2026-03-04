@@ -5,7 +5,7 @@
 //! split+intersect token overlap in hybrid scoring.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // ── Code-Aware Tokenizer ────────────────────────────────────────────────────
 
@@ -124,10 +124,23 @@ pub struct Bm25Index {
     pub doc_count: usize,
     /// Average document length
     avg_doc_len: f64,
+    /// Running total of all document lengths for incremental avg_doc_len tracking
+    #[serde(default)]
+    total_doc_len: usize,
     /// BM25 k1 parameter (term frequency saturation)
     k1: f64,
     /// BM25 b parameter (length normalization)
     b: f64,
+    /// Maximum number of documents before eviction kicks in
+    #[serde(default = "default_max_documents")]
+    max_documents: usize,
+    /// Insertion order for FIFO eviction when max_documents is exceeded
+    #[serde(default)]
+    insertion_order: VecDeque<String>,
+}
+
+fn default_max_documents() -> usize {
+    100_000
 }
 
 impl Bm25Index {
@@ -139,17 +152,28 @@ impl Bm25Index {
             doc_terms: HashMap::new(),
             doc_count: 0,
             avg_doc_len: 0.0,
+            total_doc_len: 0,
             k1: 1.2,
             b: 0.75,
+            max_documents: default_max_documents(),
+            insertion_order: VecDeque::new(),
         }
     }
 
     /// Add a document to the index, updating term frequencies and statistics.
     /// If a document with the same ID already exists, it is replaced.
+    /// When the index exceeds `max_documents`, the oldest document is evicted.
     pub fn add_document(&mut self, id: &str, content: &str) {
         // Remove old version if exists (to avoid double-counting)
         if self.doc_terms.contains_key(id) {
             self.remove_document(id);
+        }
+
+        // Evict oldest document if at capacity
+        if self.doc_count >= self.max_documents {
+            if let Some(oldest_id) = self.insertion_order.pop_front() {
+                self.remove_document(&oldest_id);
+            }
         }
 
         let tokens = tokenize(content);
@@ -171,8 +195,12 @@ impl Bm25Index {
         self.doc_terms.insert(id.to_string(), term_freqs);
         self.doc_count += 1;
 
-        // Recompute average document length
-        self.recompute_avg_doc_len();
+        // Track insertion order for FIFO eviction
+        self.insertion_order.push_back(id.to_string());
+
+        // Incrementally update average document length
+        self.total_doc_len += doc_len;
+        self.avg_doc_len = self.total_doc_len as f64 / self.doc_count as f64;
     }
 
     /// Remove a document from the index, updating all statistics.
@@ -188,9 +216,19 @@ impl Bm25Index {
                 }
             }
 
-            self.doc_lengths.remove(id);
+            let removed_len = self.doc_lengths.remove(id).unwrap_or(0);
             self.doc_count = self.doc_count.saturating_sub(1);
-            self.recompute_avg_doc_len();
+
+            // Incrementally update average document length
+            self.total_doc_len = self.total_doc_len.saturating_sub(removed_len);
+            if self.doc_count == 0 {
+                self.avg_doc_len = 0.0;
+            } else {
+                self.avg_doc_len = self.total_doc_len as f64 / self.doc_count as f64;
+            }
+
+            // Remove from insertion order
+            self.insertion_order.retain(|x| x != id);
         }
     }
 
@@ -236,6 +274,35 @@ impl Bm25Index {
         (raw / max_score).min(1.0)
     }
 
+    /// Score pre-tokenized query tokens (as `&str` slices) against a specific indexed document.
+    /// Use this when scoring multiple documents against the same query to avoid
+    /// re-tokenizing the query each time. Zero-allocation: passes slices directly
+    /// to the generic internal helpers.
+    pub fn score_with_tokens_str(&self, query_tokens: &[&str], doc_id: &str) -> f64 {
+        if self.doc_count == 0 || query_tokens.is_empty() {
+            return 0.0;
+        }
+
+        let doc_len = match self.doc_lengths.get(doc_id) {
+            Some(&len) => len,
+            None => return 0.0,
+        };
+
+        let doc_term_freqs = match self.doc_terms.get(doc_id) {
+            Some(tf) => tf,
+            None => return 0.0,
+        };
+
+        let raw = self.raw_bm25_score(query_tokens, doc_term_freqs, doc_len);
+
+        let max_score = self.max_possible_score(query_tokens);
+        if max_score <= 0.0 {
+            return 0.0;
+        }
+
+        (raw / max_score).min(1.0)
+    }
+
     /// Score pre-tokenized query tokens against arbitrary text (not necessarily in the index).
     /// Use this when scoring multiple documents against the same query to avoid
     /// re-tokenizing the query each time.
@@ -267,6 +334,34 @@ impl Bm25Index {
         (raw / max_score).min(1.0)
     }
 
+    /// Score pre-tokenized query tokens (as `&str` slices) against arbitrary text.
+    /// Use this when scoring multiple documents against the same query to avoid
+    /// re-tokenizing the query each time. Zero-allocation: generic helpers accept `&[&str]`.
+    pub fn score_text_with_tokens_str(&self, query_tokens: &[&str], document: &str) -> f64 {
+        if self.doc_count == 0 || query_tokens.is_empty() {
+            return 0.0;
+        }
+
+        let doc_tokens = tokenize(document);
+        if doc_tokens.is_empty() {
+            return 0.0;
+        }
+
+        let doc_len = doc_tokens.len();
+        let mut doc_term_freqs: HashMap<String, usize> = HashMap::new();
+        for token in &doc_tokens {
+            *doc_term_freqs.entry(token.clone()).or_insert(0) += 1;
+        }
+
+        let raw = self.raw_bm25_score(query_tokens, &doc_term_freqs, doc_len);
+        let max_score = self.max_possible_score(query_tokens);
+        if max_score <= 0.0 {
+            return 0.0;
+        }
+
+        (raw / max_score).min(1.0)
+    }
+
     /// Score a query against arbitrary text (not necessarily in the index).
     /// Useful for scoring documents that haven't been indexed yet.
     pub fn score_text(&self, query: &str, document: &str) -> f64 {
@@ -286,9 +381,11 @@ impl Bm25Index {
     // ── Internal helpers ────────────────────────────────────────────────
 
     /// Compute the raw (unnormalized) BM25 score.
-    fn raw_bm25_score(
+    /// Generic over `AsRef<str>` so both `&[String]` and `&[&str]` work
+    /// without per-call allocation.
+    fn raw_bm25_score<S: AsRef<str>>(
         &self,
-        query_tokens: &[String],
+        query_tokens: &[S],
         doc_term_freqs: &HashMap<String, usize>,
         doc_len: usize,
     ) -> f64 {
@@ -306,18 +403,19 @@ impl Bm25Index {
         let mut seen_query_terms: HashSet<&str> = HashSet::new();
 
         for qt in query_tokens {
-            if !seen_query_terms.insert(qt.as_str()) {
+            let qt_str = qt.as_ref();
+            if !seen_query_terms.insert(qt_str) {
                 continue;
             }
 
             // Term frequency in document
-            let tf = *doc_term_freqs.get(qt).unwrap_or(&0) as f64;
+            let tf = *doc_term_freqs.get(qt_str).unwrap_or(&0) as f64;
             if tf == 0.0 {
                 continue;
             }
 
             // Document frequency (number of docs containing this term)
-            let df = *self.doc_freq.get(qt).unwrap_or(&0) as f64;
+            let df = *self.doc_freq.get(qt_str).unwrap_or(&0) as f64;
 
             // IDF: ln((N - n(qi) + 0.5) / (n(qi) + 0.5) + 1)
             let idf = ((n - df + 0.5) / (df + 0.5) + 1.0).ln();
@@ -335,18 +433,19 @@ impl Bm25Index {
     /// Compute the maximum possible BM25 score for a query (for normalization).
     /// Assumes a perfect document that contains every query term with high tf
     /// and has average length.
-    fn max_possible_score(&self, query_tokens: &[String]) -> f64 {
+    fn max_possible_score<S: AsRef<str>>(&self, query_tokens: &[S]) -> f64 {
         let n = self.doc_count as f64;
 
         let mut max_score = 0.0;
         let mut seen: HashSet<&str> = HashSet::new();
 
         for qt in query_tokens {
-            if !seen.insert(qt.as_str()) {
+            let qt_str = qt.as_ref();
+            if !seen.insert(qt_str) {
                 continue;
             }
 
-            let df = *self.doc_freq.get(qt).unwrap_or(&0) as f64;
+            let df = *self.doc_freq.get(qt_str).unwrap_or(&0) as f64;
             let idf = ((n - df + 0.5) / (df + 0.5) + 1.0).ln();
 
             // Best case: high tf in average-length document
@@ -361,12 +460,14 @@ impl Bm25Index {
         max_score
     }
 
-    /// Recompute average document length from stored lengths.
-    fn recompute_avg_doc_len(&mut self) {
+    /// Recompute average document length and total_doc_len from stored lengths.
+    /// Public for use after deserialization to reconstruct the running total.
+    pub fn recompute_avg_doc_len(&mut self) {
+        let total: usize = self.doc_lengths.values().sum();
+        self.total_doc_len = total;
         if self.doc_count == 0 {
             self.avg_doc_len = 0.0;
         } else {
-            let total: usize = self.doc_lengths.values().sum();
             self.avg_doc_len = total as f64 / self.doc_count as f64;
         }
     }
@@ -386,8 +487,18 @@ impl Bm25Index {
     /// Deserialize a BM25 index from bytes previously produced by `serialize()`.
     ///
     /// Returns `Err` if the data is corrupt or from an incompatible version.
+    /// Reconstructs `total_doc_len` and `insertion_order` if they were missing
+    /// from older serialized data (via `#[serde(default)]`).
     pub fn deserialize(data: &[u8]) -> Result<Self, String> {
-        serde_json::from_slice(data).map_err(|e| format!("BM25 deserialization failed: {e}"))
+        let mut index: Self = serde_json::from_slice(data)
+            .map_err(|e| format!("BM25 deserialization failed: {e}"))?;
+        // Reconstruct total_doc_len from stored doc_lengths (handles old data without the field)
+        index.recompute_avg_doc_len();
+        // Rebuild insertion_order if it was empty (old data without the field)
+        if index.insertion_order.is_empty() && index.doc_count > 0 {
+            index.insertion_order = index.doc_lengths.keys().cloned().collect();
+        }
+        Ok(index)
     }
 
     /// Whether the index contains any documents and may need saving.

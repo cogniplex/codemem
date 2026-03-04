@@ -179,10 +179,20 @@ impl CodememEngine {
         let mut new_connections = 0usize;
         // C1: Lock ordering: graph first, then vector
         let mut graph = self.lock_graph()?;
-        let vector = self.lock_vector()?;
+        let mut vector = self.lock_vector()?;
 
-        // For each memory, load its embedding on demand and find 6 nearest neighbors
-        for id in &memory_ids {
+        // H1: For each memory, load its embedding on demand and find 6 nearest neighbors.
+        // Drop and re-acquire graph+vector locks every 50 iterations to yield to other threads.
+        for (iter_idx, id) in memory_ids.iter().enumerate() {
+            // H1: Yield locks every 50 iterations to avoid long lock holds
+            if iter_idx > 0 && iter_idx % 50 == 0 {
+                // Must drop in reverse acquisition order
+                drop(vector);
+                drop(graph);
+                graph = self.lock_graph()?;
+                vector = self.lock_vector()?;
+            }
+
             let my_type = match type_map.get(id) {
                 Some(t) => t,
                 None => continue,
@@ -341,7 +351,8 @@ impl CodememEngine {
             }
 
             if member_indices.len() <= 50 {
-                // Small group: pairwise comparison (load embeddings on demand)
+                // O(n^2) pairwise comparison is acceptable here — groups are capped at <=50 members,
+                // so worst case is ~1250 comparisons which completes in microseconds.
                 for i in 0..member_indices.len() {
                     for j in (i + 1)..member_indices.len() {
                         let idx_a = member_indices[i];
@@ -452,48 +463,57 @@ impl CodememEngine {
             }
         }
 
-        // C1: Lock ordering: graph first, then vector, then bm25
-        let mut graph = self.lock_graph()?;
-        let mut vector = self.lock_vector()?;
-        let mut bm25 = self.lock_bm25()?;
-        for id in &ids_to_delete {
-            if let Err(e) = self.storage.delete_memory(id) {
-                tracing::warn!("Failed to delete memory {id} during cluster consolidation: {e}");
+        // H2: Batch deletes in groups of 100, releasing all locks between batches
+        for batch in ids_to_delete.chunks(100) {
+            // C1: Lock ordering: graph first, then vector, then bm25
+            let mut graph = self.lock_graph()?;
+            let mut vector = self.lock_vector()?;
+            let mut bm25 = self.lock_bm25()?;
+            for id in batch {
+                if let Err(e) = self.storage.delete_memory(id) {
+                    tracing::warn!(
+                        "Failed to delete memory {id} during cluster consolidation: {e}"
+                    );
+                }
+                if let Err(e) = self.storage.delete_embedding(id) {
+                    tracing::warn!(
+                        "Failed to delete embedding {id} during cluster consolidation: {e}"
+                    );
+                }
+                if let Err(e) = self.storage.delete_graph_edges_for_node(id) {
+                    tracing::warn!(
+                        "Failed to delete graph edges for {id} during cluster consolidation: {e}"
+                    );
+                }
+                if let Err(e) = self.storage.delete_graph_node(id) {
+                    tracing::warn!(
+                        "Failed to delete graph node {id} during cluster consolidation: {e}"
+                    );
+                }
+                if let Err(e) = vector.remove(id) {
+                    tracing::warn!(
+                        "Failed to remove {id} from vector index during cluster consolidation: {e}"
+                    );
+                }
+                if let Err(e) = graph.remove_node(id) {
+                    tracing::warn!(
+                        "Failed to remove {id} from graph during cluster consolidation: {e}"
+                    );
+                }
+                // M15: Clean up BM25 index for deleted memories (was missing)
+                bm25.remove_document(id);
             }
-            if let Err(e) = self.storage.delete_embedding(id) {
-                tracing::warn!("Failed to delete embedding {id} during cluster consolidation: {e}");
-            }
-            if let Err(e) = self.storage.delete_graph_edges_for_node(id) {
-                tracing::warn!(
-                    "Failed to delete graph edges for {id} during cluster consolidation: {e}"
-                );
-            }
-            if let Err(e) = self.storage.delete_graph_node(id) {
-                tracing::warn!(
-                    "Failed to delete graph node {id} during cluster consolidation: {e}"
-                );
-            }
-            if let Err(e) = vector.remove(id) {
-                tracing::warn!(
-                    "Failed to remove {id} from vector index during cluster consolidation: {e}"
-                );
-            }
-            if let Err(e) = graph.remove_node(id) {
-                tracing::warn!(
-                    "Failed to remove {id} from graph during cluster consolidation: {e}"
-                );
-            }
-            // M15: Clean up BM25 index for deleted memories (was missing)
-            bm25.remove_document(id);
+            drop(bm25);
+            drop(vector);
+            drop(graph);
         }
 
         // Rebuild vector index if we deleted anything
         if merged_count > 0 {
+            let mut vector = self.lock_vector()?;
             self.rebuild_vector_index_internal(&mut vector);
+            drop(vector);
         }
-        drop(bm25);
-        drop(vector);
-        drop(graph);
 
         self.save_index();
 
@@ -547,43 +567,54 @@ impl CodememEngine {
 
         let deleted = ids.len();
 
-        // C1: Lock ordering: graph first, then vector, then bm25
-        let mut graph = self.lock_graph()?;
-        let mut vector = self.lock_vector()?;
-        let mut bm25 = self.lock_bm25()?;
-        for id in &ids {
-            if let Err(e) = self.storage.delete_memory(id) {
-                tracing::warn!("Failed to delete memory {id} during forget consolidation: {e}");
+        // H2: Batch deletes in groups of 100, releasing all locks between batches
+        for batch in ids.chunks(100) {
+            // C1: Lock ordering: graph first, then vector, then bm25
+            let mut graph = self.lock_graph()?;
+            let mut vector = self.lock_vector()?;
+            let mut bm25 = self.lock_bm25()?;
+            for id in batch {
+                if let Err(e) = self.storage.delete_memory(id) {
+                    tracing::warn!("Failed to delete memory {id} during forget consolidation: {e}");
+                }
+                if let Err(e) = self.storage.delete_embedding(id) {
+                    tracing::warn!(
+                        "Failed to delete embedding {id} during forget consolidation: {e}"
+                    );
+                }
+                if let Err(e) = self.storage.delete_graph_edges_for_node(id) {
+                    tracing::warn!(
+                        "Failed to delete graph edges for {id} during forget consolidation: {e}"
+                    );
+                }
+                if let Err(e) = self.storage.delete_graph_node(id) {
+                    tracing::warn!(
+                        "Failed to delete graph node {id} during forget consolidation: {e}"
+                    );
+                }
+                if let Err(e) = graph.remove_node(id) {
+                    tracing::warn!(
+                        "Failed to remove {id} from graph during forget consolidation: {e}"
+                    );
+                }
+                if let Err(e) = vector.remove(id) {
+                    tracing::warn!(
+                        "Failed to remove {id} from vector index during forget consolidation: {e}"
+                    );
+                }
+                bm25.remove_document(id);
             }
-            if let Err(e) = self.storage.delete_embedding(id) {
-                tracing::warn!("Failed to delete embedding {id} during forget consolidation: {e}");
-            }
-            if let Err(e) = self.storage.delete_graph_edges_for_node(id) {
-                tracing::warn!(
-                    "Failed to delete graph edges for {id} during forget consolidation: {e}"
-                );
-            }
-            if let Err(e) = self.storage.delete_graph_node(id) {
-                tracing::warn!("Failed to delete graph node {id} during forget consolidation: {e}");
-            }
-            if let Err(e) = graph.remove_node(id) {
-                tracing::warn!("Failed to remove {id} from graph during forget consolidation: {e}");
-            }
-            if let Err(e) = vector.remove(id) {
-                tracing::warn!(
-                    "Failed to remove {id} from vector index during forget consolidation: {e}"
-                );
-            }
-            bm25.remove_document(id);
+            drop(bm25);
+            drop(vector);
+            drop(graph);
         }
 
         // Rebuild vector index if we deleted anything
         if deleted > 0 {
+            let mut vector = self.lock_vector()?;
             self.rebuild_vector_index_internal(&mut vector);
+            drop(vector);
         }
-        drop(bm25);
-        drop(vector);
-        drop(graph);
 
         self.save_index();
 
@@ -705,7 +736,9 @@ impl CodememEngine {
                 last_accessed_at: now,
             };
 
-            if self.persist_memory(&mem).is_err() {
+            // M4: Use persist_memory_no_save to skip per-memory index save,
+            // then call save_index() once after the entire loop.
+            if self.persist_memory_no_save(&mem).is_err() {
                 tracing::warn!("Failed to persist summary memory: {new_id}");
                 continue;
             }
@@ -732,6 +765,11 @@ impl CodememEngine {
 
             summarized_count += 1;
             created_ids.push(new_id);
+        }
+
+        // M4: Save vector index once after all summaries are persisted
+        if summarized_count > 0 {
+            self.save_index();
         }
 
         if let Err(e) = self

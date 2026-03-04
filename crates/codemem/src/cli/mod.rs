@@ -298,19 +298,40 @@ pub fn run() -> anyhow::Result<()> {
         Commands::Migrate => {
             commands_migrate::cmd_migrate()?;
         }
-        Commands::Sessions { action } => match action {
-            SessionAction::List { namespace } => {
-                commands_lifecycle::cmd_sessions_list(namespace.as_deref())?;
+        Commands::Sessions { action } => {
+            // H3: Open lightweight storage instead of the full engine
+            // (avoids loading vector index, building graph, populating BM25).
+            let db_path = codemem_db_path();
+            let storage = codemem_storage::Storage::open(&db_path)?;
+            match action {
+                SessionAction::List { namespace } => {
+                    commands_lifecycle::cmd_sessions_list(&storage, namespace.as_deref())?;
+                }
+                SessionAction::Start { namespace } => {
+                    commands_lifecycle::cmd_sessions_start(&storage, namespace.as_deref())?;
+                }
+                SessionAction::End { id, summary } => {
+                    commands_lifecycle::cmd_sessions_end(&storage, &id, summary.as_deref())?;
+                }
             }
-            SessionAction::Start { namespace } => {
-                commands_lifecycle::cmd_sessions_start(namespace.as_deref())?;
-            }
-            SessionAction::End { id, summary } => {
-                commands_lifecycle::cmd_sessions_end(&id, summary.as_deref())?;
-            }
-        },
+        }
         Commands::Context => {
-            commands_lifecycle::cmd_context()?;
+            // H3: Open lightweight storage instead of the full engine.
+            let db_path = codemem_db_path();
+            match codemem_storage::Storage::open(&db_path) {
+                Ok(storage) => {
+                    commands_lifecycle::cmd_context(&storage)?;
+                }
+                Err(e) => {
+                    // H2: Only suppress missing-file errors (DB doesn't exist yet).
+                    // Log other errors (corruption, permission denied, lock poisoning)
+                    // so they're visible in traces rather than silently swallowed.
+                    if db_path.exists() {
+                        tracing::warn!("Failed to open storage for context: {e}");
+                    }
+                    println!("{}", serde_json::to_string(&serde_json::json!({}))?);
+                }
+            }
         }
         Commands::Prompt => {
             commands_lifecycle::cmd_prompt()?;
@@ -332,7 +353,9 @@ pub(crate) fn rebuild_vector_index(
     let mut vector = codemem_storage::HnswIndex::with_defaults()?;
     let embeddings = storage.list_all_embeddings()?;
     for (id, floats) in &embeddings {
-        let _ = vector.insert(id, floats);
+        if let Err(e) = vector.insert(id, floats) {
+            tracing::warn!("Failed to insert embedding for {id}: {e}");
+        }
     }
     tracing::info!("Rebuilt vector index with {} entries", embeddings.len());
     Ok(vector)
@@ -350,7 +373,11 @@ pub(crate) fn truncate_str(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max])
+        let mut end = max;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &s[..end])
     }
 }
 

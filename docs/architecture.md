@@ -6,7 +6,7 @@ Codemem is a standalone Rust memory engine for AI coding assistants. A single bi
 
 `codemem init` registers 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop) and a stdio MCP server. The PostToolUse hook intercepts Read/Grep/Edit/Write tool calls, extracts structured observations (file paths, symbols, diff summaries), embeds them with BAAI/bge-base-en-v1.5 (768-dim, contextually enriched with metadata + graph neighbors), and stores them as typed memory nodes (Decision, Pattern, Insight, etc.) with graph edges (CALLS, IMPORTS, EVOLVED_INTO, etc.) in a single SQLite WAL database + usearch HNSW index. SessionStart injects prior context; Stop generates a structured session summary.
 
-Recall uses 9-component hybrid scoring: vector cosine (25%), graph strength via PageRank/betweenness/degree/cluster coefficient (20%), Okapi BM25 with camelCase/snake_case tokenization (15%), temporal alignment (10%), importance (10%), confidence (10%), tag matching (5%), recency (5%). The graph layer (petgraph) runs 25 algorithms — PageRank, Louvain community detection, betweenness centrality, SCC, topological sort — cached per session. `recall_with_impact` returns blast-radius data alongside results. All weights are runtime-configurable via `set_scoring_weights` and persist in `~/.codemem/config.toml`.
+Recall uses 9-component hybrid scoring: vector cosine (25%), graph strength via PageRank/betweenness/degree/cluster coefficient (20%), Okapi BM25 with camelCase/snake_case tokenization (15%), temporal alignment (10%), importance (10%), confidence (10%), tag matching (5%), recency (5%). The unified `recall` tool supports optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`). The graph layer (petgraph) runs 25 algorithms — PageRank, Louvain community detection, betweenness centrality, SCC, topological sort — cached per session. Recall filters expired temporal edges (valid_to < now) during graph expansion. All weights are configurable via `config.toml` and persist across restarts.
 
 Consolidation runs 5 cycles: Decay (power-law `importance × 0.9^(days/30) × (1 + log₂(access_count) × 0.1)`), Creative (O(n log n) vector KNN + Union-Find to create SHARES_THEME edges across memory types), Cluster (cosine similarity > 0.92 deduplication), Summarize (LLM-powered connected-component summarization via Ollama/OpenAI/Anthropic), Forget (prune below threshold). Memories support self-editing: `refine_memory` creates EVOLVED_INTO provenance chains, `split_memory` decomposes via PART_OF edges, `merge_memories` combines via SUMMARIZES edges — all with temporal edge tracking (valid_from/valid_to).
 
@@ -20,7 +20,7 @@ The following diagram shows the full Codemem system: AI assistant integration po
 graph TB
     subgraph "AI Coding Assistant"
         H[4 Lifecycle Hooks<br/>SessionStart, UserPromptSubmit,<br/>PostToolUse, Stop]
-        M[MCP Tools<br/>43 tools via JSON-RPC stdio]
+        M[MCP Tools<br/>28 tools via JSON-RPC stdio]
     end
 
     subgraph "Codemem Binary (codemem crate)"
@@ -101,8 +101,8 @@ flowchart TD
 | codemem-core | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`), config (`config.rs`: `CodememConfig`, `ChunkingConfig`, `EnrichmentConfig` TOML persistence). 7 `MemoryType`s, 5 `PatternType`s, 24 `RelationshipType`s, 13 `NodeKind`s, `ScoringWeights` |
 | codemem-storage | rusqlite (bundled) WAL mode + usearch HNSW vector index + petgraph graph engine. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning), `vector.rs` (HNSW 768-dim cosine, M=16, efConstruction=200), `graph/` (traversal with BFS/DFS/kind-aware filtering, algorithms: PageRank, Louvain, SCC, betweenness, topological, cached centrality, graph compaction, package nodes) |
 | codemem-embeddings | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization. Safe concurrency via `LockPoisoned` error handling |
-| codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing, reference resolution), `hooks/` (PostToolUse JSON parser, per-tool extractors, diff-aware memory), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `bm25.rs` (Okapi BM25 scoring), `scoring.rs` (hybrid scoring helpers), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `metrics.rs` (operational metrics) |
-| codemem | Unified binary + library. Three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 43 MCP tools, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 18 commands, lifecycle hooks, config management, multi-format export) |
+| codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing for Cargo.toml/package.json/go.mod/pyproject.toml, reference resolution with Rust grouped import decomposition), `hooks/` (PostToolUse JSON parser, per-tool extractors for Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/ListDir, diff-aware memory, trigger-based auto-insights), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `enrichment.rs` (14 enrichment types: git history, security, performance, complexity, architecture, test mapping, API surface, doc coverage, change impact, code smells, hot+complex correlation, blame/ownership, advanced security scanning, quality stratification), `bm25.rs` (Okapi BM25 scoring with serialization), `scoring.rs` (hybrid scoring helpers), `recall.rs` (unified recall with temporal edge filtering), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `metrics.rs` (operational metrics), `persistence.rs` (index persistence with cold-start-aware compaction) |
+| codemem | Unified binary + library. Three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 28 MCP tools + legacy aliases, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 18 commands, lifecycle hooks, config management, multi-format export) |
 | codemem-bench | Criterion benchmarks (vector, storage, graph), 20% CI regression threshold |
 
 ---
@@ -143,6 +143,10 @@ sequenceDiagram
 | Grep | Pattern | None | `pattern:<regex>`, `search` |
 | Edit / MultiEdit | Decision | `file:<path>` (File) | `ext:rs`, `dir:src`, `file:lib.rs` |
 | Write | Decision | `file:<path>` (File) | `ext:rs`, `dir:src`, `file:new.rs` |
+| Bash | Context | `file:<path>` (if detectable) | `bash`, `command:<first_word>`, `dir:<cwd>`, `error` (if failed) |
+| WebFetch / WebSearch | Context | None | `web-research`, `url:<domain>`, `query:<text>` |
+| Agent / SendMessage | Context | None | `agent-communication` |
+| ListFiles / ListDir | Context | None | `discovery`, `dir:<name>` |
 
 **Edge materialization:** When a file is Edited or Written after a prior Read, an `EVOLVED_INTO` self-edge is created on the file node, capturing the explore-then-modify workflow pattern.
 
@@ -217,7 +221,7 @@ sequenceDiagram
 
 **UserPromptSubmit (`codemem prompt`):** Stores the user's prompt as a Context memory (importance 0.3) with `source: UserPromptSubmit` metadata. Auto-starts a session if one isn't active.
 
-**PostToolUse (`codemem ingest`):** The existing capture pipeline. Extracts observations from Read/Glob/Grep/Edit/Write, optionally compresses via LLM, embeds, and stores with graph nodes and edges.
+**PostToolUse (`codemem ingest`):** The existing capture pipeline. Extracts observations from Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/SendMessage/ListDir, optionally compresses via LLM, embeds, and stores with graph nodes and edges. Also runs trigger-based auto-insights (directory focus, module exploration, debugging detection, repeated search patterns).
 
 **Stop (`codemem summarize`):** Collects all memories created during the session (by timestamp), categorizes them (files read, files edited, searches, decisions, prompts), builds a structured summary, stores it as an Insight memory, and ends the session.
 
@@ -225,7 +229,7 @@ sequenceDiagram
 
 ## 5. Data Flow -- Active Recall (MCP)
 
-When an AI assistant calls `recall_memory`, the query goes through embedding, HNSW search, metadata fetch, and 9-component hybrid scoring before results are returned.
+When an AI assistant calls `recall`, the query goes through embedding, HNSW search, metadata fetch, and 9-component hybrid scoring before results are returned. Optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`) add additional passes.
 
 ```mermaid
 sequenceDiagram
@@ -236,7 +240,7 @@ sequenceDiagram
     participant Store as codemem-storage
     participant Graph as codemem-storage (graph)
 
-    AI->>MCP: recall_memory(query, k, namespace)
+    AI->>MCP: recall(query, k, namespace)
     MCP->>Emb: Embed query (768-dim)
     Emb-->>MCP: Query vector
     MCP->>Vec: HNSW search (top-k*2)
@@ -261,7 +265,7 @@ sequenceDiagram
 | Tag matching | 5% | Overlap between query-derived tags and memory tags |
 | Recency | 5% | Boost for recently accessed memories |
 
-Weights are configurable at runtime via the `set_scoring_weights` MCP tool and are always normalized to sum to 1.0.
+Weights are configurable via `codemem config set scoring.<key> <value>` and persist in `~/.codemem/config.toml`.
 
 ---
 
@@ -323,7 +327,7 @@ graph TB
 
 **Forget (optional):** Archives or deletes memories below an importance threshold. This is opt-in and never runs automatically. Configurable via `importance_threshold` parameter. Useful for cleaning up low-value noise after a project phase completes.
 
-Each consolidation run is logged in the `consolidation_log` table with cycle type, timestamp, and affected count. The `consolidation_status` MCP tool and `codemem consolidate --status` CLI command report the last run for each cycle type.
+Each consolidation run is logged in the `consolidation_log` table with cycle type, timestamp, and affected count. The `consolidate` tool (with `mode=auto`) and `codemem consolidate --status` CLI command report the last run for each cycle type.
 
 ---
 
@@ -383,13 +387,15 @@ sequenceDiagram
 
 ### CST-Aware Chunking (Phase 3)
 
-Tree-sitter produces a Concrete Syntax Tree preserving the full source structure. The chunker operates in three steps:
+Tree-sitter produces a Concrete Syntax Tree preserving the full source structure. The chunker operates in four steps:
 
 1. **Recursive collection**: Starting at the CST root, each node is measured by non-whitespace character count. If a node fits within `max_chunk_size` (default 1500 chars), it becomes a chunk. Otherwise, its named children are recursed into. This ensures chunks align to syntactic boundaries (function bodies, struct definitions, impl blocks) rather than arbitrary line counts.
 
-2. **Greedy merge**: Adjacent small chunks below `min_chunk_size` (default 50 chars) are merged with their neighbor if the combined size stays within `max_chunk_size`. This prevents proliferation of tiny fragments (e.g., a single `use` statement).
+2. **Greedy merge**: Adjacent small chunks below `min_chunk_size` (default 50 chars) are merged with their neighbor if the combined size stays within `max_chunk_size`. This prevents proliferation of tiny fragments (e.g., a single `use` statement). Merged chunks preserve comma-separated `node_kind` labels from their constituents.
 
-3. **Parent resolution**: Each chunk is matched to its innermost containing symbol (the symbol with the smallest line-range that fully contains the chunk). This creates the structural link between chunks and their parent function/method/class.
+3. **Overlap (optional)**: When `overlap_lines > 0`, trailing lines from the previous chunk are prepended to the current chunk, providing context continuity at chunk boundaries.
+
+4. **Parent resolution**: Each chunk is matched to its innermost containing symbol using a pre-sorted `SymbolIntervalIndex` with O(log n) binary search (replacing the previous O(n) linear scan). This creates the structural link between chunks and their parent function/method/class.
 
 ### Package Node Hierarchy (Phase 5)
 
@@ -409,28 +415,28 @@ Compaction reduces graph traversal complexity while preserving all embeddings in
 
 **Pass 1 — Chunk scoring and pruning:**
 
-Each chunk is scored on four factors:
+Each chunk is scored on four factors (weights adjust on cold start — when no memories exist, memory link weight is redistributed to centrality and content density):
 
-| Factor | Weight | Source |
-|--------|--------|--------|
-| Centrality rank | 30% | Normalized edge degree (how connected) |
-| Has symbol parent | 20% | 1.0 if chunk belongs to a named symbol |
-| Memory link | 30% | 1.0 if any edge connects to a memory node |
-| Content density | 20% | Normalized non-whitespace character count |
+| Factor | Weight | Cold-Start Weight | Source |
+|--------|--------|-------------------|--------|
+| Centrality rank | 30% | 40% | Normalized edge degree (how connected) |
+| Has symbol parent | 20% | 30% | 1.0 if chunk belongs to a named symbol |
+| Memory link | 30% | 0% | 1.0 if any edge connects to a memory node |
+| Content density | 20% | 30% | Normalized non-whitespace character count |
 
 Per file, retain at least `max(3, symbol_count)` chunks and at most `max_retained_chunks_per_file` (default 10). Chunks below `min_chunk_score_threshold` (default 0.2) are always pruned. When a chunk is pruned, its line range is annotated on the parent symbol's `covered_ranges` payload.
 
 **Pass 2 — Symbol scoring and pruning:**
 
-Each symbol is scored on five factors:
+Each symbol is scored on five factors (weights adjust on cold start — when no memories exist, memory link weight is redistributed to call connectivity and code size):
 
-| Factor | Weight | Source |
-|--------|--------|--------|
-| Call connectivity | 30% | Normalized count of CALLS edges |
-| Visibility | 20% | public=1.0, crate=0.5, private=0.0 |
-| Kind | 15% | Class/Interface/Module=1.0, Function/Method=0.6, Test=0.3, Constant=0.1 |
-| Memory link | 20% | 1.0 if connected to a memory node |
-| Code size | 15% | Normalized line span |
+| Factor | Weight | Cold-Start Weight | Source |
+|--------|--------|-------------------|--------|
+| Call connectivity | 30% | 40% | Normalized count of CALLS edges |
+| Visibility | 20% | 20% | public=1.0, crate=0.5, private=0.0 |
+| Kind | 15% | 15% | Class/Interface/Module=1.0, Function/Method=0.6, Test=0.3, Constant=0.1 |
+| Memory link | 20% | 0% | 1.0 if connected to a memory node |
+| Code size | 15% | 25% | Normalized line span |
 
 **Always retained (never pruned):** Class, Interface, and Module nodes (structural anchors) and any symbol linked to a memory node. Per file, retain at least `max(max_retained_symbols_per_file, public_symbol_count)` (default 15). Symbols below `min_symbol_score_threshold` (default 0.15) are pruned.
 
@@ -440,7 +446,9 @@ After compaction, `compute_centrality()` and `recompute_centrality()` (PageRank 
 
 ## 7.6. Data Flow -- Enrichment Pipeline
 
-Three enrichment tools (`enrich_git_history`, `enrich_security`, `enrich_performance`) analyze the code graph and produce `Insight` memories tagged `static-analysis`. All insights go through a shared `store_insight()` pipeline with content-hash dedup, semantic near-duplicate rejection (cosine > `dedup_similarity_threshold`, default 0.90), and auto-linking to code nodes.
+14 enrichment types analyze the code graph and produce `Insight` memories tagged `static-analysis`. The three primary types (`enrich_git_history`, `enrich_security`, `enrich_performance`) are exposed as MCP tools via `enrich_codebase`. 11 additional types run as part of the `analyze_codebase` pipeline or can be called programmatically: complexity (cyclomatic/cognitive), architecture inference, test mapping, API surface analysis, doc coverage, change impact, code smells, hot+complex correlation, blame/ownership, advanced security scanning, and quality stratification.
+
+All insights go through a shared `store_insight()` pipeline with content-hash dedup, semantic near-duplicate rejection (cosine > `dedup_similarity_threshold`, default 0.90), and auto-linking to code nodes.
 
 ```mermaid
 sequenceDiagram
@@ -766,91 +774,62 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 
 ---
 
-## 12. MCP Tools (43 total)
+## 12. MCP Tools (28 primary + legacy aliases)
 
-### Memory Operations
+### Memory CRUD (7)
 | Tool | Description |
 |------|-------------|
-| `store_memory` | Store a new memory with type, tags, namespace, importance |
-| `recall_memory` | Search memories with 9-component hybrid scoring |
-| `recall_with_expansion` | Recall with graph-based multi-hop expansion |
-| `update_memory` | Update memory content and re-embed with contextual enrichment |
+| `store_memory` | Store a new memory with auto-embedding, type classification, graph linking, and auto-linking to code nodes |
+| `recall` | Unified search: 9-component hybrid scoring with optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`) |
 | `delete_memory` | Delete a memory and its embedding |
-
-### Graph Operations
-| Tool | Description |
-|------|-------------|
-| `associate_memories` | Create an edge between two memory nodes |
-| `graph_traverse` | BFS/DFS traversal from a starting node |
-| `summary_tree` | Hierarchical package/file/symbol tree browser |
-
-### Code Index Operations
-| Tool | Description |
-|------|-------------|
-| `index_codebase` | Index a directory with ast-grep (14 languages) |
-| `search_symbols` | Search indexed code symbols |
-| `get_symbol_info` | Get detailed info about a specific symbol |
-| `get_dependencies` | Get package/module dependency graph |
-| `get_impact` | Impact analysis: what depends on a given symbol |
-| `get_clusters` | Get code structure clusters |
-| `get_cross_repo` | Cross-repo structural relationships |
-| `get_pagerank` | PageRank scores for graph nodes |
-| `search_code` | Full-text code search across indexed symbols |
-
-### Configuration
-| Tool | Description |
-|------|-------------|
-| `set_scoring_weights` | Configure the 9-component hybrid scoring weights |
-
-### Namespace Management
-| Tool | Description |
-|------|-------------|
-| `list_namespaces` | List all distinct namespaces |
-| `namespace_stats` | Get memory/graph stats for a namespace |
-| `delete_namespace` | Delete all memories in a namespace |
-
-### Import / Export
-| Tool | Description |
-|------|-------------|
-| `export_memories` | Export memories to JSONL format |
-| `import_memories` | Import memories from JSONL format |
-
-### Consolidation
-| Tool | Description |
-|------|-------------|
-| `consolidate_decay` | Run decay cycle (reduce stale memory importance) |
-| `consolidate_creative` | Run creative/REM cycle (discover new connections) |
-| `consolidate_cluster` | Run cluster cycle (group similar memories) |
-| `consolidate_forget` | Run forget cycle (archive/delete low-importance memories, tag-aware bulk cleanup) |
-| `consolidate_summarize` | LLM-powered cluster summarization into Insight memories |
-| `consolidation_status` | Report last run for each consolidation cycle |
-
-### Impact & Patterns
-| Tool | Description |
-|------|-------------|
-| `recall_with_impact` | Recall with PageRank/centrality impact data per result |
-| `get_decision_chain` | Get chronological chain of Decision memories for a file or topic |
-| `detect_patterns` | Detect cross-session patterns (repeated searches, file hotspots, decision chains, tool preferences) |
-| `pattern_insights` | Generate human-readable markdown insights from detected patterns |
-
-### Self-Editing
-| Tool | Description |
-|------|-------------|
-| `refine_memory` | Refine a memory in-place with EVOLVED_INTO provenance chain |
-| `split_memory` | Split a memory into multiple parts with PART_OF edges |
+| `associate_memories` | Create a typed relationship between two nodes in the knowledge graph |
+| `refine_memory` | Refine a memory (default: new version via EVOLVED_INTO; `destructive=true`: update in-place) |
+| `split_memory` | Split a memory into parts with PART_OF edges |
 | `merge_memories` | Merge multiple memories into one with SUMMARIZES edges |
 
-### Enrichment
+### Graph & Structure (7)
 | Tool | Description |
 |------|-------------|
-| `enrich_git_history` | Analyze git commit history, annotate graph nodes with temporal data, create CO_CHANGED edges |
-| `enrich_security` | Scan graph nodes for security-sensitive patterns and store severity-tagged findings |
-| `enrich_performance` | Compute coupling scores, dependency depth, and critical path analysis |
+| `graph_traverse` | Multi-hop BFS/DFS traversal with kind and relationship filtering |
+| `summary_tree` | Hierarchical package/file/symbol tree browser |
+| `codemem_status` | Unified status: stats, health, and metrics (replaces `codemem_stats`/`codemem_health`/`codemem_metrics`) |
+| `index_codebase` | Index a directory with ast-grep (14 languages) |
+| `search_code` | Search code by meaning (`semantic`), name (`text`), or both (`hybrid`) |
+| `get_symbol_info` | Get symbol details, optionally with graph dependencies |
+| `get_symbol_graph` | Symbol dependency graph and impact analysis (replaces `get_dependencies`/`get_impact`) |
 
-### System
+### Graph Analysis (3)
 | Tool | Description |
 |------|-------------|
-| `codemem_stats` | Database statistics (memory count, embedding count, node count, edge count) |
-| `codemem_health` | Health check (storage, vector, graph, embeddings status) |
-| `codemem_metrics` | Operational metrics (tool call counts, latencies, error rates) |
-| `session_checkpoint` | Save a mid-session checkpoint with current context |
+| `find_important_nodes` | PageRank to find most central nodes (replaces `get_pagerank`) |
+| `find_related_groups` | Louvain community detection (replaces `get_clusters`) |
+| `get_cross_repo` | Cross-package dependency analysis (Cargo.toml, package.json, go.mod, pyproject.toml) |
+
+### Consolidation & Patterns (3)
+| Tool | Description |
+|------|-------------|
+| `consolidate` | Unified consolidation: `auto`, `decay`, `creative`, `cluster`, `forget`, `summarize` modes |
+| `detect_patterns` | Cross-session patterns with `json`, `markdown`, or `both` output formats |
+| `get_decision_chain` | Decision evolution via EVOLVED_INTO/LEADS_TO/DERIVED_FROM edges |
+
+### Namespace Management (3)
+| Tool | Description |
+|------|-------------|
+| `list_namespaces` | List all namespaces with inline stats |
+| `namespace_stats` | Detailed stats for a namespace |
+| `delete_namespace` | Delete all memories in a namespace |
+
+### Session & Context (2)
+| Tool | Description |
+|------|-------------|
+| `session_checkpoint` | Mid-session progress report with activity summary and pattern detection |
+| `session_context` | Recent memories, pending analyses, active patterns, and focus areas |
+
+### Enrichment (3)
+| Tool | Description |
+|------|-------------|
+| `enrich_codebase` | Composite enrichment: git history + security + performance in one call |
+| `analyze_codebase` | Full pipeline: index -> enrich -> PageRank -> clusters -> summary |
+| `enrich_git_history` | Git commit history analysis with CO_CHANGED edges and activity insights |
+
+Legacy tool names (`recall_memory`, `update_memory`, `consolidate_decay`, `get_pagerank`, etc.) are still accepted and transparently mapped. See [MCP Tools Reference](mcp-tools.md#legacy-tool-aliases) for the full mapping.

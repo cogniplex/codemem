@@ -38,6 +38,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "UNIQUE content_hash and session_activity tool index",
         sql: include_str!("migrations/006_schema_fixes.sql"),
     },
+    Migration {
+        version: 7,
+        description: "JSON expression indexes, hash prefix index, session activity composite index",
+        sql: include_str!("migrations/007_expression_indexes.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.

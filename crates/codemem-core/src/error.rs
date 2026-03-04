@@ -1,4 +1,9 @@
 /// Unified error type for Codemem.
+///
+/// Variants like `Storage(String)` intentionally carry a stringified error
+/// message rather than the original typed error. This avoids coupling
+/// `codemem-core` to storage-specific dependencies (e.g. `rusqlite`),
+/// keeping the core crate lightweight and backend-agnostic.
 #[derive(Debug, thiserror::Error)]
 pub enum CodememError {
     #[error("Storage error: {0}")]
@@ -51,4 +56,10 @@ pub enum CodememError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+impl From<toml::de::Error> for CodememError {
+    fn from(e: toml::de::Error) -> Self {
+        CodememError::Config(e.to_string())
+    }
 }

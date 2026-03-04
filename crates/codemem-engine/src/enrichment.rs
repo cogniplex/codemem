@@ -19,14 +19,13 @@ pub struct EnrichResult {
 }
 
 impl CodememEngine {
-    /// Store an Insight memory through the full pipeline: storage, BM25, graph
-    /// node, RELATES_TO edges to linked nodes, and vector embedding.
+    /// Store an Insight memory through a 3-phase pipeline:
+    /// 1. Semantic dedup check (reject near-duplicates before persisting)
+    /// 2. Core persist via `persist_memory_no_save` (storage, BM25, graph node, embedding)
+    /// 3. Post-step: RELATES_TO edges to linked nodes + auto-link to code nodes
+    ///
     /// Returns the memory ID if inserted, or None if it was a duplicate.
     /// Does NOT call `save_index()` -- callers should batch that at the end.
-    ///
-    // TODO: Steps 1/2/3/5 duplicate `persist_memory_inner`. Refactor to call
-    // `persist_memory_no_save` for the core pipeline, then add the semantic dedup
-    // pre-check (step 1b) and RELATES_TO edges (step 4) as pre/post steps.
     pub fn store_insight(
         &self,
         content: &str,
@@ -36,13 +35,41 @@ impl CodememEngine {
         namespace: Option<&str>,
         links: &[String],
     ) -> Option<String> {
-        let hash = codemem_storage::Storage::content_hash(content);
         let now = chrono::Utc::now();
         let id = uuid::Uuid::new_v4().to_string();
         let mut all_tags: Vec<String> =
             vec![format!("track:{track}"), "static-analysis".to_string()];
         all_tags.extend(tags.iter().map(|t| t.to_string()));
 
+        // ── Phase 1: Semantic dedup check ────────────────────────────────
+        // Compute enriched embedding and check for near-duplicates BEFORE persisting.
+        let enriched = self.enrich_memory_text(
+            content,
+            MemoryType::Insight,
+            &all_tags,
+            namespace,
+            Some(&id),
+        );
+        if let Ok(Some(emb_guard)) = self.lock_embeddings() {
+            if let Ok(embedding) = emb_guard.embed(&enriched) {
+                drop(emb_guard);
+                if let Ok(vec) = self.lock_vector() {
+                    let neighbors = vec.search(&embedding, 3).unwrap_or_default();
+                    for (neighbor_id, similarity) in &neighbors {
+                        if *neighbor_id == id {
+                            continue;
+                        }
+                        if (*similarity as f64) > self.config.enrichment.dedup_similarity_threshold
+                        {
+                            return None; // Too similar — reject before persisting
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Phase 2: Core persist via persist_memory_no_save ─────────────
+        let hash = codemem_storage::Storage::content_hash(content);
         let memory = MemoryNode {
             id: id.clone(),
             content: content.to_string(),
@@ -51,7 +78,7 @@ impl CodememEngine {
             confidence: self.config.enrichment.insight_confidence,
             access_count: 0,
             content_hash: hash,
-            tags: all_tags.clone(),
+            tags: all_tags,
             metadata: HashMap::from([
                 ("track".into(), json!(track)),
                 ("generated_by".into(), json!("enrichment_pipeline")),
@@ -62,66 +89,11 @@ impl CodememEngine {
             last_accessed_at: now,
         };
 
-        // 1. Insert into storage (dedup by content hash)
-        if self.storage.insert_memory(&memory).is_err() {
+        if self.persist_memory_no_save(&memory).is_err() {
             return None; // duplicate or error -- skip silently
         }
 
-        // 1b. Compute enriched embedding once (used for both dedup check and vector insert)
-        let enriched = self.enrich_memory_text(
-            content,
-            MemoryType::Insight,
-            &all_tags,
-            namespace,
-            Some(&id),
-        );
-        let stored_embedding = if let Ok(Some(emb_guard)) = self.lock_embeddings() {
-            if let Ok(embedding) = emb_guard.embed(&enriched) {
-                drop(emb_guard);
-                // Semantic dedup: check top-3 nearest embeddings for near-duplicates
-                if let Ok(vec) = self.lock_vector() {
-                    let neighbors = vec.search(&embedding, 3).unwrap_or_default();
-                    for (neighbor_id, similarity) in &neighbors {
-                        if *neighbor_id == id {
-                            continue;
-                        }
-                        if (*similarity as f64) > self.config.enrichment.dedup_similarity_threshold
-                        {
-                            // Too similar to an existing memory -- roll back
-                            let _ = self.storage.delete_memory(&id);
-                            return None;
-                        }
-                    }
-                }
-                Some(embedding)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // 2. BM25 index
-        if let Ok(mut bm25) = self.lock_bm25() {
-            bm25.add_document(&id, content);
-        }
-
-        // 3. Graph node
-        let graph_node = GraphNode {
-            id: id.clone(),
-            kind: NodeKind::Memory,
-            label: truncate_content(content, 80),
-            payload: HashMap::new(),
-            centrality: 0.0,
-            memory_id: Some(id.clone()),
-            namespace: namespace.map(String::from),
-        };
-        let _ = self.storage.insert_graph_node(&graph_node);
-        if let Ok(mut graph) = self.lock_graph() {
-            let _ = graph.add_node(graph_node);
-        }
-
-        // 4. RELATES_TO edges to linked nodes
+        // ── Phase 3: Post-step — RELATES_TO edges to linked nodes ────────
         if !links.is_empty() {
             if let Ok(mut graph) = self.lock_graph() {
                 for link_id in links {
@@ -142,16 +114,8 @@ impl CodememEngine {
             }
         }
 
-        // 4b. Auto-link to code nodes mentioned in content
+        // Auto-link to code nodes mentioned in content
         self.auto_link_to_code_nodes(&id, content, links);
-
-        // 5. Vector embedding (reuse embedding from step 1b)
-        if let Some(ref embedding) = stored_embedding {
-            let _ = self.storage.store_embedding(&id, embedding);
-            if let Ok(mut vec) = self.lock_vector() {
-                let _ = vec.insert(&id, embedding);
-            }
-        }
 
         Some(id)
     }

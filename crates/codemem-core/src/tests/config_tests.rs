@@ -64,3 +64,58 @@ vector_similarity = 0.4
     assert_eq!(config.vector.dimensions, 768);
     assert_eq!(config.embedding.provider, "candle");
 }
+
+#[test]
+fn validate_rejects_nan_scoring_weight() {
+    let mut config = CodememConfig::default();
+    config.scoring.vector_similarity = f64::NAN;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn validate_rejects_infinity_scoring_weight() {
+    let mut config = CodememConfig::default();
+    config.scoring.graph_strength = f64::INFINITY;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn validate_rejects_negative_scoring_weight() {
+    let mut config = CodememConfig::default();
+    config.scoring.token_overlap = -0.1;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn validate_rejects_nan_insight_confidence() {
+    let mut config = CodememConfig::default();
+    config.enrichment.insight_confidence = f64::NAN;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn validate_rejects_nan_chunk_score_threshold() {
+    let mut config = CodememConfig::default();
+    config.chunking.min_chunk_score_threshold = f64::NAN;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn validate_rejects_nan_symbol_score_threshold() {
+    let mut config = CodememConfig::default();
+    config.chunking.min_symbol_score_threshold = f64::INFINITY;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn save_rejects_invalid_config() {
+    let dir = std::env::temp_dir().join("codemem_save_validate_test");
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("config.toml");
+
+    let mut config = CodememConfig::default();
+    config.scoring.recency = f64::NAN;
+    assert!(config.save(&path).is_err());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

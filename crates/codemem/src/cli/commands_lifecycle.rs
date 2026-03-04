@@ -1,11 +1,16 @@
 //! Sessions & lifecycle hook commands.
 
+use codemem_core::StorageBackend;
+
 // ── Sessions Commands ─────────────────────────────────────────────────────
 
-pub(crate) fn cmd_sessions_list(namespace: Option<&str>) -> anyhow::Result<()> {
-    let db_path = super::codemem_db_path();
-    let storage = codemem_storage::Storage::open_without_migrations(&db_path)?;
-    let sessions = storage.list_sessions(namespace)?;
+/// H3: Session commands use `&dyn StorageBackend` instead of `&CodememEngine`
+/// to avoid loading the full vector/graph/BM25 engine for lightweight storage-only ops.
+pub(crate) fn cmd_sessions_list(
+    storage: &dyn StorageBackend,
+    namespace: Option<&str>,
+) -> anyhow::Result<()> {
+    let sessions = storage.list_sessions(namespace, usize::MAX)?;
 
     if sessions.is_empty() {
         println!("No sessions recorded yet.");
@@ -33,10 +38,10 @@ pub(crate) fn cmd_sessions_list(namespace: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn cmd_sessions_start(namespace: Option<&str>) -> anyhow::Result<()> {
-    let db_path = super::codemem_db_path();
-    let storage = codemem_storage::Storage::open_without_migrations(&db_path)?;
-
+pub(crate) fn cmd_sessions_start(
+    storage: &dyn StorageBackend,
+    namespace: Option<&str>,
+) -> anyhow::Result<()> {
     let session_id = uuid::Uuid::new_v4().to_string();
     storage.start_session(&session_id, namespace)?;
 
@@ -52,9 +57,11 @@ pub(crate) fn cmd_sessions_start(namespace: Option<&str>) -> anyhow::Result<()> 
     Ok(())
 }
 
-pub(crate) fn cmd_sessions_end(id: &str, summary: Option<&str>) -> anyhow::Result<()> {
-    let db_path = super::codemem_db_path();
-    let storage = codemem_storage::Storage::open_without_migrations(&db_path)?;
+pub(crate) fn cmd_sessions_end(
+    storage: &dyn StorageBackend,
+    id: &str,
+    summary: Option<&str>,
+) -> anyhow::Result<()> {
     storage.end_session(id, summary)?;
 
     println!("Session ended: {}", id);
@@ -71,7 +78,7 @@ pub(crate) fn cmd_sessions_end(id: &str, summary: Option<&str>) -> anyhow::Resul
 ///
 /// Reads JSON `{session_id, cwd}` from stdin.
 /// Outputs JSON `{hookSpecificOutput: {additionalContext: "..."}}` to stdout.
-pub(crate) fn cmd_context() -> anyhow::Result<()> {
+pub(crate) fn cmd_context(storage: &dyn StorageBackend) -> anyhow::Result<()> {
     use std::io::BufRead;
 
     // Read a single line — hook payloads are one JSON object per line.
@@ -79,7 +86,9 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
     // hook runner doesn't close stdin after writing the payload.
     let mut input = String::new();
     let stdin = std::io::stdin();
-    let _ = stdin.lock().read_line(&mut input);
+    if let Err(e) = stdin.lock().read_line(&mut input) {
+        tracing::warn!("Failed to read hook payload from stdin: {e}");
+    }
 
     let payload: serde_json::Value = if input.trim().is_empty() {
         serde_json::json!({})
@@ -93,21 +102,12 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let db_path = super::codemem_db_path();
-    let storage = match codemem_storage::Storage::open_without_migrations(&db_path) {
-        Ok(s) => s,
-        Err(_) => {
-            // No database yet — nothing to inject
-            let output = serde_json::json!({});
-            println!("{}", serde_json::to_string(&output)?);
-            return Ok(());
-        }
-    };
-
     // Auto-start a session for this project
     if !session_id.is_empty() {
         let namespace = if cwd.is_empty() { None } else { Some(cwd) };
-        let _ = storage.start_session(session_id, namespace);
+        if let Err(e) = storage.start_session(session_id, namespace) {
+            tracing::warn!("Failed to start session {session_id}: {e}");
+        }
     }
 
     let namespace = if cwd.is_empty() { None } else { Some(cwd) };
@@ -116,7 +116,7 @@ pub(crate) fn cmd_context() -> anyhow::Result<()> {
     let mut sections: Vec<String> = Vec::new();
 
     // 1. Recent sessions with summaries
-    if let Ok(sessions) = storage.list_sessions(namespace) {
+    if let Ok(sessions) = storage.list_sessions(namespace, usize::MAX) {
         let with_summaries: Vec<_> = sessions
             .iter()
             .filter(|s| s.summary.is_some() && s.ended_at.is_some())
@@ -318,7 +318,9 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
 
     let mut input = String::new();
     let stdin = std::io::stdin();
-    let _ = stdin.lock().read_line(&mut input);
+    if let Err(e) = stdin.lock().read_line(&mut input) {
+        tracing::warn!("Failed to read prompt payload from stdin: {e}");
+    }
 
     if input.trim().is_empty() {
         println!("{{}}");
@@ -351,7 +353,9 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
     // Auto-start session if needed
     if let Some(sid) = session_id {
         if !sid.is_empty() {
-            let _ = storage.start_session(sid, cwd);
+            if let Err(e) = storage.start_session(sid, cwd) {
+                tracing::warn!("Failed to start session {sid}: {e}");
+            }
         }
     }
 
@@ -401,11 +405,15 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
     // Use the engine's persist_memory pipeline for consistent indexing
     match codemem_engine::CodememEngine::from_db_path(&db_path) {
         Ok(engine) => {
-            let _ = engine.persist_memory(&memory);
+            if let Err(e) = engine.persist_memory(&memory) {
+                tracing::warn!("Failed to persist prompt memory: {e}");
+            }
         }
         Err(_) => {
             // Fallback to raw storage insert if engine init fails
-            let _ = storage.insert_memory(&memory);
+            if let Err(e) = storage.insert_memory(&memory) {
+                tracing::warn!("Failed to insert prompt memory: {e}");
+            }
         }
     }
 
@@ -424,7 +432,9 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
 
     let mut input = String::new();
     let stdin = std::io::stdin();
-    let _ = stdin.lock().read_line(&mut input);
+    if let Err(e) = stdin.lock().read_line(&mut input) {
+        tracing::warn!("Failed to read summarize payload from stdin: {e}");
+    }
 
     if input.trim().is_empty() {
         println!("{{}}");
@@ -668,10 +678,14 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
         // Use the engine's persist_memory pipeline for consistent indexing
         match &engine {
             Some(eng) => {
-                let _ = eng.persist_memory(&summary_memory);
+                if let Err(e) = eng.persist_memory(&summary_memory) {
+                    tracing::warn!("Failed to persist session summary: {e}");
+                }
             }
             None => {
-                let _ = storage.insert_memory(&summary_memory);
+                if let Err(e) = storage.insert_memory(&summary_memory) {
+                    tracing::warn!("Failed to insert session summary: {e}");
+                }
             }
         }
     }
@@ -712,16 +726,22 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
         // Use the engine's persist_memory pipeline for consistent indexing
         match &engine {
             Some(eng) => {
-                let _ = eng.persist_memory(&change_memory);
+                if let Err(e) = eng.persist_memory(&change_memory) {
+                    tracing::warn!("Failed to persist change-tracking memory: {e}");
+                }
             }
             None => {
-                let _ = storage.insert_memory(&change_memory);
+                if let Err(e) = storage.insert_memory(&change_memory) {
+                    tracing::warn!("Failed to insert change-tracking memory: {e}");
+                }
             }
         }
     }
 
     // End the session with summary
-    let _ = storage.end_session(session_id, Some(&summary_text));
+    if let Err(e) = storage.end_session(session_id, Some(&summary_text)) {
+        tracing::warn!("Failed to end session {session_id}: {e}");
+    }
 
     let output = serde_json::json!({"continue": true});
     println!("{}", serde_json::to_string(&output)?);
