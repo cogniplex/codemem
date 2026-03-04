@@ -370,3 +370,47 @@ fn split_on_punctuation_multiple() {
     let parts = split_on_punctuation("a::b->c.d");
     assert_eq!(parts, vec!["a", "b", "c", "d"]);
 }
+
+// ── Test #1: BM25 tokenization consistency ──────────────────────────
+// score() tokenizes internally; score_with_tokens_str() uses pre-tokenized input.
+// They must produce identical results.
+
+#[test]
+fn score_with_tokens_str_matches_score() {
+    let mut index = Bm25Index::new();
+    index.add_document("d1", "processRequest handles incoming data");
+    index.add_document("d2", "unrelated database migration code");
+
+    let query = "processRequest";
+    let tokens = tokenize(query);
+    let token_refs: Vec<&str> = tokens.iter().map(|s| s.as_str()).collect();
+
+    let score_direct = index.score(query, "d1");
+    let score_tokens = index.score_with_tokens_str(&token_refs, "d1");
+
+    assert!(
+        (score_direct - score_tokens).abs() < f64::EPSILON,
+        "score() and score_with_tokens_str() must match: direct={score_direct}, tokens={score_tokens}"
+    );
+}
+
+#[test]
+fn score_text_with_tokens_str_matches_score_text() {
+    let mut index = Bm25Index::new();
+    // Need at least one doc for IDF stats
+    index.add_document("d1", "some background document for statistics");
+
+    let query = "parseFunction";
+    let text = "parseFunction extracts AST nodes from source code";
+
+    let tokens = tokenize(query);
+    let token_refs: Vec<&str> = tokens.iter().map(|s| s.as_str()).collect();
+
+    let score_direct = index.score_text(query, text);
+    let score_tokens = index.score_text_with_tokens_str(&token_refs, text);
+
+    assert!(
+        (score_direct - score_tokens).abs() < f64::EPSILON,
+        "score_text() and score_text_with_tokens_str() must match: direct={score_direct}, tokens={score_tokens}"
+    );
+}
