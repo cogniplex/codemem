@@ -32,7 +32,7 @@ cd ui && npx playwright test    # E2E tests
 
 ## Agent Definitions (`.claude/agents/`)
 
-- **code-mapper** — Team-based codebase analysis agent. Uses static analysis (PageRank, git churn, clusters) for prioritization, then spawns 2-4 parallel analysis agents to read and understand code deeply. Agents store diverse memory types (Decision, Pattern, Preference, Style, Habit, Insight, Context) and review/delete `static-analysis` noise. See `.claude/agents/code-mapper.md` for full workflow.
+- **code-mapper** — Agent definition (`.claude/agents/code-mapper.md`) + skill directory (`.claude/skills/code-mapper/`) with 8 supporting files. Uses team-based deep analysis with priority-driven agent assignments. The thin agent definition restricts tools to read-only + memory storage + team orchestration; the skill directory contains phase-by-phase workflow instructions, memory type reference, error handling, human input protocol, and incremental re-analysis guide.
 
 ## Key Design Decisions
 
