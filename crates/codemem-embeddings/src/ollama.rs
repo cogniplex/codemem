@@ -77,6 +77,65 @@ impl super::EmbeddingProvider for OllamaProvider {
         Ok(embedding)
     }
 
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CodememError> {
+        if texts.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Ollama /api/embed supports batch via "input" array (Ollama >= 0.3)
+        let url = format!("{}/api/embed", self.base_url);
+        let body = serde_json::json!({
+            "model": self.model,
+            "input": texts,
+        });
+
+        let response =
+            self.client.post(&url).json(&body).send().map_err(|e| {
+                CodememError::Embedding(format!("Ollama batch request failed: {e}"))
+            })?;
+
+        if !response.status().is_success() {
+            // Fall back to sequential calls if batch endpoint unavailable
+            let mut results = Vec::with_capacity(texts.len());
+            for text in texts {
+                results.push(self.embed(text)?);
+            }
+            return Ok(results);
+        }
+
+        let json: serde_json::Value = response
+            .json()
+            .map_err(|e| CodememError::Embedding(format!("Ollama response parse error: {e}")))?;
+
+        let embeddings_arr = json
+            .get("embeddings")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                CodememError::Embedding("Missing 'embeddings' array in Ollama response".into())
+            })?;
+
+        if embeddings_arr.len() != texts.len() {
+            return Err(CodememError::Embedding(format!(
+                "Ollama returned {} embeddings, expected {}",
+                embeddings_arr.len(),
+                texts.len()
+            )));
+        }
+
+        let results: Vec<Vec<f32>> = embeddings_arr
+            .iter()
+            .map(|arr| {
+                arr.as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                    .collect()
+            })
+            .collect();
+
+        Ok(results)
+    }
+
     fn name(&self) -> &str {
         "ollama"
     }

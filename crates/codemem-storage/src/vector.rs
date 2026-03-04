@@ -18,6 +18,9 @@ pub struct HnswIndex {
     key_to_id: HashMap<u64, String>,
     /// Next available key.
     next_key: u64,
+    /// Number of ghost entries (removed from usearch but memory not freed).
+    /// When this exceeds 20% of live entries, a rebuild is recommended.
+    ghost_count: usize,
 }
 
 impl HnswIndex {
@@ -52,6 +55,7 @@ impl HnswIndex {
             id_to_key: HashMap::new(),
             key_to_id: HashMap::new(),
             next_key: 0,
+            ghost_count: 0,
         })
     }
 
@@ -110,12 +114,24 @@ impl HnswIndex {
         self.id_to_key.clear();
         self.key_to_id.clear();
         self.next_key = 0;
+        self.ghost_count = 0;
 
         for (id, embedding) in entries {
             self.insert(id, embedding)?;
         }
 
         Ok(())
+    }
+
+    /// Returns true if ghost entries exceed 20% of live entries, suggesting a rebuild.
+    pub fn needs_compaction(&self) -> bool {
+        let live = self.id_to_key.len();
+        live > 0 && self.ghost_count > live / 5
+    }
+
+    /// Returns the number of ghost entries in the index.
+    pub fn ghost_count(&self) -> usize {
+        self.ghost_count
     }
 }
 
@@ -129,12 +145,13 @@ impl VectorBackend for HnswIndex {
             )));
         }
 
-        // If ID already exists, remove old entry first
+        // If ID already exists, remove old entry first (creates a ghost in usearch)
         if let Some(&old_key) = self.id_to_key.get(id) {
             self.index
                 .remove(old_key)
                 .map_err(|e| CodememError::Vector(e.to_string()))?;
             self.key_to_id.remove(&old_key);
+            self.ghost_count += 1;
         }
 
         let key = self.allocate_key();
@@ -200,6 +217,7 @@ impl VectorBackend for HnswIndex {
                 .remove(key)
                 .map_err(|e| CodememError::Vector(e.to_string()))?;
             self.key_to_id.remove(&key);
+            self.ghost_count += 1;
             Ok(true)
         } else {
             Ok(false)
@@ -261,6 +279,7 @@ impl VectorBackend for HnswIndex {
                 .map(|(id, key)| (*key, id.clone()))
                 .collect();
             self.next_key = mapping.next_key;
+            self.ghost_count = 0; // Fresh load has no ghosts
         }
 
         Ok(())

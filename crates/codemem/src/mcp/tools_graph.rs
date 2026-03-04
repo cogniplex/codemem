@@ -754,11 +754,10 @@ impl McpServer {
                     .collect()
             });
 
-        match self.engine.get_node_memories(
-            node_id,
-            max_depth,
-            include_relationships.as_deref(),
-        ) {
+        match self
+            .engine
+            .get_node_memories(node_id, max_depth, include_relationships.as_deref())
+        {
             Ok(results) if results.is_empty() => {
                 ToolResult::text(format!("No memories connected to node '{node_id}'."))
             }
@@ -778,8 +777,7 @@ impl McpServer {
                     })
                     .collect();
                 ToolResult::text(
-                    serde_json::to_string_pretty(&output)
-                        .expect("JSON serialization of literal"),
+                    serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
                 )
             }
             Err(e) => ToolResult::tool_error(format!("{e}")),
@@ -810,8 +808,7 @@ impl McpServer {
                     })
                     .collect();
                 ToolResult::text(
-                    serde_json::to_string_pretty(&output)
-                        .expect("JSON serialization of literal"),
+                    serde_json::to_string_pretty(&output).expect("JSON serialization of literal"),
                 )
             }
             Err(e) => ToolResult::tool_error(format!("{e}")),

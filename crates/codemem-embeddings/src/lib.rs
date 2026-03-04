@@ -16,7 +16,7 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tokenizers::{PaddingParams, PaddingStrategy, TruncationParams};
+use tokenizers::{PaddingParams, PaddingStrategy};
 
 /// Default model name.
 pub const MODEL_NAME: &str = "bge-base-en-v1.5";
@@ -39,7 +39,8 @@ pub use codemem_core::EmbeddingProvider;
 // ── Candle Embedding Service ────────────────────────────────────────────────
 
 /// Maximum batch size for batched embedding forward passes.
-const BATCH_SIZE: usize = 32;
+/// Kept small to limit peak GPU memory on Metal (768-dim × batch × layers).
+const BATCH_SIZE: usize = 8;
 
 /// Select the best available compute device.
 ///
@@ -69,6 +70,8 @@ fn select_device() -> Device {
 /// Embedding service with Candle inference and LRU caching.
 pub struct EmbeddingService {
     model: Mutex<BertModel>,
+    /// Tokenizer pre-configured with truncation (no padding).
+    /// Used directly for single embeds; cloned and augmented with padding for batch.
     tokenizer: tokenizers::Tokenizer,
     device: Device,
     cache: Mutex<LruCache<String, Vec<f32>>>,
@@ -97,27 +100,42 @@ impl EmbeddingService {
         let config: BertConfig = serde_json::from_str(&config_str)
             .map_err(|e| CodememError::Embedding(format!("Failed to parse config: {e}")))?;
 
-        // Load model weights from safetensors via memory-mapped IO
-        let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[&model_path], DType::F32, &device)
-                .map_err(|e| CodememError::Embedding(format!("Failed to load weights: {e}")))?
+        // Load model weights from safetensors via memory-mapped IO.
+        // Scope vb so it drops before a potential retry, avoiding two VarBuilders
+        // holding materialized Metal tensors simultaneously.
+        let model = {
+            let vb = unsafe {
+                VarBuilder::from_mmaped_safetensors(&[&model_path], DType::F32, &device)
+                    .map_err(|e| CodememError::Embedding(format!("Failed to load weights: {e}")))?
+            };
+            BertModel::load(vb.pp("bert"), &config)
         };
-
         // Try with "bert." prefix first (standard HF BERT models), then without
-        let model = BertModel::load(vb.pp("bert"), &config)
-            .or_else(|_| {
+        let model = match model {
+            Ok(m) => m,
+            Err(_) => {
                 let vb2 = unsafe {
                     VarBuilder::from_mmaped_safetensors(&[&model_path], DType::F32, &device)
                         .map_err(|e| {
-                            candle_core::Error::Msg(format!("Failed to load weights: {e}"))
-                        })
-                }?;
-                BertModel::load(vb2, &config)
-            })
-            .map_err(|e| CodememError::Embedding(format!("Failed to load BERT model: {e}")))?;
+                            CodememError::Embedding(format!("Failed to load weights: {e}"))
+                        })?
+                };
+                BertModel::load(vb2, &config).map_err(|e| {
+                    CodememError::Embedding(format!("Failed to load BERT model: {e}"))
+                })?
+            }
+        };
 
-        let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
+        let mut tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| CodememError::Embedding(e.to_string()))?;
+
+        // Pre-configure truncation once so we don't need to clone on every embed call.
+        tokenizer
+            .with_truncation(Some(tokenizers::TruncationParams {
+                max_length: MAX_SEQ_LENGTH,
+                ..Default::default()
+            }))
+            .map_err(|e| CodememError::Embedding(format!("Truncation error: {e}")))?;
 
         let cache = Mutex::new(LruCache::new(
             NonZeroUsize::new(CACHE_CAPACITY).expect("CACHE_CAPACITY is non-zero"),
@@ -214,17 +232,9 @@ impl EmbeddingService {
 
     /// Embed without caching. Uses mean pooling with attention mask.
     fn embed_uncached(&self, text: &str) -> Result<Vec<f32>, CodememError> {
-        // Tokenize with truncation
-        let mut tokenizer = self.tokenizer.clone();
-
-        tokenizer
-            .with_truncation(Some(tokenizers::TruncationParams {
-                max_length: MAX_SEQ_LENGTH,
-                ..Default::default()
-            }))
-            .map_err(|e| CodememError::Embedding(format!("Truncation error: {e}")))?;
-
-        let encoding = tokenizer
+        // Tokenize using pre-configured tokenizer (truncation already set in constructor)
+        let encoding = self
+            .tokenizer
             .encode(text, true)
             .map_err(|e| CodememError::Embedding(e.to_string()))?;
 
@@ -257,6 +267,17 @@ impl EmbeddingService {
             )
             .map_err(|e| CodememError::Embedding(format!("Model forward error: {e}")))?;
         drop(model);
+
+        // Drop intermediate GPU tensors before pooling
+        drop(input_ids_tensor);
+        drop(token_type_ids);
+
+        // Flush Metal command buffers to release GPU memory
+        if !matches!(self.device, Device::Cpu) {
+            self.device
+                .synchronize()
+                .map_err(|e| CodememError::Embedding(format!("Device sync error: {e}")))?;
+        }
 
         // Mean pooling weighted by attention mask
         // attention_mask: [1, seq_len] -> [1, seq_len, 1] for broadcasting
@@ -334,7 +355,20 @@ impl EmbeddingService {
             }
         }
 
-        Ok(results.into_iter().flatten().collect())
+        // Verify all texts got embeddings — flatten() would silently drop Nones
+        let expected = texts.len();
+        let output: Vec<Vec<f32>> = results
+            .into_iter()
+            .enumerate()
+            .map(|(i, opt)| {
+                opt.ok_or_else(|| {
+                    CodememError::Embedding(format!(
+                        "Missing embedding for text at index {i} (batch size {expected})"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(output)
     }
 
     /// Embed a batch of texts without caching, using a true batched forward pass.
@@ -350,16 +384,9 @@ impl EmbeddingService {
         let mut all_embeddings = Vec::with_capacity(texts.len());
 
         for chunk in texts.chunks(BATCH_SIZE) {
+            // Clone tokenizer only for batch path — needs per-chunk padding config.
+            // Truncation is already configured on self.tokenizer.
             let mut tokenizer = self.tokenizer.clone();
-
-            tokenizer
-                .with_truncation(Some(TruncationParams {
-                    max_length: MAX_SEQ_LENGTH,
-                    ..Default::default()
-                }))
-                .map_err(|e| CodememError::Embedding(format!("Truncation error: {e}")))?;
-
-            // Pad all sequences in this chunk to the length of the longest
             tokenizer.with_padding(Some(PaddingParams {
                 strategy: PaddingStrategy::BatchLongest,
                 ..Default::default()
@@ -407,6 +434,10 @@ impl EmbeddingService {
                 .map_err(|e| CodememError::Embedding(format!("Forward error: {e}")))?;
             drop(model);
 
+            // Drop intermediate GPU tensors before pooling
+            drop(input_ids);
+            drop(token_type_ids);
+
             // Mean pooling: mask [batch, seq] -> [batch, seq, 1] for broadcast
             let mask = attention_mask
                 .to_dtype(DType::F32)
@@ -434,13 +465,21 @@ impl EmbeddingService {
                 .broadcast_div(&norm)
                 .map_err(|e| CodememError::Embedding(format!("Normalize error: {e}")))?;
 
-            // Extract each row as Vec<f32>
+            // Single GPU→CPU blit: flatten all rows, then slice on CPU
+            let flat: Vec<f32> = normalized
+                .flatten_all()
+                .and_then(|t| t.to_vec1())
+                .map_err(|e| CodememError::Embedding(format!("Extract error: {e}")))?;
             for i in 0..batch_len {
-                let row: Vec<f32> = normalized
-                    .get(i)
-                    .and_then(|t| t.to_vec1())
-                    .map_err(|e| CodememError::Embedding(format!("Extract error: {e}")))?;
-                all_embeddings.push(row);
+                let start = i * DIMENSIONS;
+                all_embeddings.push(flat[start..start + DIMENSIONS].to_vec());
+            }
+
+            // Flush Metal command buffers to release GPU memory between chunks
+            if !matches!(self.device, Device::Cpu) {
+                self.device
+                    .synchronize()
+                    .map_err(|e| CodememError::Embedding(format!("Device sync error: {e}")))?;
             }
         }
 
@@ -557,7 +596,20 @@ impl EmbeddingProvider for CachedProvider {
             }
         }
 
-        Ok(results.into_iter().flatten().collect())
+        // Verify all texts got embeddings — flatten() would silently drop Nones
+        let expected = texts.len();
+        let output: Vec<Vec<f32>> = results
+            .into_iter()
+            .enumerate()
+            .map(|(i, opt)| {
+                opt.ok_or_else(|| {
+                    CodememError::Embedding(format!(
+                        "Missing embedding for text at index {i} (batch size {expected})"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(output)
     }
 
     fn name(&self) -> &str {

@@ -493,10 +493,7 @@ impl CodememEngine {
     }
 
     /// Check which graph nodes have attached memories (depth-1 only).
-    pub fn node_coverage(
-        &self,
-        node_ids: &[&str],
-    ) -> Result<Vec<NodeCoverageEntry>, CodememError> {
+    pub fn node_coverage(&self, node_ids: &[&str]) -> Result<Vec<NodeCoverageEntry>, CodememError> {
         let graph = self.lock_graph()?;
         let mut results = Vec::with_capacity(node_ids.len());
 

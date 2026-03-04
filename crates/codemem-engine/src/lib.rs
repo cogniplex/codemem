@@ -203,13 +203,41 @@ impl CodememEngine {
             .lock_graph()?
             .recompute_centrality_with_options(false);
 
-        // Populate BM25 index from all existing memories (batch load)
-        if let Ok(ids) = engine.storage.list_memory_ids() {
-            let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
-            if let Ok(memories) = engine.storage.get_memories_batch(&id_refs) {
-                let mut bm25 = engine.lock_bm25()?;
-                for memory in &memories {
-                    bm25.add_document(&memory.id, &memory.content);
+        // Try loading persisted BM25 index; fall back to rebuilding from memories.
+        let bm25_path = db_path.with_extension("bm25");
+        let mut bm25_loaded = false;
+        if bm25_path.exists() {
+            match std::fs::read(&bm25_path) {
+                Ok(data) => match Bm25Index::deserialize(&data) {
+                    Ok(index) => {
+                        let mut bm25 = engine.lock_bm25()?;
+                        *bm25 = index;
+                        bm25_loaded = true;
+                        tracing::info!(
+                            "Loaded BM25 index from disk ({} documents)",
+                            bm25.doc_count
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to deserialize BM25 index, rebuilding: {e}");
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to read BM25 index file, rebuilding: {e}");
+                }
+            }
+        }
+
+        if !bm25_loaded {
+            // Rebuild BM25 index from all existing memories (batch load)
+            if let Ok(ids) = engine.storage.list_memory_ids() {
+                let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+                if let Ok(memories) = engine.storage.get_memories_batch(&id_refs) {
+                    let mut bm25 = engine.lock_bm25()?;
+                    for memory in &memories {
+                        bm25.add_document(&memory.id, &memory.content);
+                    }
+                    tracing::info!("Rebuilt BM25 index from {} memories", bm25.doc_count);
                 }
             }
         }
@@ -562,9 +590,7 @@ impl CodememEngine {
                     if node.kind == NodeKind::Memory {
                         let memory_id = node.memory_id.as_deref().unwrap_or(&node.id);
                         if seen_memory_ids.insert(memory_id.to_string()) {
-                            if let Ok(Some(memory)) =
-                                self.storage.get_memory_no_touch(memory_id)
-                            {
+                            if let Ok(Some(memory)) = self.storage.get_memory_no_touch(memory_id) {
                                 results.push(NodeMemoryResult {
                                     memory,
                                     relationship: parent_rel.clone(),
@@ -1045,14 +1071,42 @@ impl CodememEngine {
 
     // ── Index Persistence ────────────────────────────────────────────────
 
-    /// Save the vector index to disk if a db_path is configured.
+    /// Save the vector and BM25 indexes to disk if a db_path is configured.
+    /// Compacts the HNSW index if ghost entries exceed 20% of live entries.
     /// Always clears the dirty flag so `flush_if_dirty()` won't double-save.
     pub fn save_index(&self) {
         if let Some(ref db_path) = self.db_path {
             let idx_path = db_path.with_extension("idx");
-            if let Ok(vi) = self.lock_vector() {
+            if let Ok(mut vi) = self.lock_vector() {
+                // Compact HNSW if ghost entries exceed threshold
+                if vi.needs_compaction() {
+                    let ghost = vi.ghost_count();
+                    let live = vi.stats().count;
+                    tracing::info!(
+                        "HNSW ghost compaction: {ghost} ghosts / {live} live entries, rebuilding..."
+                    );
+                    if let Ok(embeddings) = self.storage.list_all_embeddings() {
+                        if let Err(e) = vi.rebuild_from_entries(&embeddings) {
+                            tracing::warn!("HNSW compaction failed: {e}");
+                        }
+                    }
+                }
                 if let Err(e) = vi.save(&idx_path) {
                     tracing::warn!("Failed to save vector index: {e}");
+                }
+            }
+
+            // Persist BM25 index alongside the vector index
+            let bm25_path = db_path.with_extension("bm25");
+            if let Ok(bm25) = self.lock_bm25() {
+                if bm25.needs_save() {
+                    let data = bm25.serialize();
+                    let tmp_path = db_path.with_extension("bm25.tmp");
+                    if let Err(e) = std::fs::write(&tmp_path, &data)
+                        .and_then(|_| std::fs::rename(&tmp_path, &bm25_path))
+                    {
+                        tracing::warn!("Failed to save BM25 index: {e}");
+                    }
                 }
             }
         }
