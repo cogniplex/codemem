@@ -14,12 +14,12 @@ fn handle_initialize() {
 }
 
 #[test]
-fn handle_tools_list_returns_28_tools() {
+fn handle_tools_list_returns_30_tools() {
     let server = test_server();
     let resp = server.handle_request("tools/list", None, json!(2));
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 28);
+    assert_eq!(tools.len(), 30);
 
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     // Memory CRUD (7)
@@ -30,7 +30,7 @@ fn handle_tools_list_returns_28_tools() {
     assert!(names.contains(&"refine_memory"));
     assert!(names.contains(&"split_memory"));
     assert!(names.contains(&"merge_memories"));
-    // Graph & Structure (10)
+    // Graph & Structure (9)
     assert!(names.contains(&"graph_traverse"));
     assert!(names.contains(&"summary_tree"));
     assert!(names.contains(&"codemem_status"));
@@ -40,6 +40,8 @@ fn handle_tools_list_returns_28_tools() {
     assert!(names.contains(&"get_symbol_graph"));
     assert!(names.contains(&"find_important_nodes"));
     assert!(names.contains(&"find_related_groups"));
+    assert!(names.contains(&"get_node_memories"));
+    assert!(names.contains(&"node_coverage"));
     assert!(names.contains(&"get_cross_repo"));
     // Consolidation & Patterns (3)
     assert!(names.contains(&"consolidate"));

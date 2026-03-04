@@ -5,8 +5,8 @@
 
 use crate::CodememEngine;
 use codemem_core::{
-    CodememError, DetectedPattern, GraphBackend, MemoryNode, MemoryType, NodeKind,
-    RelationshipType, SearchResult,
+    CodememError, DetectedPattern, GraphBackend, MemoryNode, MemoryType, NodeCoverageEntry,
+    NodeKind, RelationshipType, SearchResult,
 };
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -490,5 +490,36 @@ impl CodememEngine {
         }
 
         report
+    }
+
+    /// Check which graph nodes have attached memories (depth-1 only).
+    pub fn node_coverage(
+        &self,
+        node_ids: &[&str],
+    ) -> Result<Vec<NodeCoverageEntry>, CodememError> {
+        let graph = self.lock_graph()?;
+        let mut results = Vec::with_capacity(node_ids.len());
+
+        for &node_id in node_ids {
+            let edges = graph.get_edges_ref(node_id);
+            let memory_count = edges
+                .iter()
+                .filter(|e| {
+                    let other_id = if e.src == node_id { &e.dst } else { &e.src };
+                    graph
+                        .get_node_ref(other_id)
+                        .map(|n| n.kind == NodeKind::Memory)
+                        .unwrap_or(false)
+                })
+                .count();
+
+            results.push(NodeCoverageEntry {
+                node_id: node_id.to_string(),
+                memory_count,
+                has_coverage: memory_count > 0,
+            });
+        }
+
+        Ok(results)
     }
 }

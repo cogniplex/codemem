@@ -24,6 +24,7 @@ pub use traits::{
 // ── types ───────────────────────────────────────────────────────────────────
 pub use types::{
     content_hash, DetectedPattern, DistanceMetric, Edge, GraphConfig, GraphNode, MemoryNode,
-    MemoryType, NodeKind, PatternType, RelationshipType, Repository, ScoreBreakdown,
-    ScoringWeights, SearchResult, Session, SessionActivitySummary, VectorConfig,
+    MemoryType, NodeCoverageEntry, NodeKind, NodeMemoryResult, PatternType, RelationshipType,
+    Repository, ScoreBreakdown, ScoringWeights, SearchResult, Session, SessionActivitySummary,
+    VectorConfig,
 };

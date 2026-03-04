@@ -1,10 +1,11 @@
 //! codemem-mcp: MCP server for Codemem (JSON-RPC 2.0 over stdio).
 //!
-//! Implements 28 tools:
+//! Implements 30 tools:
 //! store_memory, recall, delete_memory, associate_memories, refine_memory,
 //! split_memory, merge_memories, graph_traverse, summary_tree,
 //! codemem_status, index_codebase, search_code, get_symbol_info,
 //! get_symbol_graph, find_important_nodes, find_related_groups,
+//! get_node_memories, node_coverage,
 //! get_cross_repo, consolidate, detect_patterns, get_decision_chain,
 //! list_namespaces, namespace_stats, delete_namespace,
 //! session_checkpoint, session_context,
@@ -293,6 +294,8 @@ impl McpServer {
             "find_important_nodes" => self.tool_find_important_nodes(args),
             "find_related_groups" => self.tool_find_related_groups(args),
             "get_cross_repo" => self.tool_get_cross_repo(args),
+            "get_node_memories" => self.tool_get_node_memories(args),
+            "node_coverage" => self.tool_node_coverage(args),
 
             // ── Consolidation & Patterns ────────────────────────────────
             "consolidate" => self.tool_consolidate(args),
@@ -577,7 +580,7 @@ fn tool_definitions() -> Vec<Value> {
                 "required": ["source_ids", "content"]
             }
         }),
-        // ── Graph & Structure (7 tools) ────────────────────────────────────
+        // ── Graph & Structure (9 tools) ────────────────────────────────────
         json!({
             "name": "graph_traverse",
             "description": "Multi-hop graph traversal from a start node with optional filtering by node kind and relationship type",
@@ -689,6 +692,34 @@ fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "resolution": { "type": "number", "default": 1.0, "description": "Higher = more clusters" }
                 }
+            }
+        }),
+        json!({
+            "name": "get_node_memories",
+            "description": "Retrieve all memories connected to a graph node via BFS traversal",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "node_id": { "type": "string", "description": "Graph node ID (e.g. 'file:src/main.rs', 'sym:Module::func')" },
+                    "max_depth": { "type": "integer", "default": 1, "description": "Max graph hops to search for memories" },
+                    "include_relationships": { "type": "array", "items": { "type": "string" }, "description": "Only follow edges of these relationship types" }
+                },
+                "required": ["node_id"]
+            }
+        }),
+        json!({
+            "name": "node_coverage",
+            "description": "Batch-check which graph nodes have attached memories. Returns memory count and coverage status for each node.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "node_ids": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Array of graph node IDs to check coverage for"
+                    }
+                },
+                "required": ["node_ids"]
             }
         }),
         json!({

@@ -597,6 +597,24 @@ pub struct SessionActivitySummary {
     pub total_actions: usize,
 }
 
+// ── Node Memory Query ────────────────────────────────────────────────
+
+/// A memory connected to a graph node, with relationship and distance metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeMemoryResult {
+    pub memory: MemoryNode,
+    pub relationship: String,
+    pub depth: usize,
+}
+
+/// Coverage status for a single graph node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeCoverageEntry {
+    pub node_id: String,
+    pub memory_count: usize,
+    pub has_coverage: bool,
+}
+
 #[cfg(test)]
 #[path = "tests/types_tests.rs"]
 mod tests;

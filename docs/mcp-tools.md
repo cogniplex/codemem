@@ -1,6 +1,6 @@
 # Codemem MCP Tools API Reference
 
-Codemem exposes 28 tools over JSON-RPC 2.0 (stdio transport). All requests use the
+Codemem exposes 30 tools over JSON-RPC 2.0 (stdio transport). All requests use the
 `tools/call` method with `{"name": "<tool>", "arguments": {...}}` as params.
 
 Legacy tool names (from v0.7.0 and earlier) are still accepted and transparently mapped to the new unified tools.
@@ -268,7 +268,7 @@ Merge multiple memories into a single summary memory linked via SUMMARIZES edges
 
 ---
 
-## Graph & Structure (7 tools)
+## Graph & Structure (9 tools)
 
 ### graph_traverse
 
@@ -460,6 +460,47 @@ Run Louvain community detection to find clusters of related symbols. Replaces th
   "name": "find_related_groups",
   "arguments": {
     "resolution": 1.5
+  }
+}
+```
+
+---
+
+### get_node_memories
+
+Retrieve all memories connected to a graph node via BFS traversal. Useful for checking what knowledge exists about a specific file, symbol, or package.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `node_id` | string | yes | -- | Graph node ID (e.g. `file:src/main.rs`, `sym:Module::func`) |
+| `max_depth` | integer | no | `1` | Max graph hops to search for memories |
+| `include_relationships` | string[] | no | -- | Only follow edges of these relationship types |
+
+```json
+{
+  "name": "get_node_memories",
+  "arguments": {
+    "node_id": "file:src/main.rs",
+    "max_depth": 2
+  }
+}
+```
+
+---
+
+### node_coverage
+
+Batch-check which graph nodes have attached memories. Returns memory count and coverage status for each node. Useful for identifying gaps in knowledge coverage.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `node_ids` | string[] | yes | -- | Array of graph node IDs to check |
+
+```json
+{
+  "name": "node_coverage",
+  "arguments": {
+    "node_ids": ["sym:CodememEngine::recall", "file:src/main.rs", "pkg:src/"]
   }
 }
 ```

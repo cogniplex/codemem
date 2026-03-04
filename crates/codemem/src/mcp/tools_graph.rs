@@ -737,6 +737,86 @@ impl McpServer {
             Err(e) => ToolResult::tool_error(format!("{e}")),
         }
     }
+    /// Retrieve all memories connected to a graph node.
+    pub(crate) fn tool_get_node_memories(&self, args: &Value) -> ToolResult {
+        let node_id = match args.get("node_id").and_then(|v| v.as_str()) {
+            Some(id) => id,
+            None => return ToolResult::tool_error("Missing 'node_id' parameter"),
+        };
+        let max_depth = args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+
+        let include_relationships: Option<Vec<RelationshipType>> = args
+            .get("include_relationships")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str()?.parse::<RelationshipType>().ok())
+                    .collect()
+            });
+
+        match self.engine.get_node_memories(
+            node_id,
+            max_depth,
+            include_relationships.as_deref(),
+        ) {
+            Ok(results) if results.is_empty() => {
+                ToolResult::text(format!("No memories connected to node '{node_id}'."))
+            }
+            Ok(results) => {
+                let output: Vec<Value> = results
+                    .iter()
+                    .map(|r| {
+                        json!({
+                            "memory_id": r.memory.id,
+                            "content": r.memory.content,
+                            "memory_type": r.memory.memory_type.to_string(),
+                            "importance": r.memory.importance,
+                            "relationship": r.relationship,
+                            "depth": r.depth,
+                            "tags": r.memory.tags,
+                        })
+                    })
+                    .collect();
+                ToolResult::text(
+                    serde_json::to_string_pretty(&output)
+                        .expect("JSON serialization of literal"),
+                )
+            }
+            Err(e) => ToolResult::tool_error(format!("{e}")),
+        }
+    }
+
+    /// Batch-check which nodes have attached memories.
+    pub(crate) fn tool_node_coverage(&self, args: &Value) -> ToolResult {
+        let node_ids: Vec<&str> = match args.get("node_ids").and_then(|v| v.as_array()) {
+            Some(arr) => arr.iter().filter_map(|v| v.as_str()).collect(),
+            None => return ToolResult::tool_error("Missing 'node_ids' parameter (string array)"),
+        };
+
+        if node_ids.is_empty() {
+            return ToolResult::tool_error("'node_ids' must be a non-empty array");
+        }
+
+        match self.engine.node_coverage(&node_ids) {
+            Ok(entries) => {
+                let output: Vec<Value> = entries
+                    .iter()
+                    .map(|e| {
+                        json!({
+                            "node_id": e.node_id,
+                            "memory_count": e.memory_count,
+                            "has_coverage": e.has_coverage,
+                        })
+                    })
+                    .collect();
+                ToolResult::text(
+                    serde_json::to_string_pretty(&output)
+                        .expect("JSON serialization of literal"),
+                )
+            }
+            Err(e) => ToolResult::tool_error(format!("{e}")),
+        }
+    }
 }
 
 #[cfg(test)]

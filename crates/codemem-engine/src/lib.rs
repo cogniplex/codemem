@@ -12,7 +12,7 @@
 
 use codemem_core::{
     CodememConfig, CodememError, DetectedPattern, Edge, GraphBackend, MemoryNode, MemoryType,
-    NodeKind, RelationshipType, ScoringWeights, StorageBackend, VectorBackend,
+    NodeKind, NodeMemoryResult, RelationshipType, ScoringWeights, StorageBackend, VectorBackend,
 };
 use codemem_storage::graph::GraphEngine;
 use codemem_storage::HnswIndex;
@@ -528,6 +528,94 @@ impl CodememEngine {
         }
 
         created
+    }
+
+    // ── Node Memory Queries ──────────────────────────────────────────────
+
+    /// Retrieve all memories connected to a graph node via BFS traversal.
+    ///
+    /// Performs level-by-level BFS to track actual hop distance. For each
+    /// Memory node found, reports the relationship type from the edge that
+    /// connected it (or the edge leading into the path toward it).
+    pub fn get_node_memories(
+        &self,
+        node_id: &str,
+        max_depth: usize,
+        include_relationships: Option<&[RelationshipType]>,
+    ) -> Result<Vec<NodeMemoryResult>, CodememError> {
+        let graph = self.lock_graph()?;
+
+        // Manual BFS tracking (node_id, depth, relationship_from_parent_edge)
+        let mut results: Vec<NodeMemoryResult> = Vec::new();
+        let mut seen_memory_ids = HashSet::new();
+        let mut visited = HashSet::new();
+        let mut queue: std::collections::VecDeque<(String, usize, String)> =
+            std::collections::VecDeque::new();
+
+        visited.insert(node_id.to_string());
+        queue.push_back((node_id.to_string(), 0, String::new()));
+
+        while let Some((current_id, depth, parent_rel)) = queue.pop_front() {
+            // Collect Memory nodes (skip the start node itself)
+            if current_id != node_id {
+                if let Some(node) = graph.get_node_ref(&current_id) {
+                    if node.kind == NodeKind::Memory {
+                        let memory_id = node.memory_id.as_deref().unwrap_or(&node.id);
+                        if seen_memory_ids.insert(memory_id.to_string()) {
+                            if let Ok(Some(memory)) =
+                                self.storage.get_memory_no_touch(memory_id)
+                            {
+                                results.push(NodeMemoryResult {
+                                    memory,
+                                    relationship: parent_rel.clone(),
+                                    depth,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            if depth >= max_depth {
+                continue;
+            }
+
+            // Expand neighbors via edges, skipping Chunk nodes
+            for edge in graph.get_edges_ref(&current_id) {
+                let neighbor_id = if edge.src == current_id {
+                    &edge.dst
+                } else {
+                    &edge.src
+                };
+
+                if visited.contains(neighbor_id.as_str()) {
+                    continue;
+                }
+
+                // Apply relationship filter
+                if let Some(allowed) = include_relationships {
+                    if !allowed.contains(&edge.relationship) {
+                        continue;
+                    }
+                }
+
+                // Skip Chunk nodes (noisy, low-value for memory discovery)
+                if let Some(neighbor) = graph.get_node_ref(neighbor_id) {
+                    if neighbor.kind == NodeKind::Chunk {
+                        continue;
+                    }
+                }
+
+                visited.insert(neighbor_id.clone());
+                queue.push_back((
+                    neighbor_id.clone(),
+                    depth + 1,
+                    edge.relationship.to_string(),
+                ));
+            }
+        }
+
+        Ok(results)
     }
 
     // ── Persistence ─────────────────────────────────────────────────────
