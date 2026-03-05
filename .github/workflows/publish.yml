@@ -22,11 +22,11 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
-      - name: Build UI and embed into API crate
+      - name: Build UI and embed into codemem crate
         run: |
           cd ui && bun install && bun run build && cd ..
-          rm -rf crates/codemem-api/ui-dist
-          cp -r ui/dist crates/codemem-api/ui-dist
+          rm -rf crates/codemem/ui-dist
+          cp -r ui/dist crates/codemem/ui-dist
 
       - name: Verify builds
         run: cargo build --workspace
@@ -51,20 +51,12 @@ jobs:
 
           # Layer 2: depends on codemem-core only
           publish codemem-storage
-          publish codemem-vector
           publish codemem-embeddings
-          publish codemem-watch
 
           # Layer 3: depends on layers 1-2
-          publish codemem-graph
-          publish codemem-index
+          publish codemem-engine
 
-          # Layer 4: depends on layers 1-3
-          publish codemem-hooks
-          publish codemem-mcp
-          publish codemem-api --allow-dirty  # ui-dist/ is built in CI, not committed
-
-          # Layer 5: depends on everything
-          publish codemem-cli
+          # Layer 4: unified binary (depends on everything)
+          publish codemem --allow-dirty  # ui-dist/ is built in CI, not committed
 
           echo "All crates published successfully!"

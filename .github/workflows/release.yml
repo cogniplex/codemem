@@ -55,11 +55,11 @@ jobs:
         working-directory: ui
         run: bun install && bun run build
 
-      - name: Embed UI assets into API crate
-        run: rm -rf crates/codemem-api/ui-dist && cp -r ui/dist crates/codemem-api/ui-dist
+      - name: Embed UI assets into codemem crate
+        run: rm -rf crates/codemem/ui-dist && cp -r ui/dist crates/codemem/ui-dist
 
       - name: Build
-        run: cargo build --release -p codemem-cli --features ui --target ${{ matrix.target }}
+        run: cargo build --release -p codemem --features ui --target ${{ matrix.target }}
 
       - name: Package
         shell: bash
