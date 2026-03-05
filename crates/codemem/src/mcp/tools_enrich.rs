@@ -98,6 +98,94 @@ impl McpServer {
             }
         }
 
+        let root = std::path::Path::new(path);
+        let project_root = Some(root);
+
+        if run_all || analyses.iter().any(|a| a == "complexity") {
+            match self.engine.enrich_complexity(namespace, project_root) {
+                Ok(r) => {
+                    results["complexity"] = r.details;
+                }
+                Err(e) => {
+                    results["complexity"] = json!({"error": format!("{e}")});
+                }
+            }
+        }
+
+        if run_all || analyses.iter().any(|a| a == "code_smells") {
+            match self.engine.enrich_code_smells(namespace, project_root) {
+                Ok(r) => {
+                    results["code_smells"] = r.details;
+                }
+                Err(e) => {
+                    results["code_smells"] = json!({"error": format!("{e}")});
+                }
+            }
+        }
+
+        if run_all || analyses.iter().any(|a| a == "security_scan") {
+            match self
+                .engine
+                .enrich_security_scan(namespace, project_root)
+            {
+                Ok(r) => {
+                    results["security_scan"] = r.details;
+                }
+                Err(e) => {
+                    results["security_scan"] = json!({"error": format!("{e}")});
+                }
+            }
+        }
+
+        if run_all || analyses.iter().any(|a| a == "architecture") {
+            match self.engine.enrich_architecture(namespace) {
+                Ok(r) => results["architecture"] = r.details,
+                Err(e) => results["architecture"] = json!({"error": format!("{e}")}),
+            }
+        }
+
+        if run_all || analyses.iter().any(|a| a == "test_mapping") {
+            match self.engine.enrich_test_mapping(namespace) {
+                Ok(r) => results["test_mapping"] = r.details,
+                Err(e) => results["test_mapping"] = json!({"error": format!("{e}")}),
+            }
+        }
+
+        if run_all || analyses.iter().any(|a| a == "api_surface") {
+            match self.engine.enrich_api_surface(namespace) {
+                Ok(r) => results["api_surface"] = r.details,
+                Err(e) => results["api_surface"] = json!({"error": format!("{e}")}),
+            }
+        }
+
+        if run_all || analyses.iter().any(|a| a == "doc_coverage") {
+            match self.engine.enrich_doc_coverage(namespace) {
+                Ok(r) => results["doc_coverage"] = r.details,
+                Err(e) => results["doc_coverage"] = json!({"error": format!("{e}")}),
+            }
+        }
+
+        if run_all || analyses.iter().any(|a| a == "hot_complex") {
+            match self.engine.enrich_hot_complex(namespace) {
+                Ok(r) => results["hot_complex"] = r.details,
+                Err(e) => results["hot_complex"] = json!({"error": format!("{e}")}),
+            }
+        }
+
+        if run_all || analyses.iter().any(|a| a == "blame") {
+            match self.engine.enrich_blame(path, namespace) {
+                Ok(r) => results["blame"] = r.details,
+                Err(e) => results["blame"] = json!({"error": format!("{e}")}),
+            }
+        }
+
+        if run_all || analyses.iter().any(|a| a == "quality") {
+            match self.engine.enrich_quality_stratification(namespace) {
+                Ok(r) => results["quality"] = r.details,
+                Err(e) => results["quality"] = json!({"error": format!("{e}")}),
+            }
+        }
+
         ToolResult::text(
             serde_json::to_string_pretty(&results).expect("JSON serialization of literal"),
         )
