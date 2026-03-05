@@ -41,6 +41,10 @@ pub mod watch;
 #[path = "tests/engine_integration_tests.rs"]
 mod integration_tests;
 
+#[cfg(test)]
+#[path = "tests/enrichment_tests.rs"]
+mod enrichment_tests;
+
 // Re-export key index types at crate root for convenience
 pub use index::{
     ChunkConfig, CodeChunk, CodeParser, Dependency, IndexAndResolveResult, IndexProgress,

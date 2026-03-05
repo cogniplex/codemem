@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// Resolve a (possibly relative) file path against a project root.
 /// If `project_root` is `Some`, joins it with `rel_path` to produce an absolute path.
 /// Otherwise returns `rel_path` as-is.
-fn resolve_path(rel_path: &str, project_root: Option<&Path>) -> PathBuf {
+pub(crate) fn resolve_path(rel_path: &str, project_root: Option<&Path>) -> PathBuf {
     match project_root {
         Some(root) => root.join(rel_path),
         None => PathBuf::from(rel_path),

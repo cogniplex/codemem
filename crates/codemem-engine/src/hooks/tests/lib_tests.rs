@@ -1,5 +1,131 @@
 use super::*;
 
+// ── relativize_path tests ───────────────────────────────────────────────────
+
+#[test]
+fn relativize_path_strips_cwd_prefix() {
+    let result = relativize_path("/home/user/project/src/main.rs", Some("/home/user/project"));
+    assert_eq!(result, "src/main.rs");
+}
+
+#[test]
+fn relativize_path_cwd_with_trailing_slash() {
+    let result = relativize_path(
+        "/home/user/project/src/main.rs",
+        Some("/home/user/project/"),
+    );
+    assert_eq!(result, "src/main.rs");
+}
+
+#[test]
+fn relativize_path_no_cwd_returns_original() {
+    let result = relativize_path("/home/user/project/src/main.rs", None);
+    assert_eq!(result, "/home/user/project/src/main.rs");
+}
+
+#[test]
+fn relativize_path_no_match_returns_original() {
+    let result = relativize_path("/other/path/file.rs", Some("/home/user/project"));
+    assert_eq!(result, "/other/path/file.rs");
+}
+
+#[test]
+fn relativize_path_exact_cwd_no_trailing_file() {
+    // Path equals cwd exactly — no stripping possible (no trailing file)
+    let result = relativize_path("/home/user/project", Some("/home/user/project"));
+    assert_eq!(result, "/home/user/project");
+}
+
+// ── build_file_extraction with cwd ──────────────────────────────────────────
+
+#[test]
+fn build_file_extraction_relativizes_with_cwd() {
+    let payload = HookPayload {
+        tool_name: "Read".to_string(),
+        tool_input: serde_json::json!({"file_path": "/home/user/project/src/lib.rs"}),
+        tool_response: "fn foo() {}".to_string(),
+        session_id: None,
+        cwd: Some("/home/user/project".to_string()),
+    };
+
+    let extracted = build_file_extraction(
+        &payload,
+        "/home/user/project/src/lib.rs",
+        "Read file src/lib.rs".to_string(),
+        MemoryType::Context,
+        "Read",
+    );
+
+    // Graph node ID should use relative path
+    let node = extracted.graph_node.unwrap();
+    assert_eq!(node.id, "file:src/lib.rs");
+    assert_eq!(node.label, "src/lib.rs");
+
+    // Metadata should also store relative path
+    assert_eq!(
+        extracted.metadata["file_path"],
+        serde_json::Value::String("src/lib.rs".to_string())
+    );
+}
+
+#[test]
+fn build_file_extraction_no_cwd_keeps_absolute() {
+    let payload = HookPayload {
+        tool_name: "Read".to_string(),
+        tool_input: serde_json::json!({"file_path": "/home/user/project/src/lib.rs"}),
+        tool_response: "fn foo() {}".to_string(),
+        session_id: None,
+        cwd: None,
+    };
+
+    let extracted = build_file_extraction(
+        &payload,
+        "/home/user/project/src/lib.rs",
+        "Read file".to_string(),
+        MemoryType::Context,
+        "Read",
+    );
+
+    let node = extracted.graph_node.unwrap();
+    assert_eq!(node.id, "file:/home/user/project/src/lib.rs");
+}
+
+// ── extract_bash with cwd relativization ────────────────────────────────────
+
+#[test]
+fn extract_bash_relativizes_file_path_with_cwd() {
+    let json = r#"{
+        "tool_name": "Bash",
+        "tool_input": {"command": "cat /home/user/project/src/main.rs"},
+        "tool_response": "fn main() {}",
+        "cwd": "/home/user/project"
+    }"#;
+
+    let payload = parse_payload(json).unwrap();
+    let extracted = extract(&payload).unwrap().unwrap();
+
+    let node = extracted.graph_node.unwrap();
+    assert_eq!(node.id, "file:src/main.rs");
+    assert_eq!(node.label, "src/main.rs");
+}
+
+#[test]
+fn extract_bash_no_cwd_keeps_absolute_path() {
+    let json = r#"{
+        "tool_name": "Bash",
+        "tool_input": {"command": "cat /home/user/project/src/main.rs"},
+        "tool_response": "fn main() {}"
+    }"#;
+
+    let payload = parse_payload(json).unwrap();
+    let extracted = extract(&payload).unwrap().unwrap();
+
+    let node = extracted.graph_node.unwrap();
+    assert_eq!(node.id, "file:/home/user/project/src/main.rs");
+}
+
+// ── Existing tests ──────────────────────────────────────────────────────────
+
 #[test]
 fn parse_read_payload() {
     let json = r#"{
