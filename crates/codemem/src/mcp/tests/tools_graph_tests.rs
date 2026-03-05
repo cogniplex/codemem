@@ -172,23 +172,205 @@ fn graph_strength_caps_at_one() {
 // ── Structural Tool Tests ───────────────────────────────────────────
 
 #[test]
-fn search_symbols_requires_index() {
+fn search_symbols_no_index_returns_empty() {
     let server = test_server();
+    // With no cache and no DB data, search_symbols returns empty (not an error)
     let params = json!({"name": "search_symbols", "arguments": {"query": "foo"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(300));
     let result = resp.result.unwrap();
-    assert_eq!(result["isError"], true);
     let text = result["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("No codebase indexed"));
+    assert!(
+        text.contains("No matching symbols") || text == "[]",
+        "Expected empty results, got: {text}"
+    );
 }
 
 #[test]
-fn get_symbol_info_requires_index() {
+fn get_symbol_info_not_found() {
     let server = test_server();
+    // With no cache and no DB data, get_symbol_info returns "Symbol not found"
     let params = json!({"name": "get_symbol_info", "arguments": {"qualified_name": "foo::bar"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(301));
     let result = resp.result.unwrap();
     assert_eq!(result["isError"], true);
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("Symbol not found"),
+        "Expected 'Symbol not found', got: {text}"
+    );
+}
+
+#[test]
+fn search_symbols_db_fallback() {
+    let server = test_server();
+
+    // Insert a sym:* node directly into storage (simulating persisted data)
+    let mut payload = HashMap::new();
+    payload.insert(
+        "symbol_kind".to_string(),
+        serde_json::Value::String("function".to_string()),
+    );
+    payload.insert(
+        "signature".to_string(),
+        serde_json::Value::String("fn hello_world()".to_string()),
+    );
+    payload.insert(
+        "file_path".to_string(),
+        serde_json::Value::String("src/lib.rs".to_string()),
+    );
+    payload.insert("line_start".to_string(), serde_json::json!(10));
+    payload.insert("line_end".to_string(), serde_json::json!(20));
+    payload.insert(
+        "visibility".to_string(),
+        serde_json::Value::String("public".to_string()),
+    );
+
+    let node = GraphNode {
+        id: "sym:mymod::hello_world".to_string(),
+        kind: NodeKind::Function,
+        label: "mymod::hello_world".to_string(),
+        payload,
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+    };
+    server.engine.storage.insert_graph_node(&node).unwrap();
+
+    // Cache is None — search_symbols should fall through to DB
+    let results = server
+        .engine
+        .search_symbols("hello_world", 10, None)
+        .unwrap();
+    assert!(
+        !results.is_empty(),
+        "DB fallback should return results for hello_world"
+    );
+    assert_eq!(results[0].qualified_name, "mymod::hello_world");
+    assert_eq!(results[0].kind, "function");
+
+    // Verify cache was populated
+    let cache = server.engine.lock_index_cache().unwrap();
+    assert!(
+        cache.is_some(),
+        "Cache should be populated after DB fallback"
+    );
+    let syms = &cache.as_ref().unwrap().symbols;
+    assert!(
+        syms.iter()
+            .any(|s| s.qualified_name == "mymod::hello_world"),
+        "Cache should contain hello_world"
+    );
+}
+
+#[test]
+fn get_symbol_info_db_fallback() {
+    let server = test_server();
+
+    // Insert a sym:* node directly into storage
+    let mut payload = HashMap::new();
+    payload.insert(
+        "symbol_kind".to_string(),
+        serde_json::Value::String("struct".to_string()),
+    );
+    payload.insert(
+        "signature".to_string(),
+        serde_json::Value::String("pub struct Config".to_string()),
+    );
+    payload.insert(
+        "file_path".to_string(),
+        serde_json::Value::String("src/config.rs".to_string()),
+    );
+    payload.insert("line_start".to_string(), serde_json::json!(5));
+    payload.insert("line_end".to_string(), serde_json::json!(25));
+    payload.insert(
+        "visibility".to_string(),
+        serde_json::Value::String("public".to_string()),
+    );
+    payload.insert(
+        "doc_comment".to_string(),
+        serde_json::Value::String("Configuration struct".to_string()),
+    );
+
+    let node = GraphNode {
+        id: "sym:mymod::Config".to_string(),
+        kind: NodeKind::Class,
+        label: "mymod::Config".to_string(),
+        payload,
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+    };
+    server.engine.storage.insert_graph_node(&node).unwrap();
+
+    // Cache is None — get_symbol_info should fall through to DB
+    let params =
+        json!({"name": "get_symbol_info", "arguments": {"qualified_name": "mymod::Config"}});
+    let resp = server.handle_request("tools/call", Some(&params), json!(311));
+    let result = resp.result.unwrap();
+    assert_ne!(result["isError"], true, "Should not be an error");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    let parsed: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(parsed["qualified_name"], "mymod::Config");
+    assert_eq!(parsed["kind"], "struct");
+    assert_eq!(parsed["file_path"], "src/config.rs");
+    assert_eq!(parsed["line_start"], 5);
+    assert_eq!(parsed["doc_comment"], "Configuration struct");
+
+    // Verify cache was populated
+    let cache = server.engine.lock_index_cache().unwrap();
+    assert!(cache.is_some());
+    assert!(cache
+        .as_ref()
+        .unwrap()
+        .symbols
+        .iter()
+        .any(|s| s.qualified_name == "mymod::Config"),);
+}
+
+#[test]
+fn symbol_from_graph_node_roundtrip() {
+    use codemem_engine::index::symbol::symbol_from_graph_node;
+
+    let mut payload = HashMap::new();
+    payload.insert(
+        "symbol_kind".to_string(),
+        serde_json::Value::String("enum_variant".to_string()),
+    );
+    payload.insert(
+        "signature".to_string(),
+        serde_json::Value::String("Red".to_string()),
+    );
+    payload.insert(
+        "file_path".to_string(),
+        serde_json::Value::String("src/colors.rs".to_string()),
+    );
+    payload.insert("line_start".to_string(), serde_json::json!(3));
+    payload.insert("line_end".to_string(), serde_json::json!(3));
+    payload.insert(
+        "visibility".to_string(),
+        serde_json::Value::String("public".to_string()),
+    );
+    payload.insert("is_async".to_string(), serde_json::json!(false));
+
+    let node = GraphNode {
+        id: "sym:Color::Red".to_string(),
+        kind: NodeKind::Constant, // lossy mapping — EnumVariant -> Constant
+        label: "Color::Red".to_string(),
+        payload,
+        centrality: 0.5,
+        memory_id: None,
+        namespace: Some("test".to_string()),
+    };
+
+    let sym = symbol_from_graph_node(&node).expect("Should reconstruct symbol");
+    assert_eq!(sym.qualified_name, "Color::Red");
+    assert_eq!(sym.name, "Red");
+    // Lossless: symbol_kind payload should give us EnumVariant, not Constant
+    assert_eq!(sym.kind.to_string(), "enum_variant");
+    assert_eq!(sym.file_path, "src/colors.rs");
+    assert_eq!(sym.line_start, 3);
+    assert_eq!(sym.visibility.to_string(), "public");
+    assert!(!sym.is_async);
 }
 
 #[test]

@@ -185,6 +185,10 @@ impl super::CodememEngine {
 
             let mut payload = HashMap::new();
             payload.insert(
+                "symbol_kind".to_string(),
+                serde_json::Value::String(sym.kind.to_string()),
+            );
+            payload.insert(
                 "signature".to_string(),
                 serde_json::Value::String(sym.signature.clone()),
             );
@@ -239,6 +243,12 @@ impl super::CodememEngine {
             }
             if sym.is_abstract {
                 payload.insert("is_abstract".to_string(), serde_json::json!(true));
+            }
+            if let Some(ref parent) = sym.parent {
+                payload.insert(
+                    "parent".to_string(),
+                    serde_json::Value::String(parent.clone()),
+                );
             }
 
             let node = GraphNode {

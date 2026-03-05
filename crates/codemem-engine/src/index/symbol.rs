@@ -148,6 +148,196 @@ pub enum ReferenceKind {
     TypeUsage,
 }
 
+impl std::str::FromStr for SymbolKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "function" => Ok(SymbolKind::Function),
+            "method" => Ok(SymbolKind::Method),
+            "class" => Ok(SymbolKind::Class),
+            "struct" => Ok(SymbolKind::Struct),
+            "enum" => Ok(SymbolKind::Enum),
+            "interface" => Ok(SymbolKind::Interface),
+            "type" => Ok(SymbolKind::Type),
+            "constant" => Ok(SymbolKind::Constant),
+            "module" => Ok(SymbolKind::Module),
+            "test" => Ok(SymbolKind::Test),
+            "field" => Ok(SymbolKind::Field),
+            "property" => Ok(SymbolKind::Property),
+            "constructor" => Ok(SymbolKind::Constructor),
+            "enum_variant" => Ok(SymbolKind::EnumVariant),
+            "macro" => Ok(SymbolKind::Macro),
+            "decorator" => Ok(SymbolKind::Decorator),
+            _ => Err(format!("Unknown SymbolKind: {s}")),
+        }
+    }
+}
+
+/// Parse a `SymbolKind` from its `Display` string (e.g. `"function"`, `"enum_variant"`).
+pub fn symbol_kind_from_str(s: &str) -> Option<SymbolKind> {
+    s.parse().ok()
+}
+
+/// Parse a `Visibility` from its `Display` string.
+pub fn visibility_from_str(s: &str) -> Visibility {
+    match s {
+        "public" => Visibility::Public,
+        "crate" => Visibility::Crate,
+        "protected" => Visibility::Protected,
+        _ => Visibility::Private,
+    }
+}
+
+/// Lossy fallback: map a `NodeKind` back to a `SymbolKind`.
+/// Several `SymbolKind` variants collapse into the same `NodeKind`, so this
+/// mapping is not lossless (e.g. `NodeKind::Constant` could be Field/Property/
+/// EnumVariant/Constant). Prefer `symbol_kind_from_str` with the stored
+/// `"symbol_kind"` payload field for lossless round-trips.
+fn symbol_kind_from_node_kind(nk: &codemem_core::NodeKind) -> SymbolKind {
+    match nk {
+        codemem_core::NodeKind::Function => SymbolKind::Function,
+        codemem_core::NodeKind::Method => SymbolKind::Method,
+        codemem_core::NodeKind::Class => SymbolKind::Class,
+        codemem_core::NodeKind::Interface => SymbolKind::Interface,
+        codemem_core::NodeKind::Type => SymbolKind::Type,
+        codemem_core::NodeKind::Constant => SymbolKind::Constant,
+        codemem_core::NodeKind::Module => SymbolKind::Module,
+        codemem_core::NodeKind::Test => SymbolKind::Test,
+        _ => SymbolKind::Function, // safe fallback for non-symbol node kinds
+    }
+}
+
+/// Reconstruct a `Symbol` from a persisted `sym:*` `GraphNode`.
+///
+/// Returns `None` if the node ID doesn't start with `"sym:"` or required
+/// payload fields are missing.
+pub fn symbol_from_graph_node(node: &codemem_core::GraphNode) -> Option<Symbol> {
+    let qualified_name = node.id.strip_prefix("sym:")?.to_string();
+
+    // Lossless kind from payload, lossy fallback from NodeKind
+    let kind = node
+        .payload
+        .get("symbol_kind")
+        .and_then(|v| v.as_str())
+        .and_then(symbol_kind_from_str)
+        .unwrap_or_else(|| symbol_kind_from_node_kind(&node.kind));
+
+    let file_path = node
+        .payload
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let signature = node
+        .payload
+        .get("signature")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let visibility = node
+        .payload
+        .get("visibility")
+        .and_then(|v| v.as_str())
+        .map(visibility_from_str)
+        .unwrap_or(Visibility::Private);
+
+    let line_start = node
+        .payload
+        .get("line_start")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+
+    let line_end = node
+        .payload
+        .get("line_end")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+
+    let doc_comment = node
+        .payload
+        .get("doc_comment")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Derive simple name from qualified name (last segment after "::")
+    let name = qualified_name
+        .rsplit("::")
+        .next()
+        .unwrap_or(&qualified_name)
+        .to_string();
+
+    let parameters: Vec<Parameter> = node
+        .payload
+        .get("parameters")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    let return_type = node
+        .payload
+        .get("return_type")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let is_async = node
+        .payload
+        .get("is_async")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let attributes: Vec<String> = node
+        .payload
+        .get("attributes")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    let throws: Vec<String> = node
+        .payload
+        .get("throws")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    let generic_params = node
+        .payload
+        .get("generic_params")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let is_abstract = node
+        .payload
+        .get("is_abstract")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let parent = node
+        .payload
+        .get("parent")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Some(Symbol {
+        name,
+        qualified_name,
+        kind,
+        signature,
+        visibility,
+        file_path,
+        line_start,
+        line_end,
+        doc_comment,
+        parent,
+        parameters,
+        return_type,
+        is_async,
+        attributes,
+        throws,
+        generic_params,
+        is_abstract,
+    })
+}
+
 impl From<SymbolKind> for codemem_core::NodeKind {
     fn from(kind: SymbolKind) -> Self {
         match kind {

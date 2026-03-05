@@ -1,5 +1,6 @@
 //! Code search and summary tree domain logic.
 
+use crate::index::symbol::{symbol_from_graph_node, Symbol};
 use crate::CodememEngine;
 use codemem_core::{CodememError, GraphBackend, NodeKind, RelationshipType, VectorBackend};
 use serde::Serialize;
@@ -305,41 +306,85 @@ impl CodememEngine {
             .ok_or_else(|| CodememError::NotFound(format!("Node not found: {start_id}")))
     }
 
-    /// Search cached in-memory symbols by name, with optional kind filter.
+    /// Look up a single symbol by qualified name with cache-through to the DB.
+    ///
+    /// 1. Check the in-memory `IndexCache`.
+    /// 2. On miss, query storage for `sym:{qualified_name}` graph node.
+    /// 3. Reconstruct a `Symbol`, insert into cache, return.
+    pub fn get_symbol(&self, qualified_name: &str) -> Result<Option<Symbol>, CodememError> {
+        // 1. Check cache
+        {
+            let cache = self.lock_index_cache()?;
+            if let Some(ref c) = *cache {
+                if let Some(sym) = c
+                    .symbols
+                    .iter()
+                    .find(|s| s.qualified_name == qualified_name)
+                {
+                    return Ok(Some(sym.clone()));
+                }
+            }
+        }
+
+        // 2. Cache miss — query DB
+        let node_id = format!("sym:{qualified_name}");
+        let node = match self.storage.get_graph_node(&node_id)? {
+            Some(n) => n,
+            None => return Ok(None),
+        };
+
+        // 3. Reconstruct Symbol from GraphNode
+        let sym = match symbol_from_graph_node(&node) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        // 4. Insert into cache (init if None)
+        {
+            let mut cache = self.lock_index_cache()?;
+            if let Some(ref mut c) = *cache {
+                // Dedup: only insert if not already present
+                if !c.symbols.iter().any(|s| s.qualified_name == qualified_name) {
+                    c.symbols.push(sym.clone());
+                }
+            } else {
+                *cache = Some(crate::IndexCache {
+                    symbols: vec![sym.clone()],
+                    chunks: Vec::new(),
+                    root_path: String::new(),
+                });
+            }
+        }
+
+        Ok(Some(sym))
+    }
+
+    /// Search symbols by name, with optional kind filter. Falls through to the DB
+    /// when the in-memory cache is empty or has no matches.
     pub fn search_symbols(
         &self,
         query: &str,
         limit: usize,
         kind_filter: Option<&str>,
     ) -> Result<Vec<SymbolSearchResult>, CodememError> {
-        let cache = self.lock_index_cache()?;
-        let symbols = match cache.as_ref() {
-            Some(c) => &c.symbols,
-            None => {
-                return Err(CodememError::InvalidInput(
-                    "No codebase indexed yet. Run index_codebase first.".into(),
-                ));
-            }
-        };
-
         let query_lower = query.to_lowercase();
         let kind_lower = kind_filter.map(|k| k.to_lowercase());
 
-        let matches: Vec<SymbolSearchResult> = symbols
-            .iter()
-            .filter(|sym| {
-                let name_match = sym.name.to_lowercase().contains(&query_lower)
-                    || sym.qualified_name.to_lowercase().contains(&query_lower);
-                if !name_match {
-                    return false;
-                }
-                if let Some(ref kl) = kind_lower {
-                    return sym.kind.to_string().to_lowercase() == *kl;
-                }
-                true
-            })
-            .take(limit)
-            .map(|sym| SymbolSearchResult {
+        // Helper closure: filter + map a Symbol into a SymbolSearchResult
+        let matches_filter = |sym: &Symbol| -> bool {
+            let name_match = sym.name.to_lowercase().contains(&query_lower)
+                || sym.qualified_name.to_lowercase().contains(&query_lower);
+            if !name_match {
+                return false;
+            }
+            if let Some(ref kl) = kind_lower {
+                return sym.kind.to_string().to_lowercase() == *kl;
+            }
+            true
+        };
+
+        let to_result = |sym: &Symbol| -> SymbolSearchResult {
+            SymbolSearchResult {
                 name: sym.name.clone(),
                 qualified_name: sym.qualified_name.clone(),
                 kind: sym.kind.to_string(),
@@ -349,9 +394,74 @@ impl CodememEngine {
                 line_end: sym.line_end,
                 visibility: sym.visibility.to_string(),
                 parent: sym.parent.clone(),
-            })
-            .collect();
+            }
+        };
 
-        Ok(matches)
+        // 1. Try cache first — only short-circuit if we got enough results
+        let mut results = Vec::new();
+        let mut seen_qnames = std::collections::HashSet::new();
+        {
+            let cache = self.lock_index_cache()?;
+            if let Some(ref c) = *cache {
+                for sym in c.symbols.iter().filter(|s| matches_filter(s)) {
+                    if seen_qnames.insert(sym.qualified_name.clone()) {
+                        results.push(to_result(sym));
+                        if results.len() >= limit {
+                            return Ok(results);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Cache empty or partial results — top up from DB.
+        // Over-fetch by 3× because search_graph_nodes returns all node kinds
+        // (files, chunks, packages…) and we filter to sym:* nodes only.
+        // NOTE: namespace=None is intentional — the in-memory cache is already
+        // cross-namespace, so the DB fallback should match that behavior.
+        let db_nodes = self
+            .storage
+            .search_graph_nodes(&query_lower, None, limit * 3)?;
+
+        let mut new_symbols = Vec::new();
+
+        for node in &db_nodes {
+            if !node.id.starts_with("sym:") {
+                continue;
+            }
+            if let Some(sym) = symbol_from_graph_node(node) {
+                if matches_filter(&sym) && seen_qnames.insert(sym.qualified_name.clone()) {
+                    results.push(to_result(&sym));
+                    new_symbols.push(sym);
+                    if results.len() >= limit {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 3. Populate cache with DB results for future queries
+        if !new_symbols.is_empty() {
+            let mut cache = self.lock_index_cache()?;
+            if let Some(ref mut c) = *cache {
+                for sym in new_symbols {
+                    if !c
+                        .symbols
+                        .iter()
+                        .any(|s| s.qualified_name == sym.qualified_name)
+                    {
+                        c.symbols.push(sym);
+                    }
+                }
+            } else {
+                *cache = Some(crate::IndexCache {
+                    symbols: new_symbols,
+                    chunks: Vec::new(),
+                    root_path: String::new(),
+                });
+            }
+        }
+
+        Ok(results)
     }
 }

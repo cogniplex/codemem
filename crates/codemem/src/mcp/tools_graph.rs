@@ -389,6 +389,7 @@ impl McpServer {
     }
 
     /// Enhanced get_symbol_info with optional `include_dependencies`.
+    /// Uses `engine.get_symbol()` for cache-through DB fallback.
     pub(crate) fn tool_get_symbol_info(&self, args: &Value) -> ToolResult {
         let qualified_name = match args.get("qualified_name").and_then(|v| v.as_str()) {
             Some(qn) => qn,
@@ -399,20 +400,12 @@ impl McpServer {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let cache = match self.lock_index_cache() {
-            Ok(c) => c,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
-        let symbols = match cache.as_ref() {
-            Some(c) => &c.symbols,
-            None => {
-                return ToolResult::tool_error("No codebase indexed yet. Run index_codebase first.")
+        let sym = match self.engine.get_symbol(qualified_name) {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                return ToolResult::tool_error(format!("Symbol not found: {qualified_name}"))
             }
-        };
-
-        let sym = match symbols.iter().find(|s| s.qualified_name == qualified_name) {
-            Some(s) => s,
-            None => return ToolResult::tool_error(format!("Symbol not found: {qualified_name}")),
+            Err(e) => return ToolResult::tool_error(format!("{e}")),
         };
 
         let mut result = json!({
@@ -430,7 +423,6 @@ impl McpServer {
 
         // Optionally include dependencies from graph
         if include_deps {
-            drop(cache); // Release cache lock before graph lock
             let node_id = format!("sym:{qualified_name}");
             let graph = match self.lock_graph() {
                 Ok(g) => g,
