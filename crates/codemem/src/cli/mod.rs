@@ -1,5 +1,6 @@
 //! codemem-cli: CLI entry point for the Codemem memory engine.
 
+mod commands_analyze;
 mod commands_config;
 mod commands_consolidation;
 mod commands_data;
@@ -101,6 +102,21 @@ enum Commands {
         /// Show detailed symbol output
         #[arg(short, long)]
         verbose: bool,
+    },
+
+    /// Full analysis pipeline: index → enrich → PageRank → clusters
+    Analyze {
+        /// Path to analyze (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<PathBuf>,
+
+        /// Namespace scope for enrichment
+        #[arg(long)]
+        namespace: Option<String>,
+
+        /// Days of git history to analyze
+        #[arg(long, default_value = "90")]
+        days: u64,
     },
 
     /// Export memories to JSONL, JSON, CSV, or Markdown format
@@ -257,6 +273,17 @@ pub fn run() -> anyhow::Result<()> {
                 None => std::env::current_dir()?,
             };
             commands_export::cmd_index(&project_dir, verbose)?;
+        }
+        Commands::Analyze {
+            path,
+            namespace,
+            days,
+        } => {
+            let project_dir = match path {
+                Some(p) => p,
+                None => std::env::current_dir()?,
+            };
+            commands_analyze::cmd_analyze(&project_dir, namespace.as_deref(), days)?;
         }
         Commands::Export {
             namespace,

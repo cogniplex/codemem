@@ -68,6 +68,17 @@ impl super::CodememEngine {
         results: &IndexAndResolveResult,
         namespace: Option<&str>,
     ) -> Result<IndexPersistResult, CodememError> {
+        self.persist_index_results_with_progress(results, namespace, |_, _| {})
+    }
+
+    /// Like `persist_index_results`, but calls `on_progress(done, total)` during
+    /// the embedding phase so callers can display progress.
+    pub fn persist_index_results_with_progress(
+        &self,
+        results: &IndexAndResolveResult,
+        namespace: Option<&str>,
+        on_progress: impl Fn(usize, usize),
+    ) -> Result<IndexPersistResult, CodememError> {
         let all_symbols = &results.symbols;
         let all_chunks = &results.chunks;
         let seen_files = &results.file_paths;
@@ -424,50 +435,57 @@ impl super::CodememEngine {
                 })
                 .collect();
 
-            // Phase 2: Embed all texts (embedding provider lock only, no vector lock).
-            let all_texts: Vec<&str> = sym_texts
-                .iter()
-                .map(|(_, t)| t.as_str())
-                .chain(chunk_texts.iter().map(|(_, t)| t.as_str()))
-                .collect();
-            let all_embeddings = match emb.embed_batch(&all_texts) {
-                Ok(embeddings) => embeddings,
-                Err(e) => {
-                    tracing::warn!(
-                        "embed_batch failed for {} texts, symbols/chunks will be unembedded: {e}",
-                        all_texts.len()
-                    );
-                    vec![]
-                }
-            };
-            drop(emb);
+            // Phase 2+3: Embed in chunks and persist progressively.
+            // Instead of one giant embed_batch (which blocks with no progress for
+            // large codebases), we process in manageable chunks, persisting each
+            // batch and reporting progress.
+            //
+            // The vector lock is acquired per-batch (not held across all batches)
+            // so that remote embedding providers (Ollama/OpenAI) don't block
+            // vector reads for the entire duration.
+            const EMBED_CHUNK_SIZE: usize = 64;
 
-            // Phase 3: Insert into vector index + storage with a single lock acquisition.
-            let mut vec = self.lock_vector()?;
-            let sym_count = sym_texts.len();
-            for (i, (id, _)) in sym_texts.into_iter().enumerate() {
-                if let Some(embedding) = all_embeddings.get(i) {
-                    if let Err(e) = self.storage.store_embedding(&id, embedding) {
-                        tracing::warn!("Failed to store embedding for {id}: {e}");
+            // all_pairs is ordered: symbols first, then chunks (via chain).
+            // sym_count is used to attribute embedded items to the correct counter.
+            let all_pairs: Vec<(String, String)> =
+                sym_texts.into_iter().chain(chunk_texts).collect();
+            let total = all_pairs.len();
+            let sym_count = all_symbols.len();
+            let mut done = 0usize;
+
+            for chunk in all_pairs.chunks(EMBED_CHUNK_SIZE) {
+                let texts: Vec<&str> = chunk.iter().map(|(_, t)| t.as_str()).collect();
+                match emb.embed_batch(&texts) {
+                    Ok(embeddings) => {
+                        let mut vec = self.lock_vector()?;
+                        for ((id, _), embedding) in chunk.iter().zip(embeddings) {
+                            if let Err(e) = self.storage.store_embedding(id, &embedding) {
+                                tracing::warn!("Failed to store embedding for {id}: {e}");
+                            }
+                            if let Err(e) = vec.insert(id, &embedding) {
+                                tracing::warn!("Failed to insert {id} into vector index: {e}");
+                            }
+                            if done < sym_count {
+                                symbols_embedded += 1;
+                            } else {
+                                chunks_embedded += 1;
+                            }
+                            done += 1;
+                        }
                     }
-                    if let Err(e) = vec.insert(&id, embedding) {
-                        tracing::warn!("Failed to insert {id} into vector index: {e}");
+                    Err(e) => {
+                        tracing::warn!(
+                            "embed_batch failed for chunk of {} texts: {e}",
+                            chunk.len()
+                        );
+                        // Don't advance `done` — progress should reflect actual embeddings,
+                        // not failed batches. The total will no longer be reached, which
+                        // correctly signals incomplete embedding to the caller.
                     }
-                    symbols_embedded += 1;
                 }
+                on_progress(done, total);
             }
-            for (i, (id, _)) in chunk_texts.into_iter().enumerate() {
-                if let Some(embedding) = all_embeddings.get(sym_count + i) {
-                    if let Err(e) = self.storage.store_embedding(&id, embedding) {
-                        tracing::warn!("Failed to store embedding for {id}: {e}");
-                    }
-                    if let Err(e) = vec.insert(&id, embedding) {
-                        tracing::warn!("Failed to insert {id} into vector index: {e}");
-                    }
-                    chunks_embedded += 1;
-                }
-            }
-            drop(vec);
+            drop(emb);
             self.save_index();
         }
 
