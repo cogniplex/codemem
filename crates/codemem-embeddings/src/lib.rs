@@ -39,8 +39,8 @@ pub use codemem_core::EmbeddingProvider;
 // ── Candle Embedding Service ────────────────────────────────────────────────
 
 /// Maximum batch size for batched embedding forward passes.
-/// Kept small to limit peak GPU memory on Metal (768-dim × batch × layers).
-const BATCH_SIZE: usize = 8;
+/// bge-base-en-v1.5 at 768-dim: ~48 MB peak GPU memory per batch of 32.
+const BATCH_SIZE: usize = 32;
 
 /// Select the best available compute device.
 ///
@@ -272,13 +272,6 @@ impl EmbeddingService {
         drop(input_ids_tensor);
         drop(token_type_ids);
 
-        // Flush Metal command buffers to release GPU memory
-        if !matches!(self.device, Device::Cpu) {
-            self.device
-                .synchronize()
-                .map_err(|e| CodememError::Embedding(format!("Device sync error: {e}")))?;
-        }
-
         // Mean pooling weighted by attention mask
         // attention_mask: [1, seq_len] -> [1, seq_len, 1] for broadcasting
         let mask = attention_mask_tensor
@@ -465,7 +458,8 @@ impl EmbeddingService {
                 .broadcast_div(&norm)
                 .map_err(|e| CodememError::Embedding(format!("Normalize error: {e}")))?;
 
-            // Single GPU→CPU blit: flatten all rows, then slice on CPU
+            // Single GPU→CPU blit: flatten all rows, then slice on CPU.
+            // to_vec1() implicitly syncs the GPU pipeline (data must be ready to read).
             let flat: Vec<f32> = normalized
                 .flatten_all()
                 .and_then(|t| t.to_vec1())
@@ -473,13 +467,6 @@ impl EmbeddingService {
             for i in 0..batch_len {
                 let start = i * DIMENSIONS;
                 all_embeddings.push(flat[start..start + DIMENSIONS].to_vec());
-            }
-
-            // Flush Metal command buffers to release GPU memory between chunks
-            if !matches!(self.device, Device::Cpu) {
-                self.device
-                    .synchronize()
-                    .map_err(|e| CodememError::Embedding(format!("Device sync error: {e}")))?;
             }
         }
 
