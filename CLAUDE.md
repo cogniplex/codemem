@@ -32,7 +32,20 @@ cd ui && npx playwright test    # E2E tests
 
 ## Agent Definitions (`.claude/agents/`)
 
-- **code-mapper** — Agent definition (`.claude/agents/code-mapper.md`) + skill directory (`.claude/skills/code-mapper/`) with 8 supporting files. Uses team-based deep analysis with priority-driven agent assignments. The thin agent definition restricts tools to read-only + memory storage + team orchestration; the skill directory contains phase-by-phase workflow instructions, memory type reference, error handling, human input protocol, and incremental re-analysis guide.
+Multi-agent team for codebase analysis, installed by `codemem init`:
+
+| Agent | Role | Wave |
+|-------|------|------|
+| `code-mapper.md` | Team lead — orchestrates phases, spawns agents, consolidates | — |
+| `baseline-scanner.md` | File/package baseline summaries (150 chars each) | 1 |
+| `symbol-analyst.md` | Deep analysis of critical/important symbols | 2 |
+| `api-mapper.md` | API endpoint documentation | 2 |
+| `pattern-hunter.md` | Cross-file pattern discovery within Louvain clusters | 2 |
+| `architecture-reviewer.md` | Module boundaries, dependency patterns, layering | 3 |
+| `security-reviewer.md` | Auth, validation, trust boundaries | 3 |
+| `test-mapper.md` | Testing patterns, coverage, organization | 3 |
+
+The team lead has all 30 codemem tools + team orchestration. Specialized agents have a restricted subset (memory + graph tools, no Agent/TeamCreate/TaskCreate). Multiple instances of each role are spawned based on repo size (2-10 baseline scanners, 1-20 deep analysts, 0-3 cross-cutting reviewers).
 
 ## Key Design Decisions
 

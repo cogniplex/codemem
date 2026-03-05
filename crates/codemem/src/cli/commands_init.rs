@@ -256,86 +256,109 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         std::fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
     }
 
-    // ── Step 3b: Install code-mapper agent + skills ────────────────────────
+    // ── Step 3b: Install code-mapper agent team (8 agent definitions) ─────
     {
         let agents_dir = project_dir.join(".claude").join("agents");
         std::fs::create_dir_all(&agents_dir)?;
-        let agent_path = agents_dir.join("code-mapper.md");
 
-        if agent_path.exists() {
-            println!("[agents] code-mapper agent already installed, skipped");
-            status_lines.push("Agent: code-mapper already present".to_string());
-        } else {
-            // Agent definition
-            let agent_content =
-                include_str!("../../../../examples/agents/code-mapper/code-mapper.md");
-            std::fs::write(&agent_path, agent_content)?;
-            println!("[agents] Installed code-mapper agent → .claude/agents/code-mapper.md");
+        let agent_files: &[(&str, &str)] = &[
+            (
+                "code-mapper.md",
+                include_str!("../../../../examples/agents/code-mapper/code-mapper.md"),
+            ),
+            (
+                "baseline-scanner.md",
+                include_str!("../../../../examples/agents/code-mapper/baseline-scanner.md"),
+            ),
+            (
+                "symbol-analyst.md",
+                include_str!("../../../../examples/agents/code-mapper/symbol-analyst.md"),
+            ),
+            (
+                "api-mapper.md",
+                include_str!("../../../../examples/agents/code-mapper/api-mapper.md"),
+            ),
+            (
+                "pattern-hunter.md",
+                include_str!("../../../../examples/agents/code-mapper/pattern-hunter.md"),
+            ),
+            (
+                "architecture-reviewer.md",
+                include_str!("../../../../examples/agents/code-mapper/architecture-reviewer.md"),
+            ),
+            (
+                "security-reviewer.md",
+                include_str!("../../../../examples/agents/code-mapper/security-reviewer.md"),
+            ),
+            (
+                "test-mapper.md",
+                include_str!("../../../../examples/agents/code-mapper/test-mapper.md"),
+            ),
+        ];
 
-            // Skills directory
-            let skills_dir = project_dir
-                .join(".claude")
-                .join("skills")
-                .join("code-mapper");
-            std::fs::create_dir_all(&skills_dir)?;
-
-            let skill_files: &[(&str, &str)] = &[
-                (
-                    "SKILL.md",
-                    include_str!("../../../../examples/agents/code-mapper/skills/SKILL.md"),
-                ),
-                (
-                    "phase-1-foundation.md",
-                    include_str!(
-                        "../../../../examples/agents/code-mapper/skills/phase-1-foundation.md"
-                    ),
-                ),
-                (
-                    "phase-2-planning.md",
-                    include_str!(
-                        "../../../../examples/agents/code-mapper/skills/phase-2-planning.md"
-                    ),
-                ),
-                (
-                    "phase-3-execution.md",
-                    include_str!(
-                        "../../../../examples/agents/code-mapper/skills/phase-3-execution.md"
-                    ),
-                ),
-                (
-                    "phase-4-consolidation.md",
-                    include_str!(
-                        "../../../../examples/agents/code-mapper/skills/phase-4-consolidation.md"
-                    ),
-                ),
-                (
-                    "memory-types.md",
-                    include_str!("../../../../examples/agents/code-mapper/skills/memory-types.md"),
-                ),
-                (
-                    "error-handling.md",
-                    include_str!(
-                        "../../../../examples/agents/code-mapper/skills/error-handling.md"
-                    ),
-                ),
-                (
-                    "human-input.md",
-                    include_str!("../../../../examples/agents/code-mapper/skills/human-input.md"),
-                ),
-                (
-                    "incremental.md",
-                    include_str!("../../../../examples/agents/code-mapper/skills/incremental.md"),
-                ),
-            ];
-
-            for (name, content) in skill_files {
-                std::fs::write(skills_dir.join(name), content)?;
+        let mut installed = 0;
+        let mut skipped = 0;
+        for (name, content) in agent_files {
+            let agent_path = agents_dir.join(name);
+            if agent_path.exists() {
+                skipped += 1;
+            } else {
+                std::fs::write(&agent_path, content)?;
+                installed += 1;
             }
+        }
+
+        if installed > 0 {
             println!(
-                "[agents] Installed {} skill files → .claude/skills/code-mapper/",
-                skill_files.len()
+                "[agents] Installed {} agent definitions → .claude/agents/",
+                installed
             );
-            status_lines.push("Agent: code-mapper + skills installed".to_string());
+            status_lines.push(format!(
+                "Agents: {} code-mapper team agents installed",
+                installed
+            ));
+        }
+        if skipped > 0 {
+            println!("[agents] {} agent(s) already present, skipped", skipped);
+            if installed == 0 {
+                status_lines.push("Agents: all already present (no changes)".to_string());
+            }
+        }
+
+        // Legacy cleanup: remove old skills directory if it exists
+        let legacy_skills_dir = project_dir
+            .join(".claude")
+            .join("skills")
+            .join("code-mapper");
+        if legacy_skills_dir.is_dir() {
+            if let Err(e) = std::fs::remove_dir_all(&legacy_skills_dir) {
+                println!(
+                    "[agents] Warning: could not remove legacy skills dir: {}",
+                    e
+                );
+            } else {
+                println!("[agents] Removed legacy .claude/skills/code-mapper/ directory");
+            }
+        }
+    }
+
+    // ── Step 3c: Install codemem skill (tool quick-reference) ─────────────
+    {
+        let skill_dir = project_dir
+            .join(".claude")
+            .join("skills")
+            .join("codemem");
+        std::fs::create_dir_all(&skill_dir)?;
+        let skill_path = skill_dir.join("SKILL.md");
+
+        if skill_path.exists() {
+            println!("[skills] codemem skill already installed, skipped");
+        } else {
+            let skill_content =
+                include_str!("../../../../examples/skills/codemem/SKILL.md");
+            std::fs::write(&skill_path, skill_content)?;
+            println!("[skills] Installed codemem tool guide → .claude/skills/codemem/SKILL.md");
+            status_lines.push("Skill: /codemem tool reference installed".to_string());
         }
     }
 
