@@ -138,11 +138,10 @@ impl McpServer {
             Err(e) => return ToolResult::tool_error(format!("Indexing failed: {e}")),
         };
 
-        let persist_result =
-            match self
-                .engine
-                .persist_index_results(&resolved, Some(&namespace))
-            {
+        let persist_result = match self
+            .engine
+            .persist_index_results(&resolved, Some(&namespace))
+        {
             Ok(r) => r,
             Err(e) => return ToolResult::tool_error(format!("Persistence failed: {e}")),
         };
