@@ -1,6 +1,6 @@
 import type { BrowseNodeItem } from '../../api/types'
 import { KIND_COLORS } from './constants'
-import { trimLabel, trimNamespace } from '../../utils/paths'
+import { trimLabel } from '../../utils/paths'
 
 interface Props {
   node: BrowseNodeItem
@@ -37,13 +37,13 @@ export function BrowseNodeCard({ node, selected, onClick }: Props) {
 
           {/* Label */}
           <p className="mt-1 truncate text-sm font-medium text-zinc-200">
-            {trimLabel(node.label, node.namespace)}
+            {trimLabel(node.label)}
           </p>
 
           {/* Namespace */}
           {node.namespace && (
             <p className="mt-0.5 truncate text-xs text-zinc-500">
-              {trimNamespace(node.namespace)}
+              {node.namespace}
             </p>
           )}
         </div>

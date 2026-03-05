@@ -1,19 +1,12 @@
 /**
- * Trim absolute paths for display. Strips workspace prefix from labels
- * and shows just relative paths or directory names.
+ * Trim absolute paths for display. Shows just relative paths or
+ * the last few components of long paths.
  */
 
-/** Strip leading path prefix from a label, showing relative path */
-export function trimLabel(label: string, namespace?: string | null): string {
+/** Shorten a label for display. For absolute paths, show the last 2-3 components. */
+export function trimLabel(label: string): string {
   if (!label) return label
 
-  // If namespace is a path and label starts with it, strip the prefix
-  if (namespace && label.startsWith(namespace)) {
-    const stripped = label.slice(namespace.length).replace(/^\//, '')
-    if (stripped) return stripped
-  }
-
-  // For any absolute path, show just the last 2-3 components
   if (label.startsWith('/')) {
     const parts = label.split('/')
     if (parts.length > 3) {
@@ -22,14 +15,4 @@ export function trimLabel(label: string, namespace?: string | null): string {
   }
 
   return label
-}
-
-/** Show just the directory name for a namespace path */
-export function trimNamespace(ns: string): string {
-  if (!ns) return ns
-  if (ns.startsWith('/')) {
-    const parts = ns.split('/').filter(Boolean)
-    return parts[parts.length - 1] ?? ns
-  }
-  return ns
 }

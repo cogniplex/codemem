@@ -54,9 +54,6 @@ export function SigmaGraph({
     onLayoutRunning?.(running)
   }, [onLayoutRunning])
 
-  // Derive a common namespace prefix for path trimming
-  const namespacePrefix = nodes[0]?.namespace ?? null
-
   // Build graph when data changes — community coloring is handled
   // by the node reducer below, not here, to avoid expensive rebuilds.
   useEffect(() => {
@@ -65,7 +62,7 @@ export function SigmaGraph({
     // First pass: add nodes with placeholder size
     for (const node of nodes) {
       graph.addNode(node.id, {
-        label: trimLabel(node.label, namespacePrefix),
+        label: trimLabel(node.label),
         size: 3, // placeholder — resized after edges are added
         color: KIND_COLORS[node.kind] ?? '#71717a',
         kind: node.kind,
@@ -135,7 +132,7 @@ export function SigmaGraph({
     return () => {
       graph.clear()
     }
-  }, [nodes, edges, namespacePrefix])
+  }, [nodes, edges])
 
   // Init Sigma renderer — depends on graphInstance STATE, not a ref
   useEffect(() => {

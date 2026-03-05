@@ -1,7 +1,7 @@
 import { X, Expand, Network, Target } from 'lucide-react'
 import type { GraphNode, GraphEdge } from '../../api/types'
 import { KIND_COLORS } from './constants'
-import { trimLabel, trimNamespace } from '../../utils/paths'
+import { trimLabel } from '../../utils/paths'
 
 interface Props {
   node: GraphNode
@@ -36,7 +36,7 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
       <div className="space-y-3 p-4">
         <div>
           <p className="text-xs text-zinc-500">Label</p>
-          <p className="text-sm font-medium text-zinc-200 break-words">{trimLabel(node.label, node.namespace)}</p>
+          <p className="text-sm font-medium text-zinc-200 break-words">{trimLabel(node.label)}</p>
         </div>
 
         <div className="flex gap-4">
@@ -59,7 +59,7 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
         {node.namespace && (
           <div>
             <p className="text-xs text-zinc-500">Namespace</p>
-            <p className="truncate text-sm text-zinc-300">{trimNamespace(node.namespace)}</p>
+            <p className="truncate text-sm text-zinc-300">{node.namespace}</p>
           </div>
         )}
 
@@ -103,7 +103,7 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
                   <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400">
                     {edge.relationship}
                   </span>
-                  <span className="truncate text-zinc-300">{trimLabel(target?.label ?? targetId, node.namespace)}</span>
+                  <span className="truncate text-zinc-300">{trimLabel(target?.label ?? targetId)}</span>
                 </div>
               )
             })}

@@ -6,7 +6,7 @@ import { KindFilterChips } from './KindFilterChips'
 import { BrowseNodeCard } from './BrowseNodeCard'
 import { SigmaGraph } from './SigmaGraph'
 import { EDGE_COLORS } from './constants'
-import { trimLabel, trimNamespace } from '../../utils/paths'
+import { trimLabel } from '../../utils/paths'
 import type { BrowseNodeItem } from '../../api/types'
 
 const PAGE_SIZE = 30
@@ -158,10 +158,10 @@ function DetailPanel({
       if (!groups[rel]) groups[rel] = { rel, targets: [] }
       const targetId = edge.src === node.id ? edge.dst : edge.src
       const target = nodeMap.get(targetId)
-      groups[rel].targets.push(trimLabel(target?.label ?? targetId, node.namespace))
+      groups[rel].targets.push(trimLabel(target?.label ?? targetId))
     }
     return Object.values(groups).sort((a, b) => b.targets.length - a.targets.length)
-  }, [neighborData, node.id, node.namespace])
+  }, [neighborData, node.id])
 
   return (
     <div className="flex h-full flex-col">
@@ -191,12 +191,12 @@ function DetailPanel({
 
       {/* Node detail */}
       <div className="flex-1 overflow-y-auto p-4">
-        <h3 className="mb-1 text-lg font-semibold text-zinc-100 break-words">{trimLabel(node.label, node.namespace)}</h3>
+        <h3 className="mb-1 text-lg font-semibold text-zinc-100 break-words">{trimLabel(node.label)}</h3>
         <div className="mb-4 flex items-center gap-3 text-xs text-zinc-400">
           <span>{node.kind}</span>
           <span>{node.degree} connections</span>
           <span>{(node.centrality * 100).toFixed(1)}% centrality</span>
-          {node.namespace && <span>{trimNamespace(node.namespace)}</span>}
+          {node.namespace && <span>{node.namespace}</span>}
         </div>
 
         {/* Connections grouped by relationship */}
