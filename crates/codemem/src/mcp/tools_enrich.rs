@@ -51,7 +51,11 @@ impl McpServer {
         }
     }
 
-    /// Composite enrichment tool: runs git + security + performance enrichment in one call.
+    /// Composite enrichment tool: runs selected (or all) enrichment analyses in one call.
+    ///
+    /// The 14 supported analyses must match the `enum` in `tool_definitions()` (mcp/mod.rs):
+    /// git, security, performance, complexity, code_smells, security_scan, architecture,
+    /// test_mapping, api_surface, doc_coverage, hot_complex, blame, quality, change_impact.
     pub(crate) fn tool_enrich_codebase(&self, args: &Value) -> ToolResult {
         let path = match args.get("path").and_then(|v| v.as_str()) {
             Some(p) if !p.is_empty() => p,
@@ -180,6 +184,20 @@ impl McpServer {
             match self.engine.enrich_quality_stratification(namespace) {
                 Ok(r) => results["quality"] = r.details,
                 Err(e) => results["quality"] = json!({"error": format!("{e}")}),
+            }
+        }
+
+        if analyses.iter().any(|a| a == "change_impact") {
+            // change_impact requires a file_path, so it is not included in run_all
+            let file_path = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+            if file_path.is_empty() {
+                results["change_impact"] =
+                    json!({"error": "change_impact requires 'file_path' parameter"});
+            } else {
+                match self.engine.enrich_change_impact(file_path, namespace) {
+                    Ok(r) => results["change_impact"] = r.details,
+                    Err(e) => results["change_impact"] = json!({"error": format!("{e}")}),
+                }
             }
         }
 

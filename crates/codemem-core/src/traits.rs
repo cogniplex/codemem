@@ -72,11 +72,7 @@ pub trait GraphBackend: Send + Sync {
         max_depth: usize,
         exclude_kinds: &[NodeKind],
         include_relationships: Option<&[RelationshipType]>,
-    ) -> Result<Vec<GraphNode>, CodememError> {
-        // Default implementation falls back to unfiltered BFS
-        let _ = (exclude_kinds, include_relationships);
-        self.bfs(start_id, max_depth)
-    }
+    ) -> Result<Vec<GraphNode>, CodememError>;
 
     /// DFS traversal with filtering: exclude certain node kinds and optionally
     /// restrict to specific relationship types.
@@ -86,11 +82,7 @@ pub trait GraphBackend: Send + Sync {
         max_depth: usize,
         exclude_kinds: &[NodeKind],
         include_relationships: Option<&[RelationshipType]>,
-    ) -> Result<Vec<GraphNode>, CodememError> {
-        // Default implementation falls back to unfiltered DFS
-        let _ = (exclude_kinds, include_relationships);
-        self.dfs(start_id, max_depth)
-    }
+    ) -> Result<Vec<GraphNode>, CodememError>;
 
     /// Shortest path between two nodes.
     fn shortest_path(&self, from: &str, to: &str) -> Result<Vec<String>, CodememError>;

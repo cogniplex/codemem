@@ -22,10 +22,13 @@ pub enum MemoryType {
     /// Recurring code patterns observed across files.
     Pattern,
     /// Team/project preferences (e.g., "prefers explicit error types").
+    /// Not auto-generated; available for manual use via the MCP `store_memory` tool.
     Preference,
     /// Coding style norms (e.g., "early returns, max 20 lines").
+    /// Not auto-generated; available for manual use via the MCP `store_memory` tool.
     Style,
     /// Workflow habits (e.g., "tests written before implementation").
+    /// Not auto-generated; available for manual use via the MCP `store_memory` tool.
     Habit,
     /// Cross-domain insights discovered during consolidation.
     Insight,
@@ -295,28 +298,6 @@ pub struct GraphNode {
     pub namespace: Option<String>,
 }
 
-impl GraphNode {
-    /// Get the file path from the node's payload metadata.
-    pub fn file_path(&self) -> Option<&str> {
-        self.payload.get("file_path").and_then(|v| v.as_str())
-    }
-
-    /// Get the programming language from the node's payload metadata.
-    pub fn language(&self) -> Option<&str> {
-        self.payload.get("language").and_then(|v| v.as_str())
-    }
-
-    /// Get the visibility (pub/private/etc.) from the node's payload metadata.
-    pub fn visibility(&self) -> Option<&str> {
-        self.payload.get("visibility").and_then(|v| v.as_str())
-    }
-
-    /// Get the function/method signature from the node's payload metadata.
-    pub fn signature(&self) -> Option<&str> {
-        self.payload.get("signature").and_then(|v| v.as_str())
-    }
-}
-
 /// A search result with hybrid scoring.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -347,18 +328,6 @@ pub struct ScoreBreakdown {
 }
 
 impl ScoreBreakdown {
-    /// Compute the weighted total score using default weights.
-    pub fn total(&self) -> f64 {
-        self.vector_similarity * 0.25
-            + self.graph_strength * 0.20
-            + self.token_overlap * 0.15
-            + self.temporal * 0.10
-            + self.tag_matching * 0.05
-            + self.importance * 0.10
-            + self.confidence * 0.10
-            + self.recency * 0.05
-    }
-
     /// Compute the weighted total score using configurable weights.
     pub fn total_with_weights(&self, weights: &ScoringWeights) -> f64 {
         self.vector_similarity * weights.vector_similarity
@@ -400,33 +369,6 @@ impl Default for ScoringWeights {
             importance: 0.10,
             confidence: 0.10,
             recency: 0.05,
-        }
-    }
-}
-
-impl ScoringWeights {
-    /// Normalize weights so they sum to 1.0.
-    pub fn normalized(&self) -> Self {
-        let sum = self.vector_similarity
-            + self.graph_strength
-            + self.token_overlap
-            + self.temporal
-            + self.tag_matching
-            + self.importance
-            + self.confidence
-            + self.recency;
-        if sum == 0.0 {
-            return Self::default();
-        }
-        Self {
-            vector_similarity: self.vector_similarity / sum,
-            graph_strength: self.graph_strength / sum,
-            token_overlap: self.token_overlap / sum,
-            temporal: self.temporal / sum,
-            tag_matching: self.tag_matching / sum,
-            importance: self.importance / sum,
-            confidence: self.confidence / sum,
-            recency: self.recency / sum,
         }
     }
 }
@@ -516,8 +458,6 @@ pub enum PatternType {
     RepeatedSearch,
     /// A file that is read or edited frequently across sessions.
     FileHotspot,
-    /// A sequence of file explorations forming a navigation path.
-    ExplorationPath,
     /// Multiple edits/writes to the same file over time, forming a decision chain.
     DecisionChain,
     /// Disproportionate usage of certain tools over others.
@@ -529,7 +469,6 @@ impl std::fmt::Display for PatternType {
         match self {
             Self::RepeatedSearch => write!(f, "repeated_search"),
             Self::FileHotspot => write!(f, "file_hotspot"),
-            Self::ExplorationPath => write!(f, "exploration_path"),
             Self::DecisionChain => write!(f, "decision_chain"),
             Self::ToolPreference => write!(f, "tool_preference"),
         }
@@ -554,9 +493,7 @@ pub struct Session {
 /// A registered repository tracked by the control plane.
 ///
 /// The `created_at` and `last_indexed_at` fields are stored as RFC 3339
-/// strings for SQLite compatibility. Use [`Repository::created_at_parsed`]
-/// and [`Repository::last_indexed_at_parsed`] to obtain typed
-/// `DateTime<Utc>` values.
+/// strings for SQLite compatibility.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repository {
     pub id: String,
@@ -566,24 +503,6 @@ pub struct Repository {
     pub created_at: String,
     pub last_indexed_at: Option<String>,
     pub status: String,
-}
-
-impl Repository {
-    /// Parse `created_at` into a typed `DateTime<Utc>`.
-    pub fn created_at_parsed(&self) -> Option<DateTime<Utc>> {
-        chrono::DateTime::parse_from_rfc3339(&self.created_at)
-            .map(|dt| dt.with_timezone(&Utc))
-            .ok()
-    }
-
-    /// Parse `last_indexed_at` into a typed `DateTime<Utc>`.
-    pub fn last_indexed_at_parsed(&self) -> Option<DateTime<Utc>> {
-        self.last_indexed_at.as_deref().and_then(|s| {
-            chrono::DateTime::parse_from_rfc3339(s)
-                .map(|dt| dt.with_timezone(&Utc))
-                .ok()
-        })
-    }
 }
 
 // ── Session Activity ─────────────────────────────────────────────────
@@ -614,6 +533,29 @@ pub struct NodeCoverageEntry {
     pub memory_count: usize,
     pub has_coverage: bool,
 }
+
+// ── Enrichment Analyses ─────────────────────────────────────────────
+
+/// The 14 enrichment analysis types supported by `enrich_codebase`.
+///
+/// Keep in sync with the MCP tool schema (`mcp/mod.rs` `enrich_codebase` inputSchema)
+/// and the dispatch logic in `mcp/tools_enrich.rs`.
+pub const ENRICHMENT_ANALYSES: &[&str] = &[
+    "git",
+    "security",
+    "performance",
+    "complexity",
+    "code_smells",
+    "security_scan",
+    "architecture",
+    "test_mapping",
+    "api_surface",
+    "doc_coverage",
+    "hot_complex",
+    "blame",
+    "quality",
+    "change_impact",
+];
 
 #[cfg(test)]
 #[path = "tests/types_tests.rs"]

@@ -44,11 +44,7 @@ fn get_recipes() -> Vec<RecipeListResponse> {
                     description: "Detect cross-session patterns".into(),
                 },
                 RecipeStep {
-                    tool: "pattern_insights".into(),
-                    description: "Generate pattern insights summary".into(),
-                },
-                RecipeStep {
-                    tool: "get_clusters".into(),
+                    tool: "find_related_groups".into(),
                     description: "Find semantic clusters in the graph".into(),
                 },
             ],
@@ -63,7 +59,7 @@ fn get_recipes() -> Vec<RecipeListResponse> {
                     description: "Scan and index all source files".into(),
                 },
                 RecipeStep {
-                    tool: "codemem_stats".into(),
+                    tool: "codemem_status".into(),
                     description: "Show memory and graph statistics".into(),
                 },
             ],
@@ -74,11 +70,11 @@ fn get_recipes() -> Vec<RecipeListResponse> {
             description: "Analyze graph structure: PageRank, clusters, and impact".into(),
             steps: vec![
                 RecipeStep {
-                    tool: "get_pagerank".into(),
+                    tool: "find_important_nodes".into(),
                     description: "Compute PageRank scores for all nodes".into(),
                 },
                 RecipeStep {
-                    tool: "get_clusters".into(),
+                    tool: "find_related_groups".into(),
                     description: "Find semantic clusters".into(),
                 },
                 RecipeStep {
@@ -93,19 +89,19 @@ fn get_recipes() -> Vec<RecipeListResponse> {
             description: "Run all consolidation cycles: decay, creative, cluster, summarize".into(),
             steps: vec![
                 RecipeStep {
-                    tool: "consolidate_decay".into(),
+                    tool: "consolidate:decay".into(),
                     description: "Apply importance decay to old memories".into(),
                 },
                 RecipeStep {
-                    tool: "consolidate_creative".into(),
+                    tool: "consolidate:creative".into(),
                     description: "Find creative connections between memories".into(),
                 },
                 RecipeStep {
-                    tool: "consolidate_cluster".into(),
+                    tool: "consolidate:cluster".into(),
                     description: "Cluster similar memories".into(),
                 },
                 RecipeStep {
-                    tool: "consolidate_summarize".into(),
+                    tool: "consolidate:summarize".into(),
                     description: "Summarize memory clusters".into(),
                 },
             ],
@@ -171,7 +167,12 @@ pub async fn run_recipe(
             // like index_codebase — running it on the async executor would block
             // SSE event flushing, causing the client to hang.
             let server = Arc::clone(&state.server);
-            let tool_name = step.tool.clone();
+            // Resolve tool:variant pattern (e.g. "consolidate:decay" -> "consolidate")
+            let tool_name = if step.tool.contains(':') {
+                step.tool.split(':').next().unwrap_or(&step.tool).to_string()
+            } else {
+                step.tool.clone()
+            };
             let (success, result_text) = match tokio::task::spawn_blocking(move || {
                 let request_params = json!({
                     "name": tool_name,
@@ -225,6 +226,12 @@ fn build_tool_params(
     namespace: Option<&str>,
     state: &AppState,
 ) -> serde_json::Value {
+    // Handle "consolidate:mode" pattern (e.g. "consolidate:decay") — must check
+    // before the match so the tool:variant is resolved to a `mode` param.
+    if let Some(mode) = tool.strip_prefix("consolidate:") {
+        return json!({ "mode": mode });
+    }
+
     match tool {
         "index_codebase" => {
             let mut params = json!({});
@@ -290,26 +297,21 @@ fn build_tool_params(
             }
             params
         }
-        "detect_patterns" | "pattern_insights" => {
+        "detect_patterns" => {
             let mut params = json!({});
             if let Some(ns) = namespace {
                 params["namespace"] = json!(ns);
             }
             params
         }
-        "get_clusters" => {
-            // Louvain doesn't support namespace filtering — only pass resolution
+        "find_related_groups" => {
             json!({ "resolution": 1.0 })
         }
-        "get_pagerank" => {
-            // Correct param name is `top_k`, not `top`
+        "find_important_nodes" => {
             json!({ "top_k": 20 })
         }
-        "codemem_stats" => json!({}),
-        "consolidate_decay"
-        | "consolidate_creative"
-        | "consolidate_cluster"
-        | "consolidate_summarize" => json!({}),
+        "codemem_status" => json!({}),
+        "consolidate" => json!({}),
         _ => json!({}),
     }
 }

@@ -495,7 +495,8 @@ pub(crate) fn batch_embed_existing(db_path: &std::path::Path) {
         }
     };
 
-    let emb_service = match codemem_embeddings::from_env() {
+    let config = codemem_core::CodememConfig::load_or_default();
+    let emb_service = match codemem_embeddings::from_env(Some(&config.embedding)) {
         Ok(s) => s,
         Err(_) => {
             // Embedding provider not available, skip batch embedding

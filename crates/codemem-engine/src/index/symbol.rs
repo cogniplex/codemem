@@ -73,11 +73,7 @@ pub enum SymbolKind {
     Module,
     Test,
     Field,       // struct/class field
-    Property,    // getter/setter property
     Constructor, // __init__, constructor, new
-    EnumVariant, // individual enum variant/member
-    Macro,       // macro_rules!, C preprocessor macro
-    Decorator,   // Python decorator, Java annotation definition
 }
 
 impl std::fmt::Display for SymbolKind {
@@ -94,11 +90,7 @@ impl std::fmt::Display for SymbolKind {
             Self::Module => write!(f, "module"),
             Self::Test => write!(f, "test"),
             Self::Field => write!(f, "field"),
-            Self::Property => write!(f, "property"),
             Self::Constructor => write!(f, "constructor"),
-            Self::EnumVariant => write!(f, "enum_variant"),
-            Self::Macro => write!(f, "macro"),
-            Self::Decorator => write!(f, "decorator"),
         }
     }
 }
@@ -164,11 +156,7 @@ impl std::str::FromStr for SymbolKind {
             "module" => Ok(SymbolKind::Module),
             "test" => Ok(SymbolKind::Test),
             "field" => Ok(SymbolKind::Field),
-            "property" => Ok(SymbolKind::Property),
             "constructor" => Ok(SymbolKind::Constructor),
-            "enum_variant" => Ok(SymbolKind::EnumVariant),
-            "macro" => Ok(SymbolKind::Macro),
-            "decorator" => Ok(SymbolKind::Decorator),
             _ => Err(format!("Unknown SymbolKind: {s}")),
         }
     }
@@ -191,8 +179,8 @@ pub fn visibility_from_str(s: &str) -> Visibility {
 
 /// Lossy fallback: map a `NodeKind` back to a `SymbolKind`.
 /// Several `SymbolKind` variants collapse into the same `NodeKind`, so this
-/// mapping is not lossless (e.g. `NodeKind::Constant` could be Field/Property/
-/// EnumVariant/Constant). Prefer `symbol_kind_from_str` with the stored
+/// mapping is not lossless (e.g. `NodeKind::Constant` could be Field/Constant).
+/// Prefer `symbol_kind_from_str` with the stored
 /// `"symbol_kind"` payload field for lossless round-trips.
 fn symbol_kind_from_node_kind(nk: &codemem_core::NodeKind) -> SymbolKind {
     match nk {
@@ -352,11 +340,7 @@ impl From<SymbolKind> for codemem_core::NodeKind {
             SymbolKind::Module => codemem_core::NodeKind::Module,
             SymbolKind::Test => codemem_core::NodeKind::Test,
             SymbolKind::Field => codemem_core::NodeKind::Constant,
-            SymbolKind::Property => codemem_core::NodeKind::Constant,
             SymbolKind::Constructor => codemem_core::NodeKind::Method,
-            SymbolKind::EnumVariant => codemem_core::NodeKind::Constant,
-            SymbolKind::Macro => codemem_core::NodeKind::Function,
-            SymbolKind::Decorator => codemem_core::NodeKind::Function,
         }
     }
 }

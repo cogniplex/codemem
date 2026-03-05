@@ -350,23 +350,6 @@ pub struct ScoringWeightsUpdate {
     pub recency: Option<f64>,
 }
 
-// ── SSE Events ──────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize)]
-pub struct WatchEventResponse {
-    pub path: String,
-    pub event_type: String,
-    pub timestamp: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct IndexingEventResponse {
-    pub files_scanned: usize,
-    pub files_parsed: usize,
-    pub total_symbols: usize,
-    pub current_file: String,
-}
-
 // ── Metrics ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]

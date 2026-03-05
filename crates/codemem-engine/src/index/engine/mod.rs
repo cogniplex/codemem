@@ -48,22 +48,9 @@ impl AstGrepEngine {
         self.extension_index.get(ext).map(|&idx| &LOADED_RULES[idx])
     }
 
-    /// List all file extensions we can handle.
-    pub fn supported_extensions(&self) -> Vec<&str> {
-        LOADED_RULES
-            .iter()
-            .flat_map(|lr| lr.extensions.iter().copied())
-            .collect()
-    }
-
     /// Check if a given extension is supported.
     pub fn supports_extension(&self, ext: &str) -> bool {
         self.extension_index.contains_key(ext)
-    }
-
-    /// Get the language name for a given extension.
-    pub fn language_name(&self, ext: &str) -> Option<&str> {
-        self.find_language(ext).map(|lr| lr.name)
     }
 
     pub fn extract_symbols(
@@ -692,11 +679,7 @@ fn parse_symbol_kind(s: &str) -> Option<SymbolKind> {
         "module" => Some(SymbolKind::Module),
         "test" => Some(SymbolKind::Test),
         "field" => Some(SymbolKind::Field),
-        "property" => Some(SymbolKind::Property),
         "constructor" => Some(SymbolKind::Constructor),
-        "enum_variant" => Some(SymbolKind::EnumVariant),
-        "macro" => Some(SymbolKind::Macro),
-        "decorator" => Some(SymbolKind::Decorator),
         _ => None,
     }
 }

@@ -44,7 +44,7 @@ const WATCHABLE_EXTENSIONS: &[&str] = &[
 ];
 
 /// Check if a file extension is watchable.
-pub fn is_watchable(path: &Path) -> bool {
+pub(crate) fn is_watchable(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| WATCHABLE_EXTENSIONS.contains(&ext))
@@ -59,7 +59,7 @@ pub fn is_watchable(path: &Path) -> bool {
 ///
 /// `is_dir` indicates whether the path is a directory. Pass `false` for file
 /// events from the watcher to avoid a redundant `stat` syscall per event.
-pub fn should_ignore(path: &Path, gitignore: Option<&Gitignore>, is_dir: bool) -> bool {
+pub(crate) fn should_ignore(path: &Path, gitignore: Option<&Gitignore>, is_dir: bool) -> bool {
     if let Some(gi) = gitignore {
         // Check the file itself
         if gi.matched(path, is_dir).is_ignore() {
@@ -94,7 +94,7 @@ pub fn should_ignore(path: &Path, gitignore: Option<&Gitignore>, is_dir: bool) -
 ///
 /// Reads `.gitignore` if present, and also adds the hardcoded `IGNORE_DIRS`
 /// as fallback patterns.
-pub fn build_gitignore(root: &Path) -> Option<Gitignore> {
+pub(crate) fn build_gitignore(root: &Path) -> Option<Gitignore> {
     let mut builder = GitignoreBuilder::new(root);
     // Add .gitignore if it exists
     if let Some(err) = builder.add(root.join(".gitignore")) {

@@ -362,15 +362,6 @@ impl Storage {
 
         Ok(edges)
     }
-
-    /// Delete a graph edge by ID.
-    pub fn delete_graph_edge(&self, id: &str) -> Result<bool, CodememError> {
-        let conn = self.conn()?;
-        let rows = conn
-            .execute("DELETE FROM graph_edges WHERE id = ?1", params![id])
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
-        Ok(rows > 0)
-    }
 }
 
 #[cfg(test)]

@@ -138,7 +138,7 @@ fn from_env_unknown_provider() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     // Set env var to trigger the error path
     unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "nonexistent_provider_xyz") };
-    let result = from_env();
+    let result = from_env(None);
     unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
 
     match result {
@@ -185,7 +185,7 @@ fn constants_are_sensible() {
 fn from_env_ollama_provider() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "ollama") };
-    let result = from_env();
+    let result = from_env(None);
     unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
 
     let provider = result.expect("from_env should succeed for ollama");
@@ -197,7 +197,7 @@ fn from_env_openai_provider() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "openai") };
     unsafe { std::env::set_var("OPENAI_API_KEY", "test-key-123") };
-    let result = from_env();
+    let result = from_env(None);
     unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
     unsafe { std::env::remove_var("OPENAI_API_KEY") };
 

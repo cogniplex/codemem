@@ -7,7 +7,6 @@ pub mod diff;
 
 use codemem_core::{CodememError, GraphNode, MemoryType, NodeKind, RelationshipType};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 /// Maximum file size to process (100KB).
@@ -169,11 +168,7 @@ pub fn materialize_edges(pending: &[PendingEdge], memory_id: &str) -> Vec<codeme
 }
 
 /// Content hash for deduplication.
-pub fn content_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
+pub use codemem_core::content_hash;
 
 /// Relativize an absolute file path against the hook's cwd.
 /// Returns the relative path if cwd is set and the path starts with it,

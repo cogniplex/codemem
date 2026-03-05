@@ -281,6 +281,7 @@ impl Indexer {
 
         let mut resolver = ReferenceResolver::new();
         resolver.add_symbols(&all_symbols);
+        resolver.add_imports(&all_references);
         let edges = resolver.resolve_all(&all_references);
 
         // Canonicalize the root so downstream code can reconstruct absolute paths.

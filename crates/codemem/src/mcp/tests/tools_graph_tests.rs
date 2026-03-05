@@ -334,15 +334,15 @@ fn symbol_from_graph_node_roundtrip() {
     let mut payload = HashMap::new();
     payload.insert(
         "symbol_kind".to_string(),
-        serde_json::Value::String("enum_variant".to_string()),
+        serde_json::Value::String("field".to_string()),
     );
     payload.insert(
         "signature".to_string(),
-        serde_json::Value::String("Red".to_string()),
+        serde_json::Value::String("count: usize".to_string()),
     );
     payload.insert(
         "file_path".to_string(),
-        serde_json::Value::String("src/colors.rs".to_string()),
+        serde_json::Value::String("src/counter.rs".to_string()),
     );
     payload.insert("line_start".to_string(), serde_json::json!(3));
     payload.insert("line_end".to_string(), serde_json::json!(3));
@@ -353,9 +353,9 @@ fn symbol_from_graph_node_roundtrip() {
     payload.insert("is_async".to_string(), serde_json::json!(false));
 
     let node = GraphNode {
-        id: "sym:Color::Red".to_string(),
-        kind: NodeKind::Constant, // lossy mapping — EnumVariant -> Constant
-        label: "Color::Red".to_string(),
+        id: "sym:Counter::count".to_string(),
+        kind: NodeKind::Constant, // lossy mapping — Field -> Constant
+        label: "Counter::count".to_string(),
         payload,
         centrality: 0.5,
         memory_id: None,
@@ -363,11 +363,11 @@ fn symbol_from_graph_node_roundtrip() {
     };
 
     let sym = symbol_from_graph_node(&node).expect("Should reconstruct symbol");
-    assert_eq!(sym.qualified_name, "Color::Red");
-    assert_eq!(sym.name, "Red");
-    // Lossless: symbol_kind payload should give us EnumVariant, not Constant
-    assert_eq!(sym.kind.to_string(), "enum_variant");
-    assert_eq!(sym.file_path, "src/colors.rs");
+    assert_eq!(sym.qualified_name, "Counter::count");
+    assert_eq!(sym.name, "count");
+    // Lossless: symbol_kind payload should give us Field, not Constant
+    assert_eq!(sym.kind.to_string(), "field");
+    assert_eq!(sym.file_path, "src/counter.rs");
     assert_eq!(sym.line_start, 3);
     assert_eq!(sym.visibility.to_string(), "public");
     assert!(!sym.is_async);

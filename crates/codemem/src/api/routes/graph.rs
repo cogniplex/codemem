@@ -136,7 +136,26 @@ pub async fn get_communities(
         .lock()
         .unwrap_or_else(|e| e.into_inner());
 
-    let assignment = graph.louvain_with_assignment(resolution);
+    let mut assignment = graph.louvain_with_assignment(resolution);
+
+    // Filter by namespace if provided
+    if let Some(ref ns) = query.namespace {
+        let ns_node_ids: std::collections::HashSet<String> = assignment
+            .keys()
+            .filter(|id| {
+                graph
+                    .get_node(id)
+                    .ok()
+                    .flatten()
+                    .and_then(|n| n.namespace)
+                    .as_deref()
+                    == Some(ns.as_str())
+            })
+            .cloned()
+            .collect();
+        assignment.retain(|id, _| ns_node_ids.contains(id));
+    }
+
     let num_communities = assignment
         .values()
         .collect::<std::collections::HashSet<_>>()
@@ -163,6 +182,19 @@ pub async fn get_pagerank(
 
     let mut entries: Vec<PagerankEntry> = scores
         .into_iter()
+        .filter(|(id, _)| {
+            if let Some(ref ns) = query.namespace {
+                graph
+                    .get_node(id)
+                    .ok()
+                    .flatten()
+                    .and_then(|n| n.namespace)
+                    .as_deref()
+                    == Some(ns.as_str())
+            } else {
+                true
+            }
+        })
         .map(|(id, score)| {
             let label = graph
                 .get_node(&id)
@@ -239,6 +271,31 @@ pub async fn get_impact(
 
     let reachable = graph.bfs(&id, 3).map_err(|_| StatusCode::NOT_FOUND)?;
 
+    let node_ids: std::collections::HashSet<&str> =
+        reachable.iter().map(|n| n.id.as_str()).collect();
+
+    // Collect edges between reachable nodes
+    let mut edges = Vec::new();
+    let mut seen_edges = std::collections::HashSet::new();
+    for node in &reachable {
+        if let Ok(node_edges) = graph.get_edges(&node.id) {
+            for edge in node_edges {
+                if node_ids.contains(edge.src.as_str())
+                    && node_ids.contains(edge.dst.as_str())
+                    && seen_edges.insert(edge.id.clone())
+                {
+                    edges.push(GraphEdgeResponse {
+                        id: edge.id,
+                        src: edge.src,
+                        dst: edge.dst,
+                        relationship: edge.relationship.to_string(),
+                        weight: edge.weight,
+                    });
+                }
+            }
+        }
+    }
+
     let nodes: Vec<GraphNodeResponse> = reachable
         .into_iter()
         .map(|n| GraphNodeResponse {
@@ -251,10 +308,7 @@ pub async fn get_impact(
         })
         .collect();
 
-    Ok(Json(SubgraphResponse {
-        nodes,
-        edges: Vec::new(),
-    }))
+    Ok(Json(SubgraphResponse { nodes, edges }))
 }
 
 pub async fn get_graph_browse(

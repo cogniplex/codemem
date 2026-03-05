@@ -27,10 +27,7 @@ struct McpHttpState {
     sessions: Mutex<HashMap<String, SessionMeta>>,
 }
 
-struct SessionMeta {
-    #[allow(dead_code)]
-    created_at: std::time::Instant,
-}
+struct SessionMeta;
 
 /// Returns an Axum router handling `/mcp` (POST, GET, DELETE)
 /// per MCP Streamable HTTP spec (2025-03-26).
@@ -138,12 +135,7 @@ async fn handle_post(
         let session_id = uuid::Uuid::new_v4().to_string();
         {
             let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
-            sessions.insert(
-                session_id.clone(),
-                SessionMeta {
-                    created_at: std::time::Instant::now(),
-                },
-            );
+            sessions.insert(session_id.clone(), SessionMeta);
         }
         resp.headers_mut().insert(
             "mcp-session-id",
@@ -155,13 +147,12 @@ async fn handle_post(
 }
 
 /// GET /mcp — Client opens SSE listener for server-initiated messages.
-/// Currently returns an empty SSE stream (server-initiated messages not yet implemented).
+/// Not implemented -- SSE server notifications are not supported in this version.
 async fn handle_get(State(_state): State<Arc<McpHttpState>>, headers: HeaderMap) -> Response {
     // Validate session
     let _session_id = headers.get("mcp-session-id").and_then(|v| v.to_str().ok());
 
-    // Return a minimal SSE stream that stays open
-    // Server-initiated messages (like notifications) will be added in a future iteration
+    // Not implemented -- SSE server notifications are not supported in this version
     let body = Body::from(": MCP SSE stream\n\n");
     Response::builder()
         .status(StatusCode::OK)

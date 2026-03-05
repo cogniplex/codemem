@@ -39,14 +39,6 @@ impl CodeParser {
         }
     }
 
-    /// Create a new CodeParser with a custom chunk configuration.
-    pub fn with_chunk_config(chunk_config: ChunkConfig) -> Self {
-        Self {
-            engine: AstGrepEngine::new(),
-            chunk_config,
-        }
-    }
-
     /// Parse a single file and extract symbols, references, and chunks.
     ///
     /// Returns `None` if the file extension is not supported or parsing fails.
@@ -84,46 +76,9 @@ impl CodeParser {
         })
     }
 
-    /// Returns the list of all supported file extensions.
-    pub fn supported_extensions(&self) -> Vec<&str> {
-        self.engine.supported_extensions()
-    }
-
     /// Check if a given file extension is supported.
     pub fn supports_extension(&self, ext: &str) -> bool {
         self.engine.supports_extension(ext)
-    }
-}
-
-impl ParseResult {
-    /// C5: Generate (id, text) pairs suitable for adding to a BM25 index.
-    ///
-    /// For symbols: uses `qualified_name + signature + doc_comment` as document text.
-    /// For chunks: uses the chunk text content.
-    ///
-    /// IDs are prefixed with `sym:` and `chunk:` respectively.
-    pub fn bm25_documents(&self) -> Vec<(String, String)> {
-        let mut docs = Vec::with_capacity(self.symbols.len() + self.chunks.len());
-
-        for sym in &self.symbols {
-            let mut text = sym.qualified_name.clone();
-            if !sym.signature.is_empty() {
-                text.push(' ');
-                text.push_str(&sym.signature);
-            }
-            if let Some(ref doc) = sym.doc_comment {
-                text.push(' ');
-                text.push_str(doc);
-            }
-            docs.push((format!("sym:{}", sym.qualified_name), text));
-        }
-
-        for chunk in &self.chunks {
-            let id = format!("chunk:{}:{}", chunk.file_path, chunk.index);
-            docs.push((id, chunk.text.clone()));
-        }
-
-        docs
     }
 }
 

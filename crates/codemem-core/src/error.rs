@@ -12,14 +12,8 @@ pub enum CodememError {
     #[error("Vector error: {0}")]
     Vector(String),
 
-    #[error("Graph error: {0}")]
-    Graph(String),
-
     #[error("Embedding error: {0}")]
     Embedding(String),
-
-    #[error("MCP error: {0}")]
-    Mcp(String),
 
     #[error("Hook error: {0}")]
     Hook(String),

@@ -44,13 +44,6 @@ impl ChangeDetector {
         storage.save_file_hashes(&self.known_hashes)
     }
 
-    /// Check if a file has changed since the last index.
-    /// Returns `true` if the file is new or its content hash differs.
-    pub fn is_changed(&self, path: &str, content: &[u8]) -> bool {
-        let hash = Self::hash_content(content);
-        self.known_hashes.get(path) != Some(&hash)
-    }
-
     /// Check if a file has changed and return (changed, hash) to avoid double-hashing.
     /// Callers can pass the returned hash to `record_hash` to skip recomputation.
     pub fn check_changed(&self, path: &str, content: &[u8]) -> (bool, String) {
@@ -59,23 +52,34 @@ impl ChangeDetector {
         (changed, hash)
     }
 
-    /// Update the stored hash for a file after successful indexing.
-    pub fn update_hash(&mut self, path: &str, content: &[u8]) {
-        let hash = Self::hash_content(content);
-        self.known_hashes.insert(path.to_string(), hash);
-    }
-
     /// Record a pre-computed hash for a file (avoids re-hashing when used with `check_changed`).
     pub fn record_hash(&mut self, path: &str, hash: String) {
         self.known_hashes.insert(path.to_string(), hash);
     }
 
+    /// Check if a file has changed since the last index.
+    /// Returns `true` if the file is new or its content hash differs.
+    #[cfg(test)]
+    pub fn is_changed(&self, path: &str, content: &[u8]) -> bool {
+        let hash = Self::hash_content(content);
+        self.known_hashes.get(path) != Some(&hash)
+    }
+
+    /// Update the stored hash for a file after successful indexing.
+    #[cfg(test)]
+    pub fn update_hash(&mut self, path: &str, content: &[u8]) {
+        let hash = Self::hash_content(content);
+        self.known_hashes.insert(path.to_string(), hash);
+    }
+
     /// Remove the hash for a file (e.g., when it's deleted).
+    #[cfg(test)]
     pub fn remove_hash(&mut self, path: &str) {
         self.known_hashes.remove(path);
     }
 
     /// Get the number of tracked files.
+    #[cfg(test)]
     pub fn tracked_count(&self) -> usize {
         self.known_hashes.len()
     }

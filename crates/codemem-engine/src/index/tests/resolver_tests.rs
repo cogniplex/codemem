@@ -37,9 +37,9 @@ fn resolve_exact_match() {
         line: 10,
     };
 
-    let result = resolver.resolve(&reference);
+    let result = resolver.resolve_with_confidence(&reference);
     assert!(result.is_some());
-    assert_eq!(result.unwrap().qualified_name, "module::foo");
+    assert_eq!(result.unwrap().0.qualified_name, "module::foo");
 }
 
 #[test]
@@ -56,9 +56,9 @@ fn resolve_simple_name_match() {
         line: 10,
     };
 
-    let result = resolver.resolve(&reference);
+    let result = resolver.resolve_with_confidence(&reference);
     assert!(result.is_some());
-    assert_eq!(result.unwrap().qualified_name, "module::foo");
+    assert_eq!(result.unwrap().0.qualified_name, "module::foo");
 }
 
 #[test]
@@ -76,9 +76,9 @@ fn resolve_prefers_same_file() {
         line: 5,
     };
 
-    let result = resolver.resolve(&reference);
+    let result = resolver.resolve_with_confidence(&reference);
     assert!(result.is_some());
-    assert_eq!(result.unwrap().qualified_name, "b::foo");
+    assert_eq!(result.unwrap().0.qualified_name, "b::foo");
 }
 
 #[test]

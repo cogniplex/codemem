@@ -264,11 +264,6 @@ impl GraphEngine {
         self.nodes.values().cloned().collect()
     }
 
-    /// Return references to all node IDs without cloning.
-    pub fn get_all_node_ids(&self) -> Vec<&str> {
-        self.nodes.keys().map(|s| s.as_str()).collect()
-    }
-
     /// Return a reference to a node without cloning. Returns `None` if not found.
     pub fn get_node_ref(&self, id: &str) -> Option<&GraphNode> {
         self.nodes.get(id)

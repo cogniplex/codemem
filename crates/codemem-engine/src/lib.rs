@@ -141,6 +141,17 @@ impl CodememEngine {
         embeddings: Option<Box<dyn codemem_embeddings::EmbeddingProvider>>,
     ) -> Self {
         let config = CodememConfig::load_or_default();
+        Self::new_with_config(storage, vector, graph, embeddings, config)
+    }
+
+    /// Create an engine with an explicit config (avoids double-loading from disk).
+    pub fn new_with_config(
+        storage: Box<dyn StorageBackend>,
+        vector: HnswIndex,
+        graph: GraphEngine,
+        embeddings: Option<Box<dyn codemem_embeddings::EmbeddingProvider>>,
+        config: CodememConfig,
+    ) -> Self {
         Self {
             storage,
             vector: Mutex::new(vector),
@@ -158,7 +169,14 @@ impl CodememEngine {
 
     /// Create an engine from a database path, loading all backends.
     pub fn from_db_path(db_path: &Path) -> Result<Self, CodememError> {
-        let storage = Storage::open(db_path)?;
+        let config = CodememConfig::load_or_default();
+
+        // Wire StorageConfig into Storage::open
+        let storage = Storage::open_with_config(
+            db_path,
+            Some(config.storage.cache_size_mb),
+            Some(config.storage.busy_timeout_secs),
+        )?;
         let mut vector = HnswIndex::with_defaults()?;
 
         // Load existing vector index if it exists
@@ -195,10 +213,11 @@ impl CodememEngine {
         // Load graph from storage
         let graph = GraphEngine::from_storage(&storage)?;
 
-        // Try loading embeddings (optional)
-        let embeddings = codemem_embeddings::from_env().ok();
+        // Wire EmbeddingConfig into from_env as fallback
+        let embeddings = codemem_embeddings::from_env(Some(&config.embedding)).ok();
 
-        let mut engine = Self::new(Box::new(storage), vector, graph, embeddings);
+        let mut engine =
+            Self::new_with_config(Box::new(storage), vector, graph, embeddings, config);
         engine.db_path = Some(db_path.to_path_buf());
 
         // H7: Only compute PageRank at startup; betweenness is computed lazily
@@ -326,51 +345,6 @@ impl CodememEngine {
         self.scoring_weights
             .write()
             .map_err(|e| CodememError::LockPoisoned(format!("scoring_weights write: {e}")))
-    }
-
-    // ── Accessor Methods ─────────────────────────────────────────────────────
-    // C7: Accessor methods for fields. Once external callers in `crates/codemem/`
-    // are migrated from direct field access to these methods, fields can be
-    // changed to `pub(crate)`.
-
-    /// Access the storage backend.
-    pub fn storage(&self) -> &dyn StorageBackend {
-        &*self.storage
-    }
-
-    /// Access the graph engine mutex.
-    pub fn graph(&self) -> &Mutex<GraphEngine> {
-        &self.graph
-    }
-
-    /// Access the vector index mutex.
-    pub fn vector(&self) -> &Mutex<HnswIndex> {
-        &self.vector
-    }
-
-    /// Access the embeddings provider mutex (if configured).
-    pub fn embeddings(&self) -> Option<&Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
-        self.embeddings.as_ref()
-    }
-
-    /// Access the BM25 index mutex.
-    pub fn bm25_index(&self) -> &Mutex<Bm25Index> {
-        &self.bm25_index
-    }
-
-    /// Access the database path.
-    pub fn db_path(&self) -> Option<&Path> {
-        self.db_path.as_deref()
-    }
-
-    /// Access the loaded configuration.
-    pub fn config(&self) -> &CodememConfig {
-        &self.config
-    }
-
-    /// Access the operational metrics collector.
-    pub fn metrics(&self) -> &Arc<InMemoryMetrics> {
-        &self.metrics
     }
 
     /// Check if the engine has unsaved changes (dirty flag is set).
@@ -1358,39 +1332,49 @@ impl CodememEngine {
         let index_results = indexer.index_and_resolve(Path::new(path))?;
         let persist = self.persist_index_results(&index_results, namespace)?;
 
-        // 2. Enrich with git history
-        let git_result = match self.enrich_git_history(path, git_days, namespace) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                tracing::warn!("Git history enrichment failed: {e}");
-                None
-            }
-        };
+        // 2. Run all enrichment passes, accumulating total insights
+        let root = Path::new(path);
+        let project_root = Some(root);
+        let mut total_insights = 0usize;
 
-        // 3. Enrich with security analysis
-        let security_result = match self.enrich_security(namespace) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                tracing::warn!("Security enrichment failed: {e}");
-                None
-            }
-        };
+        macro_rules! run_enrich {
+            ($label:expr, $call:expr) => {
+                match $call {
+                    Ok(r) => total_insights += r.insights_stored,
+                    Err(e) => tracing::warn!(concat!($label, " enrichment failed: {}"), e),
+                }
+            };
+        }
 
-        // 4. Enrich with performance analysis
-        let perf_result = match self.enrich_performance(10, namespace) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                tracing::warn!("Performance enrichment failed: {e}");
-                None
-            }
-        };
+        run_enrich!(
+            "git_history",
+            self.enrich_git_history(path, git_days, namespace)
+        );
+        run_enrich!("security", self.enrich_security(namespace));
+        run_enrich!("performance", self.enrich_performance(10, namespace));
+        run_enrich!(
+            "complexity",
+            self.enrich_complexity(namespace, project_root)
+        );
+        run_enrich!("architecture", self.enrich_architecture(namespace));
+        run_enrich!("test_mapping", self.enrich_test_mapping(namespace));
+        run_enrich!("api_surface", self.enrich_api_surface(namespace));
+        run_enrich!("doc_coverage", self.enrich_doc_coverage(namespace));
+        run_enrich!(
+            "code_smells",
+            self.enrich_code_smells(namespace, project_root)
+        );
+        run_enrich!("hot_complex", self.enrich_hot_complex(namespace));
+        run_enrich!("blame", self.enrich_blame(path, namespace));
+        run_enrich!(
+            "security_scan",
+            self.enrich_security_scan(namespace, project_root)
+        );
+        run_enrich!("quality", self.enrich_quality_stratification(namespace));
+        // change_impact is per-file, not included in run_all
 
-        // 5. Recompute centrality after all changes
+        // Recompute centrality after all changes
         self.lock_graph()?.recompute_centrality();
-
-        let total_insights = git_result.as_ref().map_or(0, |r| r.insights_stored)
-            + security_result.as_ref().map_or(0, |r| r.insights_stored)
-            + perf_result.as_ref().map_or(0, |r| r.insights_stored);
 
         Ok(IndexEnrichResult {
             files_indexed: persist.files_created,

@@ -615,6 +615,8 @@ impl EmbeddingProvider for CachedProvider {
 
 /// Create an embedding provider from environment variables.
 ///
+/// When `config` is provided, its fields serve as defaults; env vars override them.
+///
 /// | Variable | Values | Default |
 /// |----------|--------|---------|
 /// | `CODEMEM_EMBED_PROVIDER` | `candle`, `ollama`, `openai` | `candle` |
@@ -622,23 +624,38 @@ impl EmbeddingProvider for CachedProvider {
 /// | `CODEMEM_EMBED_URL` | base URL | provider default |
 /// | `CODEMEM_EMBED_API_KEY` | API key | also reads `OPENAI_API_KEY` |
 /// | `CODEMEM_EMBED_DIMENSIONS` | integer | `768` |
-pub fn from_env() -> Result<Box<dyn EmbeddingProvider>, CodememError> {
+pub fn from_env(
+    config: Option<&codemem_core::EmbeddingConfig>,
+) -> Result<Box<dyn EmbeddingProvider>, CodememError> {
     let provider = std::env::var("CODEMEM_EMBED_PROVIDER")
-        .unwrap_or_else(|_| "candle".to_string())
+        .unwrap_or_else(|_| {
+            config
+                .map(|c| c.provider.clone())
+                .unwrap_or_else(|| "candle".to_string())
+        })
         .to_lowercase();
     let dimensions: usize = std::env::var("CODEMEM_EMBED_DIMENSIONS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(DIMENSIONS);
+        .unwrap_or_else(|| config.map_or(DIMENSIONS, |c| c.dimensions));
+    let cache_capacity = config.map_or(CACHE_CAPACITY, |c| c.cache_capacity);
 
     match provider.as_str() {
         "ollama" => {
-            let base_url = std::env::var("CODEMEM_EMBED_URL")
-                .unwrap_or_else(|_| ollama::DEFAULT_BASE_URL.to_string());
-            let model = std::env::var("CODEMEM_EMBED_MODEL")
-                .unwrap_or_else(|_| ollama::DEFAULT_MODEL.to_string());
+            let base_url = std::env::var("CODEMEM_EMBED_URL").unwrap_or_else(|_| {
+                config
+                    .filter(|c| !c.url.is_empty())
+                    .map(|c| c.url.clone())
+                    .unwrap_or_else(|| ollama::DEFAULT_BASE_URL.to_string())
+            });
+            let model = std::env::var("CODEMEM_EMBED_MODEL").unwrap_or_else(|_| {
+                config
+                    .filter(|c| !c.model.is_empty())
+                    .map(|c| c.model.clone())
+                    .unwrap_or_else(|| ollama::DEFAULT_MODEL.to_string())
+            });
             let inner = Box::new(ollama::OllamaProvider::new(&base_url, &model, dimensions));
-            Ok(Box::new(CachedProvider::new(inner, CACHE_CAPACITY)))
+            Ok(Box::new(CachedProvider::new(inner, cache_capacity)))
         }
         "openai" => {
             let api_key = std::env::var("CODEMEM_EMBED_API_KEY")
@@ -649,16 +666,22 @@ pub fn from_env() -> Result<Box<dyn EmbeddingProvider>, CodememError> {
                             .into(),
                     )
                 })?;
-            let model = std::env::var("CODEMEM_EMBED_MODEL")
-                .unwrap_or_else(|_| openai::DEFAULT_MODEL.to_string());
-            let base_url = std::env::var("CODEMEM_EMBED_URL").ok();
+            let model = std::env::var("CODEMEM_EMBED_MODEL").unwrap_or_else(|_| {
+                config
+                    .filter(|c| !c.model.is_empty())
+                    .map(|c| c.model.clone())
+                    .unwrap_or_else(|| openai::DEFAULT_MODEL.to_string())
+            });
+            let base_url = std::env::var("CODEMEM_EMBED_URL")
+                .ok()
+                .or_else(|| config.filter(|c| !c.url.is_empty()).map(|c| c.url.clone()));
             let inner = Box::new(openai::OpenAIProvider::new(
                 &api_key,
                 &model,
                 dimensions,
                 base_url.as_deref(),
             ));
-            Ok(Box::new(CachedProvider::new(inner, CACHE_CAPACITY)))
+            Ok(Box::new(CachedProvider::new(inner, cache_capacity)))
         }
         "candle" | "" => {
             let model_dir = EmbeddingService::default_model_dir();

@@ -11,17 +11,7 @@ use ndarray::{Array1, Array2};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        let mut end = max_len;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &s[..end])
-    }
-}
+use crate::truncate_str;
 
 pub async fn get_vectors(
     State(state): State<Arc<AppState>>,

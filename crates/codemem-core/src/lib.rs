@@ -26,5 +26,5 @@ pub use types::{
     content_hash, DetectedPattern, DistanceMetric, Edge, GraphConfig, GraphNode, MemoryNode,
     MemoryType, NodeCoverageEntry, NodeKind, NodeMemoryResult, PatternType, RelationshipType,
     Repository, ScoreBreakdown, ScoringWeights, SearchResult, Session, SessionActivitySummary,
-    VectorConfig,
+    VectorConfig, ENRICHMENT_ANALYSES,
 };

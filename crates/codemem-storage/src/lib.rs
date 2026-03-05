@@ -4,7 +4,6 @@
 
 use codemem_core::{CodememError, MemoryNode, MemoryType};
 use rusqlite::Connection;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
@@ -38,12 +37,20 @@ impl Storage {
     }
 
     /// Apply standard pragmas to a connection.
-    fn apply_pragmas(conn: &Connection) -> Result<(), CodememError> {
+    ///
+    /// `cache_size_mb` and `busy_timeout_secs` override the defaults (64 MB / 5 s)
+    /// when provided — typically sourced from `StorageConfig`.
+    fn apply_pragmas(
+        conn: &Connection,
+        cache_size_mb: Option<u32>,
+        busy_timeout_secs: Option<u64>,
+    ) -> Result<(), CodememError> {
         // WAL mode for concurrent reads
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
-        // 64MB cache
-        conn.pragma_update(None, "cache_size", -64000i64)
+        // Cache size (negative value = KiB in SQLite)
+        let cache_kb = i64::from(cache_size_mb.unwrap_or(64)) * 1000;
+        conn.pragma_update(None, "cache_size", -cache_kb)
             .map_err(|e| CodememError::Storage(e.to_string()))?;
         // Foreign keys ON
         conn.pragma_update(None, "foreign_keys", "ON")
@@ -57,16 +64,26 @@ impl Storage {
         // Temp tables in memory
         conn.pragma_update(None, "temp_store", "MEMORY")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
-        // 5s busy timeout
-        conn.busy_timeout(std::time::Duration::from_secs(5))
+        // Busy timeout
+        let timeout = busy_timeout_secs.unwrap_or(5);
+        conn.busy_timeout(std::time::Duration::from_secs(timeout))
             .map_err(|e| CodememError::Storage(e.to_string()))?;
         Ok(())
     }
 
     /// Open (or create) a Codemem database at the given path.
     pub fn open(path: &Path) -> Result<Self, CodememError> {
+        Self::open_with_config(path, None, None)
+    }
+
+    /// Open a database with explicit storage configuration overrides.
+    pub fn open_with_config(
+        path: &Path,
+        cache_size_mb: Option<u32>,
+        busy_timeout_secs: Option<u64>,
+    ) -> Result<Self, CodememError> {
         let conn = Connection::open(path).map_err(|e| CodememError::Storage(e.to_string()))?;
-        Self::apply_pragmas(&conn)?;
+        Self::apply_pragmas(&conn, cache_size_mb, busy_timeout_secs)?;
         migrations::run_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -79,8 +96,17 @@ impl Storage {
     /// database has already been migrated by `codemem init` or `codemem serve`,
     /// to avoid SQLITE_BUSY race conditions with the concurrent MCP server.
     pub fn open_without_migrations(path: &Path) -> Result<Self, CodememError> {
+        Self::open_without_migrations_with_config(path, None, None)
+    }
+
+    /// Open without migrations, with explicit storage configuration overrides.
+    pub fn open_without_migrations_with_config(
+        path: &Path,
+        cache_size_mb: Option<u32>,
+        busy_timeout_secs: Option<u64>,
+    ) -> Result<Self, CodememError> {
         let conn = Connection::open(path).map_err(|e| CodememError::Storage(e.to_string()))?;
-        Self::apply_pragmas(&conn)?;
+        Self::apply_pragmas(&conn, cache_size_mb, busy_timeout_secs)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -90,8 +116,7 @@ impl Storage {
     pub fn open_in_memory() -> Result<Self, CodememError> {
         let conn =
             Connection::open_in_memory().map_err(|e| CodememError::Storage(e.to_string()))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Self::apply_pragmas(&conn, None, None)?;
         migrations::run_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -99,11 +124,8 @@ impl Storage {
     }
 
     /// Compute SHA-256 hash of content for deduplication.
-    // TODO: Delegate to `codemem_core::content_hash()` once it is added to codemem-core.
     pub fn content_hash(content: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(content.as_bytes());
-        format!("{:x}", hasher.finalize())
+        codemem_core::content_hash(content)
     }
 }
 

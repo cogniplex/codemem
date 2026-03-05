@@ -315,6 +315,8 @@ impl McpServer {
             "enrich_codebase" => self.tool_enrich_codebase(args),
             "analyze_codebase" => self.tool_analyze_codebase(args),
             "enrich_git_history" => self.tool_enrich_git_history(args),
+            "enrich_security" => self.tool_enrich_security(args),
+            "enrich_performance" => self.tool_enrich_performance(args),
 
             // ── Legacy aliases (backwards compatibility) ─────────────────
             "recall_memory" => self.tool_recall(args),
@@ -384,9 +386,6 @@ impl McpServer {
                     "Tool '{name}' has been removed from MCP. Use CLI or config instead."
                 ))
             }
-            "enrich_security" => self.tool_enrich_security(args),
-            "enrich_performance" => self.tool_enrich_performance(args),
-
             _ => ToolResult::tool_error(format!("Unknown tool: {name}")),
         }
     }
@@ -829,10 +828,10 @@ fn tool_definitions() -> Vec<Value> {
                 }
             }
         }),
-        // ── Enrichment (3 tools) ────────────────────────────────────────────
+        // ── Enrichment (5 tools) ────────────────────────────────────────────
         json!({
             "name": "enrich_codebase",
-            "description": "Composite enrichment: runs git history, security, and performance analysis in one call",
+            "description": "Composite enrichment: runs selected (or all 14) analyses — git, security, performance, complexity, code smells, architecture, test mapping, API surface, doc coverage, blame, quality, and more",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -841,7 +840,7 @@ fn tool_definitions() -> Vec<Value> {
                     "namespace": { "type": "string" },
                     "analyses": {
                         "type": "array",
-                        "items": { "type": "string", "enum": ["git", "security", "performance"] },
+                        "items": { "type": "string", "enum": codemem_core::ENRICHMENT_ANALYSES },
                         "description": "Which analyses to run (default: all)"
                     }
                 },
@@ -850,7 +849,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "analyze_codebase",
-            "description": "Full pipeline: index -> enrich (git+security+performance) -> pagerank -> clusters -> summary",
+            "description": "Full pipeline: index -> enrich (git+security+performance+more) -> pagerank -> clusters -> summary",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -872,6 +871,27 @@ fn tool_definitions() -> Vec<Value> {
                     "namespace": { "type": "string" }
                 },
                 "required": ["path"]
+            }
+        }),
+        json!({
+            "name": "enrich_security",
+            "description": "Scan the knowledge graph for security-sensitive files and endpoints",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "namespace": { "type": "string", "description": "Namespace to scope the analysis" }
+                }
+            }
+        }),
+        json!({
+            "name": "enrich_performance",
+            "description": "Analyze coupling, dependency depth, and critical path in the knowledge graph",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "namespace": { "type": "string", "description": "Namespace to scope the analysis" },
+                    "top": { "type": "integer", "default": 10, "description": "Number of top results to return" }
+                }
             }
         }),
     ]

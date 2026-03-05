@@ -187,13 +187,6 @@ impl ReferenceResolver {
         None
     }
 
-    /// Resolve a single reference to a target symbol.
-    ///
-    /// Convenience wrapper around `resolve_with_confidence` that drops confidence.
-    pub fn resolve(&self, reference: &Reference) -> Option<&Symbol> {
-        self.resolve_with_confidence(reference).map(|(sym, _)| sym)
-    }
-
     /// Resolve all references into edges.
     ///
     /// Only produces edges for successfully resolved references.
@@ -220,11 +213,6 @@ impl ReferenceResolver {
                 })
             })
             .collect()
-    }
-
-    /// Get the number of indexed symbols.
-    pub fn symbol_count(&self) -> usize {
-        self.symbol_index.len()
     }
 }
 

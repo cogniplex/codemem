@@ -363,54 +363,6 @@ impl Storage {
 
     // ── Insight / Tag Queries ──────────────────────────────────────────
 
-    /// Count memories whose content matches any of the given keywords (SQL LIKE).
-    pub fn count_memories_matching_keywords(
-        &self,
-        keywords: &[&str],
-        namespace: Option<&str>,
-    ) -> Result<usize, CodememError> {
-        if keywords.is_empty() {
-            return Ok(0);
-        }
-        let conn = self.conn()?;
-        let like_clauses: Vec<String> = keywords
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("content LIKE ?{}", i + 1))
-            .collect();
-        let where_likes = like_clauses.join(" OR ");
-
-        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-            if let Some(ns) = namespace {
-                let sql = format!(
-                    "SELECT COUNT(*) FROM memories WHERE ({}) AND namespace = ?{}",
-                    where_likes,
-                    keywords.len() + 1,
-                );
-                let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = keywords
-                    .iter()
-                    .map(|k| Box::new(format!("%{k}%")) as Box<dyn rusqlite::types::ToSql>)
-                    .collect();
-                p.push(Box::new(ns.to_string()));
-                (sql, p)
-            } else {
-                let sql = format!("SELECT COUNT(*) FROM memories WHERE ({})", where_likes);
-                let p: Vec<Box<dyn rusqlite::types::ToSql>> = keywords
-                    .iter()
-                    .map(|k| Box::new(format!("%{k}%")) as Box<dyn rusqlite::types::ToSql>)
-                    .collect();
-                (sql, p)
-            };
-
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params_vec.iter().map(|b| &**b).collect();
-
-        let count: i64 = conn
-            .query_row(&sql, params_refs.as_slice(), |row| row.get(0))
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
-        Ok(count as usize)
-    }
-
     /// List memories that contain a specific tag, optionally scoped to a namespace.
     /// Uses `json_each` for proper JSON array querying instead of LIKE patterns.
     pub fn list_memories_by_tag(

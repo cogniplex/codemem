@@ -89,7 +89,8 @@ pub(crate) fn cmd_doctor() -> anyhow::Result<()> {
     }
 
     // 3. Embedding model probe
-    match codemem_embeddings::from_env() {
+    let embed_config = codemem_core::CodememConfig::load_or_default();
+    match codemem_embeddings::from_env(Some(&embed_config.embedding)) {
         Ok(emb) => match emb.embed("hello world") {
             Ok(v) => print_check(
                 "Embedding provider",

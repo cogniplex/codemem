@@ -31,7 +31,8 @@ fn build_server() -> anyhow::Result<(crate::mcp::McpServer, codemem_storage::Sto
 
     let graph = codemem_storage::GraphEngine::from_storage(&storage)?;
 
-    let embeddings = match codemem_embeddings::from_env() {
+    let config = codemem_core::CodememConfig::load_or_default();
+    let embeddings = match codemem_embeddings::from_env(Some(&config.embedding)) {
         Ok(provider) => Some(provider),
         Err(e) => {
             tracing::warn!("Embedding provider unavailable, continuing without embeddings: {e}");
