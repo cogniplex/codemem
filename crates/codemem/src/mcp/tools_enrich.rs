@@ -124,10 +124,7 @@ impl McpServer {
         }
 
         if run_all || analyses.iter().any(|a| a == "security_scan") {
-            match self
-                .engine
-                .enrich_security_scan(namespace, project_root)
-            {
+            match self.engine.enrich_security_scan(namespace, project_root) {
                 Ok(r) => {
                     results["security_scan"] = r.details;
                 }

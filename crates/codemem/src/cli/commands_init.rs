@@ -344,18 +344,14 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
 
     // ── Step 3c: Install codemem skill (tool quick-reference) ─────────────
     {
-        let skill_dir = project_dir
-            .join(".claude")
-            .join("skills")
-            .join("codemem");
+        let skill_dir = project_dir.join(".claude").join("skills").join("codemem");
         std::fs::create_dir_all(&skill_dir)?;
         let skill_path = skill_dir.join("SKILL.md");
 
         if skill_path.exists() {
             println!("[skills] codemem skill already installed, skipped");
         } else {
-            let skill_content =
-                include_str!("../../../../examples/skills/codemem/SKILL.md");
+            let skill_content = include_str!("../../../../examples/skills/codemem/SKILL.md");
             std::fs::write(&skill_path, skill_content)?;
             println!("[skills] Installed codemem tool guide → .claude/skills/codemem/SKILL.md");
             status_lines.push("Skill: /codemem tool reference installed".to_string());
