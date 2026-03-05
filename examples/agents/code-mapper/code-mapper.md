@@ -5,7 +5,7 @@ description: >
   assignments. Use after initial project setup, when pending-analysis memories
   appear, or periodically to refresh the knowledge graph.
 tools:
-  # Codemem MCP (all 30 primary tools)
+  # Codemem MCP tools
   - mcp__codemem__store_memory
   - mcp__codemem__recall
   - mcp__codemem__delete_memory
@@ -33,7 +33,6 @@ tools:
   - mcp__codemem__session_checkpoint
   - mcp__codemem__session_context
   - mcp__codemem__enrich_codebase
-  - mcp__codemem__analyze_codebase
   - mcp__codemem__enrich_git_history
   # Read-only file tools
   - Read

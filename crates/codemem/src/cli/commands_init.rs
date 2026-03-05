@@ -291,15 +291,15 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                     ),
                 ),
                 (
-                    "phase-2-baseline.md",
+                    "phase-2-planning.md",
                     include_str!(
-                        "../../../../examples/agents/code-mapper/skills/phase-2-baseline.md"
+                        "../../../../examples/agents/code-mapper/skills/phase-2-planning.md"
                     ),
                 ),
                 (
-                    "phase-3-deep-analysis.md",
+                    "phase-3-execution.md",
                     include_str!(
-                        "../../../../examples/agents/code-mapper/skills/phase-3-deep-analysis.md"
+                        "../../../../examples/agents/code-mapper/skills/phase-3-execution.md"
                     ),
                 ),
                 (

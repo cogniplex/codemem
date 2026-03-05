@@ -40,7 +40,7 @@ store_memory {
   "memory_type": "decision",
   "importance": 0.85,
   "tags": ["architecture", "transport", "human-verified"],
-  "namespace": "/path/to/project"
+  "namespace": "project"
 }
 ```
 
@@ -56,7 +56,7 @@ store_memory {
   "memory_type": "context",
   "importance": 0.3,
   "tags": ["needs-review", "dead-code-candidate", "external-api-candidate"],
-  "namespace": "/path/to/project"
+  "namespace": "project"
 }
 ```
 
