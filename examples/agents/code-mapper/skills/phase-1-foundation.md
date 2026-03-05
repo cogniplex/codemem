@@ -2,28 +2,19 @@
 
 The code-mapper runs this phase directly (no agents needed).
 
-## Step 1: Index the codebase (incremental)
+**Task tracking**: At the start of this phase, set the Phase 1 task to `in_progress` via `TaskUpdate`. When all steps (1-4) are complete, set it to `completed`.
 
+## Prerequisite: Index the codebase from CLI
+
+Before running the agent, index the codebase from the CLI (much faster than via MCP):
+
+```bash
+codemem index /path/to/project
 ```
-index_codebase { "path": "/path/to/project" }
-```
 
-This is incremental — it skips unchanged files via SHA-256 file hashes. Creates:
-- `sym:qualified_name` nodes for every symbol
-- `file:path` nodes for every source file
-- `pkg:dir/` nodes forming a directory tree above files
-- CALLS, IMPORTS, IMPLEMENTS, CONTAINS edges for every resolved reference
+This is incremental — it skips unchanged files via SHA-256 file hashes. The agent assumes indexing is already done.
 
-After indexing, **auto-compaction** prunes low-value nodes from the graph:
-- **Chunk compaction**: Scores chunks by connectivity, symbol parentage, memory links, and code size. Keeps top-K per file.
-- **Symbol compaction**: Scores symbols by call connectivity (30%), visibility (20%), kind (15%), memory links (20%), and code size (15%). Prunes private unreferenced symbols while always retaining classes, interfaces, modules, and memory-linked symbols.
-
-Pruned nodes are removed from graph traversal/PageRank but their embeddings remain in the vector index for semantic search. The response includes `chunks_pruned`, `symbols_pruned`, and `packages_created` counts.
-
-### Error recovery
-- If `index_codebase` fails: check that the path exists and contains supported source files. Retry once. If it fails again, abort — indexing is required for all subsequent phases.
-
-## Step 2: Run static enrichment (fast)
+## Step 1: Run static enrichment (fast)
 
 Run enrichment in a single call. Each analysis is fast (grep-based static analysis) and auto-tags insights with `static-analysis` for later agent review.
 
@@ -36,9 +27,9 @@ enrich_codebase { "path": "/path/to/project", "analyses": ["git", "security", "p
 - **Performance**: N+1 queries, missing caching, blocking I/O, large allocations, concurrency issues
 
 ### Error recovery
-- If `enrich_codebase` fails: log the error and continue. Enrichment is optional — Phase 2-4 can proceed without it, but priority computation (Step 3) will lack git churn data. Use equal weights for missing signals.
+- If `enrich_codebase` fails: log the error and continue. Enrichment is optional — Phase 2-4 can proceed without it, but priority computation will lack git churn data. Use equal weights for missing signals.
 
-## Step 2b: Browse the directory structure
+## Step 2: Browse the directory structure
 
 Use `summary_tree` to get a hierarchical overview before diving into details:
 
@@ -92,7 +83,7 @@ recall { "query": "agent analysis complete", "exclude_tags": ["static-analysis"]
 
 For each file, compare the stored `file_hash` in metadata with the current hash from the graph's `file_hashes` table. Files with stale hashes need re-analysis; files with matching hashes can be skipped.
 
-## Step 5: Check for pending file changes
+## Step 4b: Check for pending file changes
 
 ```
 recall { "query": "pending analysis file changes", "k": 20 }

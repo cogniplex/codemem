@@ -16,7 +16,6 @@ tools:
   - mcp__codemem__graph_traverse
   - mcp__codemem__summary_tree
   - mcp__codemem__codemem_status
-  - mcp__codemem__index_codebase
   - mcp__codemem__search_code
   - mcp__codemem__get_symbol_info
   - mcp__codemem__get_symbol_graph

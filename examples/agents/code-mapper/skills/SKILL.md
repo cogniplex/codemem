@@ -60,6 +60,12 @@ Run coverage reports, clean up static-analysis noise, consolidate findings, stor
 - 50-200 files → 3 agents
 - 200+ files → 4 agents
 
+### Task Status Management
+- Create one task per phase at the start using TaskCreate
+- When starting a phase, set its task to `in_progress` via `TaskUpdate { "taskId": "<id>", "status": "in_progress" }`
+- When a phase completes, set its task to `completed` via `TaskUpdate { "taskId": "<id>", "status": "completed" }`
+- **Never leave a completed phase's task as `in_progress` or `pending`**
+
 ### Monitoring
 - Check TaskList after spawning for stuck/completed tasks
 - If agent idle with incomplete tasks for 2+ turns → reassign remaining work

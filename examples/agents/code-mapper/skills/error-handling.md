@@ -6,7 +6,6 @@ Comprehensive error recovery strategies organized by phase and error source.
 
 | Error | Recovery |
 |-------|----------|
-| `index_codebase` fails | Check path exists and contains supported files. Retry once. If it fails again, **abort** — indexing is required. |
 | `enrich_codebase` fails | Log and continue. Enrichment is optional. Redistribute git churn weight (0.25) to PageRank (+0.10) and Unanalyzed (+0.15). |
 | Empty PageRank (no edges) | Proceed with equal priority for all files. The graph may only have CONTAINS edges. |
 | Single Louvain cluster | All files are interconnected. Skip cluster_size weighting (set weight to 0, redistribute to others). |

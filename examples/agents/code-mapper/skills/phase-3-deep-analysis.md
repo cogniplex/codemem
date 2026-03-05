@@ -2,6 +2,8 @@
 
 This phase spawns parallel analysis agents for deep, LLM-powered code understanding.
 
+**Task tracking**: Set the Phase 3 task to `in_progress` via `TaskUpdate` when starting. When all agents finish and cluster summaries are stored, set it to `completed`.
+
 ## Step 7: Tier assignment
 
 Divide all symbols into tiers based on PageRank and git churn:

@@ -70,12 +70,13 @@ delete_memory { "id": "<pending-analysis-memory-id>" }
 
 After all consolidation steps are complete:
 
-1. **Verify all tasks completed**: Run TaskList and confirm every task has status `completed`
-2. **Send shutdown requests**: For each teammate, use SendMessage with `type: "shutdown_request"`
-3. **Wait for responses**: Each teammate should respond with `type: "shutdown_response"` approving shutdown
-4. **Handle rejections**: If a teammate rejects (still working), wait for them to finish, then retry
-5. **Clean up team**: Call TeamDelete to remove team resources
-6. **Final verification**: Confirm 0 remaining pending-analysis memories, all agents terminated
+1. **Mark Phase 4 complete**: Set the Phase 4 task to `completed` via `TaskUpdate { "taskId": "<id>", "status": "completed" }`
+2. **Verify all tasks completed**: Run TaskList and confirm every task has status `completed`. If any phase tasks are still `in_progress` or `pending`, update them to `completed` now.
+3. **Send shutdown requests**: For each teammate, use SendMessage with `type: "shutdown_request"`
+4. **Wait for responses**: Each teammate should respond with `type: "shutdown_response"` approving shutdown
+5. **Handle rejections**: If a teammate rejects (still working), wait for them to finish, then retry
+6. **Clean up team**: Call TeamDelete to remove team resources
+7. **Final verification**: Confirm 0 remaining pending-analysis memories, all agents terminated
 
 ### Error recovery
 - If a teammate doesn't respond to shutdown: wait 1 turn, then retry. If still unresponsive after 2 attempts, proceed with TeamDelete anyway.

@@ -2,7 +2,7 @@
 
 For re-analysis after file changes:
 
-1. Run `index_codebase` (incremental — detects changed files via SHA-256 hashes)
+1. Ensure the codebase has been re-indexed from CLI first: `codemem index /path/to/project`
 2. Use `get_node_memories` on each changed file's node to check for existing analysis:
    ```
    get_node_memories { "node_id": "file:<changed_file_path>" }

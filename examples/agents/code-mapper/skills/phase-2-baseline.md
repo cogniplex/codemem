@@ -2,6 +2,8 @@
 
 The code-mapper runs this phase directly. Before deep analysis, establish baseline coverage so every file and package has at least one memory.
 
+**Task tracking**: Set the Phase 2 task to `in_progress` via `TaskUpdate` when starting. When all package and file summaries are stored, set it to `completed`.
+
 ## Step 6a: Package summaries
 
 For each top-level package visible in the `summary_tree` output:
