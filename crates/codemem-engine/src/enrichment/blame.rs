@@ -70,40 +70,46 @@ impl CodememEngine {
             }
         }
 
-        // Store summary insight for files with many contributors (potential ownership ambiguity)
-        let graph = self.lock_graph()?;
-        for node in &graph.get_all_nodes() {
-            if node.kind != NodeKind::File {
-                continue;
-            }
-            if let Some(contribs) = node.payload.get("contributors").and_then(|v| v.as_array()) {
-                if contribs.len() > 5 {
-                    let primary = node
-                        .payload
-                        .get("primary_owner")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    let content = format!(
-                        "Shared ownership: {} has {} contributors (primary: {}) — may need clear ownership",
-                        node.label, contribs.len(), primary
-                    );
-                    drop(graph);
-                    if self
-                        .store_insight(
-                            &content,
-                            "ownership",
-                            &[],
-                            0.5,
-                            namespace,
-                            std::slice::from_ref(&node.id),
-                        )
-                        .is_some()
-                    {
-                        insights_stored += 1;
+        // Collect shared-ownership insights while holding the lock, then store outside
+        let pending_ownership: Vec<(String, String)> = {
+            let graph = self.lock_graph()?;
+            graph
+                .get_all_nodes()
+                .iter()
+                .filter(|n| n.kind == NodeKind::File)
+                .filter_map(|node| {
+                    let contribs = node.payload.get("contributors")?.as_array()?;
+                    if contribs.len() > 5 {
+                        let primary = node
+                            .payload
+                            .get("primary_owner")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let content = format!(
+                            "Shared ownership: {} has {} contributors (primary: {}) — may need clear ownership",
+                            node.label, contribs.len(), primary
+                        );
+                        Some((content, node.id.clone()))
+                    } else {
+                        None
                     }
-                    // Re-acquire for next iteration — but we break here to avoid lock issues
-                    break;
-                }
+                })
+                .collect()
+        };
+
+        for (content, node_id) in &pending_ownership {
+            if self
+                .store_insight(
+                    content,
+                    "ownership",
+                    &[],
+                    0.5,
+                    namespace,
+                    std::slice::from_ref(node_id),
+                )
+                .is_some()
+            {
+                insights_stored += 1;
             }
         }
 
