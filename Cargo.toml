@@ -10,7 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 authors = ["Codemem Contributors"]
 license = "Apache-2.0"
@@ -23,11 +23,11 @@ rust-version = "1.75"
 
 [workspace.dependencies]
 # Internal crates
-codemem-core = { path = "crates/codemem-core", version = "0.7.0" }
-codemem-storage = { path = "crates/codemem-storage", version = "0.7.0" }
-codemem-embeddings = { path = "crates/codemem-embeddings", version = "0.7.0" }
-codemem-engine = { path = "crates/codemem-engine", version = "0.7.0" }
-codemem = { path = "crates/codemem", version = "0.7.0" }
+codemem-core = { path = "crates/codemem-core", version = "0.8.0" }
+codemem-storage = { path = "crates/codemem-storage", version = "0.8.0" }
+codemem-embeddings = { path = "crates/codemem-embeddings", version = "0.8.0" }
+codemem-engine = { path = "crates/codemem-engine", version = "0.8.0" }
+codemem = { path = "crates/codemem", version = "0.8.0" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
