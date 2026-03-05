@@ -324,7 +324,11 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
     let edges = resolved.edges;
 
     // Persist symbols as graph nodes (using batch insert for performance)
-    let namespace = root.to_string_lossy().to_string();
+    let namespace = root
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or_else(|| root.to_str().unwrap_or("unknown"))
+        .to_string();
     let now = chrono::Utc::now();
 
     print!("  Storing graph nodes...");

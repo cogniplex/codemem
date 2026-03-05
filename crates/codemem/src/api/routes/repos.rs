@@ -27,8 +27,14 @@ pub async fn register_repo(
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
-    // Derive namespace from path
-    let namespace = Some(req.path.clone());
+    // Derive namespace from path basename (not full path)
+    let namespace = Some(
+        std::path::Path::new(&req.path)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or(&req.path)
+            .to_string(),
+    );
 
     let repo = Repository {
         id: id.clone(),

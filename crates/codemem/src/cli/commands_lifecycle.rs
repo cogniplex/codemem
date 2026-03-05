@@ -2,6 +2,15 @@
 
 use codemem_core::StorageBackend;
 
+/// Derive a short namespace from a working-directory path.
+/// Returns the directory basename (e.g. `/Users/me/project` → `"project"`).
+fn namespace_from_cwd(cwd: &str) -> &str {
+    std::path::Path::new(cwd)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or(cwd)
+}
+
 // ── Sessions Commands ─────────────────────────────────────────────────────
 
 /// H3: Session commands use `&dyn StorageBackend` instead of `&CodememEngine`
@@ -96,7 +105,12 @@ pub(crate) fn cmd_context(storage: &dyn StorageBackend) -> anyhow::Result<()> {
         serde_json::from_str(&input).unwrap_or(serde_json::json!({}))
     };
 
-    let cwd = payload.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
+    let cwd_raw = payload.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
+    let cwd_ns = if cwd_raw.is_empty() {
+        None
+    } else {
+        Some(namespace_from_cwd(cwd_raw))
+    };
     let session_id = payload
         .get("session_id")
         .and_then(|v| v.as_str())
@@ -104,13 +118,12 @@ pub(crate) fn cmd_context(storage: &dyn StorageBackend) -> anyhow::Result<()> {
 
     // Auto-start a session for this project
     if !session_id.is_empty() {
-        let namespace = if cwd.is_empty() { None } else { Some(cwd) };
-        if let Err(e) = storage.start_session(session_id, namespace) {
+        if let Err(e) = storage.start_session(session_id, cwd_ns) {
             tracing::warn!("Failed to start session {session_id}: {e}");
         }
     }
 
-    let namespace = if cwd.is_empty() { None } else { Some(cwd) };
+    let namespace = cwd_ns;
 
     // Gather context from multiple sources
     let mut sections: Vec<String> = Vec::new();
@@ -331,7 +344,10 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
 
     let prompt = payload.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
     let session_id = payload.get("session_id").and_then(|v| v.as_str());
-    let cwd = payload.get("cwd").and_then(|v| v.as_str());
+    let cwd = payload
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(namespace_from_cwd);
 
     // Skip empty or very short prompts
     if prompt.len() < 5 {
@@ -447,7 +463,10 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
         .get("session_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let cwd = payload.get("cwd").and_then(|v| v.as_str());
+    let cwd = payload
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(namespace_from_cwd);
 
     if session_id.is_empty() {
         let output = serde_json::json!({"continue": true});

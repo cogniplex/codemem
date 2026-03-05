@@ -193,6 +193,10 @@ impl McpServer {
             return ToolResult::tool_error(format!("Path does not exist: {path}"));
         }
 
+        // Use the directory basename as namespace (not the full path) so it
+        // matches the short names agents use when calling store_memory.
+        let namespace = root.file_name().and_then(|f| f.to_str()).unwrap_or(path);
+
         let mut indexer = codemem_engine::Indexer::new();
         let resolved = match indexer.index_and_resolve(root) {
             Ok(r) => r,
@@ -206,7 +210,10 @@ impl McpServer {
         let total_references = resolved.index.total_references;
 
         // Delegate all persistence to the engine
-        let persist_result = match self.engine.persist_index_results(&resolved, Some(path)) {
+        let persist_result = match self
+            .engine
+            .persist_index_results(&resolved, Some(namespace))
+        {
             Ok(r) => r,
             Err(e) => return ToolResult::tool_error(format!("Persistence failed: {e}")),
         };

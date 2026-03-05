@@ -110,7 +110,6 @@ impl McpServer {
             _ => return ToolResult::tool_error("Missing required 'path' parameter"),
         };
 
-        let namespace = args.get("namespace").and_then(|v| v.as_str());
         let days = args.get("days").and_then(|v| v.as_u64()).unwrap_or(90);
 
         let mut summary = json!({});
@@ -121,13 +120,29 @@ impl McpServer {
             return ToolResult::tool_error(format!("Path does not exist: {path}"));
         }
 
+        // Namespace: use explicit param, or derive basename from path
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                root.file_name()
+                    .and_then(|f| f.to_str())
+                    .unwrap_or(path)
+                    .to_string()
+            });
+
         let mut indexer = codemem_engine::Indexer::new();
         let resolved = match indexer.index_and_resolve(root) {
             Ok(r) => r,
             Err(e) => return ToolResult::tool_error(format!("Indexing failed: {e}")),
         };
 
-        let persist_result = match self.engine.persist_index_results(&resolved, Some(path)) {
+        let persist_result =
+            match self
+                .engine
+                .persist_index_results(&resolved, Some(&namespace))
+            {
             Ok(r) => r,
             Err(e) => return ToolResult::tool_error(format!("Persistence failed: {e}")),
         };
@@ -151,13 +166,14 @@ impl McpServer {
         });
 
         // Step 2: Enrich
-        if let Ok(r) = self.engine.enrich_git_history(path, days, namespace) {
+        let ns_ref = Some(namespace.as_str());
+        if let Ok(r) = self.engine.enrich_git_history(path, days, ns_ref) {
             summary["enrichment_git"] = r.details;
         }
-        if let Ok(r) = self.engine.enrich_security(namespace) {
+        if let Ok(r) = self.engine.enrich_security(ns_ref) {
             summary["enrichment_security"] = r.details;
         }
-        if let Ok(r) = self.engine.enrich_performance(10, namespace) {
+        if let Ok(r) = self.engine.enrich_performance(10, ns_ref) {
             summary["enrichment_performance"] = r.details;
         }
 
