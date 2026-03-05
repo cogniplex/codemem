@@ -10,7 +10,7 @@ use crate::index::resolver::{ReferenceResolver, ResolvedEdge};
 use crate::index::symbol::{Reference, Symbol};
 use ignore::WalkBuilder;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Progress event emitted during directory indexing.
 #[derive(Debug, Clone)]
@@ -55,10 +55,13 @@ pub struct IndexAndResolveResult {
     pub references: Vec<Reference>,
     /// All CST-aware chunks collected from all parsed files.
     pub chunks: Vec<CodeChunk>,
-    /// All unique file paths that were parsed.
+    /// All unique file paths that were parsed (relative to `root_path`).
     pub file_paths: HashSet<String>,
     /// Resolved edges from reference resolution.
     pub edges: Vec<ResolvedEdge>,
+    /// The absolute root path that was indexed. Downstream code can use this
+    /// to reconstruct absolute paths (e.g. for `git -C` or file reading).
+    pub root_path: PathBuf,
 }
 
 /// The main indexing pipeline.
@@ -179,7 +182,9 @@ impl Indexer {
                 }
             };
 
-            let path_str = path.to_string_lossy().to_string();
+            // Use paths relative to root so node IDs are portable across machines.
+            let rel_path = path.strip_prefix(root).unwrap_or(path);
+            let path_str = rel_path.to_string_lossy().to_string();
 
             // Check incremental state (returns pre-computed hash to avoid double-hashing)
             let (changed, hash) = self.change_detector.check_changed(&path_str, &content);
@@ -203,16 +208,11 @@ impl Indexer {
 
                     // Send progress event if a sender is provided
                     if let Some(tx) = tx {
-                        let relative_path = path
-                            .strip_prefix(root)
-                            .unwrap_or(path)
-                            .to_string_lossy()
-                            .to_string();
                         let _ = tx.send(IndexProgress {
                             files_scanned,
                             files_parsed,
                             total_symbols,
-                            current_file: relative_path,
+                            current_file: path_str.clone(),
                         });
                     }
                 }
@@ -283,6 +283,9 @@ impl Indexer {
         resolver.add_symbols(&all_symbols);
         let edges = resolver.resolve_all(&all_references);
 
+        // Canonicalize the root so downstream code can reconstruct absolute paths.
+        let root_path = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+
         Ok(IndexAndResolveResult {
             index: IndexResult {
                 files_scanned,
@@ -298,6 +301,7 @@ impl Indexer {
             chunks: all_chunks,
             file_paths,
             edges,
+            root_path,
         })
     }
 }

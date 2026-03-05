@@ -175,6 +175,23 @@ pub fn content_hash(content: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Relativize an absolute file path against the hook's cwd.
+/// Returns the relative path if cwd is set and the path starts with it,
+/// otherwise returns the original path.
+fn relativize_path<'a>(path: &'a str, cwd: Option<&str>) -> &'a str {
+    if let Some(root) = cwd {
+        let root_slash = if root.ends_with('/') {
+            std::borrow::Cow::Borrowed(root)
+        } else {
+            std::borrow::Cow::Owned(format!("{root}/"))
+        };
+        if let Some(rel) = path.strip_prefix(root_slash.as_ref()) {
+            return rel;
+        }
+    }
+    path
+}
+
 /// Build an `ExtractedMemory` for file-based tools (Read, Edit, Write).
 fn build_file_extraction(
     payload: &HookPayload,
@@ -183,11 +200,12 @@ fn build_file_extraction(
     memory_type: MemoryType,
     tool_name: &str,
 ) -> ExtractedMemory {
-    let tags = extract_tags_from_path(file_path);
+    let rel_path = relativize_path(file_path, payload.cwd.as_deref());
+    let tags = extract_tags_from_path(rel_path);
     let graph_node = Some(GraphNode {
-        id: format!("file:{file_path}"),
+        id: format!("file:{rel_path}"),
         kind: NodeKind::File,
-        label: file_path.to_string(),
+        label: rel_path.to_string(),
         payload: HashMap::new(),
         centrality: 0.0,
         memory_id: None,
@@ -196,7 +214,7 @@ fn build_file_extraction(
     let mut metadata = HashMap::new();
     metadata.insert(
         "file_path".to_string(),
-        serde_json::Value::String(file_path.to_string()),
+        serde_json::Value::String(rel_path.to_string()),
     );
     metadata.insert(
         "tool".to_string(),
@@ -417,14 +435,17 @@ fn extract_bash(payload: &HookPayload) -> Result<Option<ExtractedMemory>, Codeme
     );
 
     // Try to detect a file path reference in the command for graph node creation
-    let graph_node = extract_file_path_from_command(command).map(|fp| GraphNode {
-        id: format!("file:{fp}"),
-        kind: NodeKind::File,
-        label: fp.to_string(),
-        payload: HashMap::new(),
-        centrality: 0.0,
-        memory_id: None,
-        namespace: None,
+    let graph_node = extract_file_path_from_command(command).map(|fp| {
+        let rel = relativize_path(fp, payload.cwd.as_deref());
+        GraphNode {
+            id: format!("file:{rel}"),
+            kind: NodeKind::File,
+            label: rel.to_string(),
+            payload: HashMap::new(),
+            centrality: 0.0,
+            memory_id: None,
+            namespace: None,
+        }
     });
 
     Ok(Some(ExtractedMemory {

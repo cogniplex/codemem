@@ -11,6 +11,17 @@ use codemem_core::{
 };
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
+/// Resolve a (possibly relative) file path against a project root.
+/// If `project_root` is `Some`, joins it with `rel_path` to produce an absolute path.
+/// Otherwise returns `rel_path` as-is.
+fn resolve_path(rel_path: &str, project_root: Option<&Path>) -> PathBuf {
+    match project_root {
+        Some(root) => root.join(rel_path),
+        None => PathBuf::from(rel_path),
+    }
+}
 
 /// Result from an enrichment operation.
 pub struct EnrichResult {
@@ -767,7 +778,11 @@ impl CodememEngine {
     /// (if/else/match/for/while/loop/&&/||) as cyclomatic complexity and measures
     /// max nesting depth as a cognitive complexity proxy. High-complexity functions
     /// (cyclomatic > 10) produce Insight memories.
-    pub fn enrich_complexity(&self, namespace: Option<&str>) -> Result<EnrichResult, CodememError> {
+    pub fn enrich_complexity(
+        &self,
+        namespace: Option<&str>,
+        project_root: Option<&Path>,
+    ) -> Result<EnrichResult, CodememError> {
         let all_nodes = {
             let graph = self.lock_graph()?;
             graph.get_all_nodes()
@@ -836,7 +851,7 @@ impl CodememEngine {
 
         for sym in &symbols {
             let lines = file_cache.entry(sym.file_path.clone()).or_insert_with(|| {
-                std::fs::read_to_string(&sym.file_path)
+                std::fs::read_to_string(resolve_path(&sym.file_path, project_root))
                     .unwrap_or_default()
                     .lines()
                     .map(String::from)
@@ -1788,6 +1803,7 @@ impl CodememEngine {
     pub fn enrich_code_smells(
         &self,
         namespace: Option<&str>,
+        project_root: Option<&Path>,
     ) -> Result<EnrichResult, CodememError> {
         let all_nodes = {
             let graph = self.lock_graph()?;
@@ -1867,7 +1883,7 @@ impl CodememEngine {
             // Check nesting depth
             if fn_length > 0 {
                 let lines = file_cache.entry(file_path.clone()).or_insert_with(|| {
-                    std::fs::read_to_string(&file_path)
+                    std::fs::read_to_string(resolve_path(&file_path, project_root))
                         .unwrap_or_default()
                         .lines()
                         .map(String::from)
@@ -1921,7 +1937,7 @@ impl CodememEngine {
                 .get(file_path)
                 .map(|lines| lines.len())
                 .unwrap_or_else(|| {
-                    std::fs::read_to_string(file_path)
+                    std::fs::read_to_string(resolve_path(file_path, project_root))
                         .map(|s| s.lines().count())
                         .unwrap_or(0)
                 });
@@ -2249,6 +2265,7 @@ impl CodememEngine {
     pub fn enrich_security_scan(
         &self,
         namespace: Option<&str>,
+        project_root: Option<&Path>,
     ) -> Result<EnrichResult, CodememError> {
         use std::sync::LazyLock;
 
@@ -2283,7 +2300,7 @@ impl CodememEngine {
         let mut files_scanned = 0;
 
         for file_path in &file_nodes {
-            let content = match std::fs::read_to_string(file_path) {
+            let content = match std::fs::read_to_string(resolve_path(file_path, project_root)) {
                 Ok(c) => c,
                 Err(_) => continue,
             };

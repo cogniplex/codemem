@@ -1130,21 +1130,30 @@ impl CodememEngine {
     /// Call this from a watcher event loop:
     /// ```ignore
     /// while let Ok(event) = watcher.receiver().recv() {
-    ///     engine.process_watch_event(&event, namespace);
+    ///     engine.process_watch_event(&event, namespace, Some(root));
     /// }
     /// ```
     pub fn process_watch_event(
         &self,
         event: &watch::WatchEvent,
         namespace: Option<&str>,
+        project_root: Option<&Path>,
     ) -> Result<(), CodememError> {
         match event {
             watch::WatchEvent::FileChanged(path) | watch::WatchEvent::FileCreated(path) => {
-                self.index_single_file(path, namespace)?;
+                self.index_single_file(path, namespace, project_root)?;
             }
             watch::WatchEvent::FileDeleted(path) => {
-                let path_str = path.to_string_lossy().to_string();
-                self.cleanup_file_nodes(&path_str)?;
+                // Relativize the deleted path so the node ID matches what was indexed.
+                let rel = if let Some(root) = project_root {
+                    path.strip_prefix(root)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .to_string()
+                } else {
+                    path.to_string_lossy().to_string()
+                };
+                self.cleanup_file_nodes(&rel)?;
             }
         }
         Ok(())
@@ -1152,10 +1161,25 @@ impl CodememEngine {
 
     /// Index (or re-index) a single file: parse it, persist nodes/edges/embeddings,
     /// and update the index cache.
-    fn index_single_file(&self, path: &Path, namespace: Option<&str>) -> Result<(), CodememError> {
+    ///
+    /// `project_root` is used to relativize the absolute `path` so node IDs are
+    /// portable. If `None`, the path is stored as-is (absolute).
+    fn index_single_file(
+        &self,
+        path: &Path,
+        namespace: Option<&str>,
+        project_root: Option<&Path>,
+    ) -> Result<(), CodememError> {
         let content = std::fs::read(path)?;
 
-        let path_str = path.to_string_lossy().to_string();
+        let path_str = if let Some(root) = project_root {
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string()
+        } else {
+            path.to_string_lossy().to_string()
+        };
         let parser = index::CodeParser::new();
 
         let parse_result = match parser.parse_file(&path_str, &content) {
@@ -1186,6 +1210,9 @@ impl CodememEngine {
             chunks: parse_result.chunks,
             file_paths,
             edges,
+            root_path: project_root
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| path.to_path_buf()),
         };
 
         self.persist_index_results(&results, namespace)?;
