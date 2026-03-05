@@ -104,7 +104,7 @@ codemem stats
 
 ## `codemem serve`
 
-Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 28 MCP tools (plus legacy aliases for backwards compatibility).
+Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 30 MCP tools (plus legacy aliases for backwards compatibility).
 
 **Syntax**
 
@@ -171,7 +171,7 @@ codemem consolidate --status
 
 ## `codemem index`
 
-Index a codebase for structural analysis using ast-grep. Parses source files across 13 supported languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) and extracts functions, structs, classes, imports, and call relationships.
+Index a codebase for structural analysis using ast-grep. Parses source files across 14 supported languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) and extracts functions, structs, classes, imports, and call relationships.
 
 **Syntax**
 
@@ -192,6 +192,41 @@ codemem index [--path <dir>] [--verbose]
 codemem index
 codemem index --path ~/projects/my-app --verbose
 ```
+
+---
+
+## `codemem analyze`
+
+Run the full analysis pipeline on a codebase: index (tree-sitter structural extraction) → enrich (git history, security, performance) → PageRank (identify important nodes) → Louvain clustering (detect architectural modules). This is the CLI equivalent of the `analyze_codebase` MCP tool.
+
+**Syntax**
+
+```
+codemem analyze [--path <dir>] [--namespace <ns>] [--days <num>]
+```
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--path <dir>` | Directory to analyze (defaults to current directory) |
+| `--namespace <ns>` | Namespace for storing results (defaults to directory basename) |
+| `--days <num>` | Days of git history to analyze (default: 90) |
+
+**Example**
+
+```bash
+codemem analyze
+codemem analyze --path ~/projects/my-app --namespace my-app --days 180
+```
+
+**Output**
+
+Prints a summary including:
+- Index stats (files parsed, symbols extracted, edges resolved, chunks stored)
+- Enrichment results (git history insights, security findings, performance hotspots)
+- Top 10 important nodes by PageRank score
+- Cluster count from Louvain community detection
 
 ---
 

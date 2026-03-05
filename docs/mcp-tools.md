@@ -268,7 +268,7 @@ Merge multiple memories into a single summary memory linked via SUMMARIZES edges
 
 ---
 
-## Graph & Structure (9 tools)
+## Graph & Structure (12 tools)
 
 ### graph_traverse
 

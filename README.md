@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/cogniplex/codemem/actions/workflows/ci.yml/badge.svg)](https://github.com/cogniplex/codemem/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/cogniplex/codemem/graph/badge.svg)](https://codecov.io/gh/cogniplex/codemem)
-[![Crates.io](https://img.shields.io/crates/v/codemem-cli.svg)](https://crates.io/crates/codemem-cli)
+[![Crates.io](https://img.shields.io/crates/v/codemem.svg)](https://crates.io/crates/codemem)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 A standalone Rust memory engine for AI coding assistants. Single binary, zero runtime deps.
@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/cogniplex/codemem/main/install.sh |
 brew install cogniplex/tap/codemem
 
 # Cargo
-cargo install codemem-cli
+cargo install codemem
 ```
 
 Or download a prebuilt binary from [Releases](https://github.com/cogniplex/codemem/releases).
@@ -45,7 +45,7 @@ Downloads the local embedding model (~440MB, one-time), registers lifecycle hook
 
 ### That's it
 
-Codemem now automatically captures context, injects prior knowledge at session start, and provides 28 MCP tools to your assistant.
+Codemem now automatically captures context, injects prior knowledge at session start, and provides 30 MCP tools to your assistant.
 
 ### Map your codebase (optional)
 
@@ -70,7 +70,7 @@ See [`examples/agents/code-mapper.md`](examples/agents/code-mapper.md) for the f
 ## Key Features
 
 - **Graph-vector hybrid architecture** -- HNSW vector search (768-dim) + petgraph knowledge graph with 25 algorithms (PageRank, Louvain, betweenness centrality, BFS/DFS, and more)
-- **28 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (14 enrichment types), consolidation, impact analysis, session context, pattern detection over JSON-RPC (legacy tool names still accepted)
+- **30 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (14 enrichment types), consolidation, impact analysis, session context, pattern detection over JSON-RPC (legacy tool names still accepted)
 - **4 lifecycle hooks** -- Automatic context injection (SessionStart), prompt capture (UserPromptSubmit), observation capture (PostToolUse), and session summaries (Stop)
 - **9-component hybrid scoring** -- Vector similarity, graph strength, BM25 token overlap, temporal alignment, tag matching, importance, confidence, and recency
 - **Code-aware indexing** -- tree-sitter structural extraction for 14 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) with manifest parsing (Cargo.toml, package.json, go.mod, pyproject.toml)
@@ -148,13 +148,13 @@ Scoring weights, vector/graph tuning, and storage settings persist in `~/.codeme
 
 ## MCP Tools
 
-28 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation. Legacy tool names from v0.7.0 are still accepted.
+30 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation. Legacy tool names from v0.7.0 are still accepted.
 
 | Category | Tools |
 |----------|-------|
 | Memory CRUD (7) | `store_memory`, `recall`, `delete_memory`, `associate_memories`, `refine_memory`, `split_memory`, `merge_memories` |
 | Graph & Structure (7) | `graph_traverse`, `summary_tree`, `codemem_status`, `index_codebase`, `search_code`, `get_symbol_info`, `get_symbol_graph` |
-| Graph Analysis (3) | `find_important_nodes`, `find_related_groups`, `get_cross_repo` |
+| Graph Analysis (5) | `find_important_nodes`, `find_related_groups`, `get_cross_repo`, `get_node_memories`, `node_coverage` |
 | Consolidation & Patterns (3) | `consolidate`, `detect_patterns`, `get_decision_chain` |
 | Namespace (3) | `list_namespaces`, `namespace_stats`, `delete_namespace` |
 | Session & Context (2) | `session_checkpoint`, `session_context` |
@@ -169,6 +169,7 @@ codemem stats         # Database statistics
 codemem serve         # Start MCP server (JSON-RPC stdio)
 codemem index         # Index codebase with tree-sitter
 codemem consolidate   # Run consolidation cycles
+codemem analyze       # Full pipeline: index + enrich + PageRank + clusters
 codemem watch         # Real-time file watcher
 codemem export/import # Backup and restore (JSONL, JSON, CSV, Markdown)
 codemem sessions      # Session management (list, start, end)
@@ -192,8 +193,8 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 ## Documentation
 
 - [Architecture](docs/architecture.md) -- System design, data flow diagrams, storage schema
-- [MCP Tools Reference](docs/mcp-tools.md) -- All 28 tools with parameters and examples
-- [CLI Reference](docs/cli-reference.md) -- All 18 commands
+- [MCP Tools Reference](docs/mcp-tools.md) -- All 30 tools with parameters and examples
+- [CLI Reference](docs/cli-reference.md) -- All 19 commands
 - [Comparison](docs/comparison.md) -- vs Mem0, Zep/Graphiti, Letta, claude-mem, and more
 
 ## Building from Source
@@ -202,11 +203,11 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 git clone https://github.com/cogniplex/codemem.git
 cd codemem
 cargo build --release          # Optimized binary at target/release/codemem
-cargo test --workspace         # Run all 415 tests
+cargo test --workspace         # Run all 531 tests
 cargo bench                    # Criterion benchmarks
 ```
 
-12-crate Cargo workspace. See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
+6-crate Cargo workspace. See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
 ## Research and Inspirations
 

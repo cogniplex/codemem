@@ -14,7 +14,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 | **Offline** | Yes | Partial | Partial | No | No | Partial | Partial | No | No | Partial (Ollama) |
 | **Embedding** | Pluggable: Candle (local), Ollama, OpenAI-compatible (768-dim) | Chroma (via uvx) | Pluggable (24+ providers) | Built-in | Pluggable (OpenAI, etc.) | Configurable | Pluggable | OpenAI/Voyage/Ollama | Qdrant + Voyage AI | OpenAI, Gemini, Ollama |
 | **Code-aware** | Yes (ast-grep + CST chunking) | No | No | Partial (code connector) | No | Yes (Letta Code) | Partial (codify) | Yes (AST splitting) | No | No |
-| **MCP tools** | 28 | 3 | Yes (OpenMemory MCP) | Yes (plugin) | Yes (Graphiti MCP) | Yes | Yes (cognee-mcp) | 4 | 4 | Yes |
+| **MCP tools** | 30 | 3 | Yes (OpenMemory MCP) | Yes (plugin) | Yes (Graphiti MCP) | Yes | Yes (cognee-mcp) | 4 | 4 | Yes |
 | **Graph** | Built-in (petgraph, 25 algos) | No | Neo4j (optional) | No | Neo4j/FalkorDB/Kuzu | No | Neo4j/FalkorDB/Kuzu | No | FalkorDB | Temporal KG |
 | **Compression** | Pluggable LLM (optional) | AI-powered (always on) | No | No | No | No | No | No | No | No |
 | **Consolidation** | 5 cycles (decay/creative/cluster/summarize/forget) | No | Auto-extraction | Contradiction handling | Temporal updates | Self-editing memory | ECL pipeline | No | HippoRAG-inspired | Adaptive decay |
@@ -118,7 +118,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 |--------|--------|---------------|
 | **Scope** | Full memory engine (capture + recall + graph + consolidation + auto-insights) | Code search/retrieval only |
 | **Code parsing** | ast-grep (14 languages) + CST-aware chunking | AST splitting (14 languages) |
-| **MCP tools** | 28 tools | 4 tools (index, search, clear, status) |
+| **MCP tools** | 30 tools | 4 tools (index, search, clear, status) |
 | **Memory** | Persistent across sessions with 7 memory types | Index only (no persistent learning) |
 | **Embedding** | Pluggable: Candle (local, default), Ollama, OpenAI-compatible | External API required (OpenAI/Voyage/Ollama/Gemini) |
 | **Search** | Hybrid (vector + graph + BM25 + temporal + tags + ...) | Hybrid (BM25 + dense vector) |
@@ -228,14 +228,14 @@ The AI memory landscape has matured significantly since early 2025. Multiple too
 
 Most tools remain Python-based, require external services (vector DBs, graph DBs, embedding APIs), and target general-purpose conversation memory. The trend is toward multi-modal memory (images, video, documents), cloud-hosted APIs with SaaS connectors, and increasingly sophisticated temporal reasoning.
 
-Codemem occupies a unique position: a **single Rust binary** purpose-built for **AI coding assistants**, combining the best research ideas (graph-vector hybrid from AutoMem/HippoRAG, CST-aware chunking inspired by the cAST paper, contextual embeddings, neuroscience-inspired consolidation) into a **zero-dependency, offline-first** package with **28 MCP tools**, **self-editing memory**, **trigger-based auto-insights**, **14 enrichment types**, and **14-language structural code intelligence**. The tradeoff is intentional: Codemem drops cloud-scale multi-tenancy, multi-modal support, and pluggable backend architecture in favor of simplicity, speed, and local-first operation.
+Codemem occupies a unique position: a **single Rust binary** purpose-built for **AI coding assistants**, combining the best research ideas (graph-vector hybrid from AutoMem/HippoRAG, CST-aware chunking inspired by the cAST paper, contextual embeddings, neuroscience-inspired consolidation) into a **zero-dependency, offline-first** package with **30 MCP tools**, **self-editing memory**, **trigger-based auto-insights**, **14 enrichment types**, and **14-language structural code intelligence**. The tradeoff is intentional: Codemem drops cloud-scale multi-tenancy, multi-modal support, and pluggable backend architecture in favor of simplicity, speed, and local-first operation.
 
 Install in one line:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cogniplex/codemem/main/install.sh | sh
 # or: brew install cogniplex/tap/codemem
-# or: cargo install codemem-cli
+# or: cargo install codemem
 ```
 
 Then use the [code-mapper agent](../examples/agents/code-mapper.md) to index your codebase, run PageRank, detect clusters, and store architectural insights as persistent memories.
