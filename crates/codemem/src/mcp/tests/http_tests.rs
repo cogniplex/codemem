@@ -622,7 +622,15 @@ async fn post_broadcasts_response_to_sse_stream() {
 
     // Insert a session so POST validates it
     let mut sessions = std::collections::HashMap::new();
-    sessions.insert("test-sid".to_string(), super::SessionMeta);
+    let now = std::time::Instant::now();
+    sessions.insert(
+        "test-sid".to_string(),
+        super::SessionMeta {
+            created_at: now,
+            last_active_at: now,
+            request_count: 0,
+        },
+    );
 
     let state = Arc::new(McpHttpState {
         server,

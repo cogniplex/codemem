@@ -23,7 +23,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
@@ -53,7 +53,15 @@ pub(crate) struct SseMessage {
     pub payload: String,
 }
 
-struct SessionMeta;
+/// Per-session state for MCP HTTP transport sessions.
+struct SessionMeta {
+    /// When this session was created.
+    created_at: Instant,
+    /// When the last request was received for this session.
+    last_active_at: Instant,
+    /// Number of requests processed in this session.
+    request_count: u64,
+}
 
 /// Returns an Axum router handling `/mcp` (POST, GET, DELETE)
 /// per MCP Streamable HTTP spec (2025-03-26).
@@ -114,9 +122,15 @@ async fn handle_post(
         let session_id = headers.get("mcp-session-id").and_then(|v| v.to_str().ok());
 
         if let Some(sid) = session_id {
-            let sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
-            if !sessions.contains_key(sid) {
-                return (StatusCode::NOT_FOUND, "Unknown session").into_response();
+            let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            match sessions.get_mut(sid) {
+                Some(meta) => {
+                    meta.last_active_at = Instant::now();
+                    meta.request_count += 1;
+                }
+                None => {
+                    return (StatusCode::NOT_FOUND, "Unknown session").into_response();
+                }
             }
         }
         // Note: we're lenient here — if no session header, we still process
@@ -186,7 +200,15 @@ async fn handle_post(
         let session_id = uuid::Uuid::new_v4().to_string();
         {
             let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
-            sessions.insert(session_id.clone(), SessionMeta);
+            let now = Instant::now();
+            sessions.insert(
+                session_id.clone(),
+                SessionMeta {
+                    created_at: now,
+                    last_active_at: now,
+                    request_count: 1,
+                },
+            );
         }
         resp.headers_mut().insert(
             "mcp-session-id",
@@ -247,7 +269,14 @@ async fn handle_delete(State(state): State<Arc<McpHttpState>>, headers: HeaderMa
     match session_id {
         Some(sid) => {
             let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
-            if sessions.remove(sid).is_some() {
+            if let Some(meta) = sessions.remove(sid) {
+                let duration = meta.created_at.elapsed();
+                tracing::info!(
+                    session_id = sid,
+                    duration_secs = duration.as_secs(),
+                    request_count = meta.request_count,
+                    "MCP session terminated"
+                );
                 StatusCode::OK.into_response()
             } else {
                 (StatusCode::NOT_FOUND, "Unknown session").into_response()
