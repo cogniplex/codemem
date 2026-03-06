@@ -1,3 +1,4 @@
+use super::extractors::*;
 use super::*;
 
 // ── relativize_path tests ───────────────────────────────────────────────────
