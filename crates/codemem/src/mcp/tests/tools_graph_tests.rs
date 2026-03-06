@@ -17,8 +17,7 @@ fn handle_unknown_tool() {
 #[test]
 fn handle_health() {
     let server = test_server();
-    // Legacy alias "codemem_health" maps to codemem_status(include: ["health"])
-    let params = json!({"name": "codemem_health", "arguments": {}});
+    let params = json!({"name": "codemem_status", "arguments": {"include": ["health"]}});
     let resp = server.handle_request("tools/call", Some(&params), json!(7));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -30,8 +29,7 @@ fn handle_health() {
 #[test]
 fn handle_stats() {
     let server = test_server();
-    // Legacy alias "codemem_stats" maps to codemem_status(include: ["stats"])
-    let params = json!({"name": "codemem_stats", "arguments": {}});
+    let params = json!({"name": "codemem_status", "arguments": {"include": ["stats"]}});
     let resp = server.handle_request("tools/call", Some(&params), json!(8));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -175,7 +173,7 @@ fn graph_strength_caps_at_one() {
 fn search_symbols_no_index_returns_empty() {
     let server = test_server();
     // With no cache and no DB data, search_symbols returns empty (not an error)
-    let params = json!({"name": "search_symbols", "arguments": {"query": "foo"}});
+    let params = json!({"name": "search_code", "arguments": {"mode": "text", "query": "foo"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(300));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -376,7 +374,7 @@ fn symbol_from_graph_node_roundtrip() {
 #[test]
 fn get_clusters_empty_graph() {
     let server = test_server();
-    let params = json!({"name": "get_clusters", "arguments": {}});
+    let params = json!({"name": "find_related_groups", "arguments": {}});
     let resp = server.handle_request("tools/call", Some(&params), json!(302));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -387,7 +385,7 @@ fn get_clusters_empty_graph() {
 #[test]
 fn get_pagerank_empty_graph() {
     let server = test_server();
-    let params = json!({"name": "get_pagerank", "arguments": {}});
+    let params = json!({"name": "find_important_nodes", "arguments": {}});
     let resp = server.handle_request("tools/call", Some(&params), json!(303));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -442,8 +440,8 @@ fn index_codebase_and_search_symbols() {
 
     // Now search for symbols
     let params = json!({
-        "name": "search_symbols",
-        "arguments": {"query": "hello"}
+        "name": "search_code",
+        "arguments": {"mode": "text", "query": "hello"}
     });
     let resp = server.handle_request("tools/call", Some(&params), json!(308));
     let result = resp.result.unwrap();
@@ -453,8 +451,8 @@ fn index_codebase_and_search_symbols() {
 
     // Search by kind
     let params = json!({
-        "name": "search_symbols",
-        "arguments": {"query": "My", "kind": "struct"}
+        "name": "search_code",
+        "arguments": {"mode": "text", "query": "My", "kind": "struct"}
     });
     let resp = server.handle_request("tools/call", Some(&params), json!(309));
     let result = resp.result.unwrap();
@@ -509,7 +507,7 @@ fn get_dependencies_for_symbol() {
 
     // Query outgoing deps from foo
     let params = json!({
-        "name": "get_dependencies",
+        "name": "get_symbol_graph",
         "arguments": {"qualified_name": "module::foo", "direction": "outgoing"}
     });
     let resp = server.handle_request("tools/call", Some(&params), json!(310));
@@ -567,30 +565,13 @@ fn get_pagerank_with_nodes() {
         graph.add_edge(edge2).unwrap();
     }
 
-    let params = json!({"name": "get_pagerank", "arguments": {"top_k": 3}});
+    let params = json!({"name": "find_important_nodes", "arguments": {"top_k": 3}});
     let resp = server.handle_request("tools/call", Some(&params), json!(311));
     let result = resp.result.unwrap();
     assert_eq!(result["isError"], false);
     let text = result["content"][0]["text"].as_str().unwrap();
     let parsed: Value = serde_json::from_str(text).unwrap();
     assert_eq!(parsed["results"].as_array().unwrap().len(), 3);
-}
-
-#[test]
-fn set_scoring_weights_returns_removed_error() {
-    let server = test_server();
-
-    let params = json!({
-        "name": "set_scoring_weights",
-        "arguments": {
-            "vector_similarity": 1.0,
-        }
-    });
-    let resp = server.handle_request("tools/call", Some(&params), json!(100));
-    let result = resp.result.unwrap();
-    assert_eq!(result["isError"], true);
-    let text = result["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("removed"));
 }
 
 #[test]

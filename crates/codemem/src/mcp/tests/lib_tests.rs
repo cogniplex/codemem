@@ -76,32 +76,3 @@ fn handle_ping() {
     let resp = server.handle_request("ping", None, json!(6));
     assert!(resp.result.is_some());
 }
-
-// ── Legacy Alias Tests ──────────────────────────────────────────────
-
-#[test]
-fn legacy_recall_memory_alias_works() {
-    let server = test_server();
-    // The old "recall_memory" name should dispatch to "recall"
-    let params = json!({"name": "recall_memory", "arguments": {"query": "test"}});
-    let resp = server.handle_request("tools/call", Some(&params), json!(10));
-    let result = resp.result.unwrap();
-    // Should not be an "unknown tool" error
-    assert_ne!(result["isError"], true);
-}
-
-#[test]
-fn removed_tools_return_error() {
-    let server = test_server();
-    for tool_name in &["set_scoring_weights", "export_memories", "import_memories"] {
-        let params = json!({"name": tool_name, "arguments": {}});
-        let resp = server.handle_request("tools/call", Some(&params), json!(20));
-        let result = resp.result.unwrap();
-        assert_eq!(result["isError"], true, "{tool_name} should return error");
-        let text = result["content"][0]["text"].as_str().unwrap();
-        assert!(
-            text.contains("removed"),
-            "{tool_name} error should mention 'removed'"
-        );
-    }
-}

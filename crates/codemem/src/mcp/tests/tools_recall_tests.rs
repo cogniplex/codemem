@@ -77,10 +77,11 @@ fn recall_with_expansion_no_embeddings() {
     // Recall with expansion (no embeddings = text fallback)
     let result = call_tool(
         &server,
-        "recall_with_expansion",
+        "recall",
         json!({
             "query": "architecture",
             "k": 5,
+            "expand": true,
             "expansion_depth": 1,
         }),
     );
@@ -273,28 +274,4 @@ fn delete_namespace_with_confirm() {
         json!({"namespace": "delete-ns"}),
     );
     assert_eq!(stats_after["count"], 0);
-}
-
-// ── Removed Tool Tests ──────────────────────────────────────────────
-
-#[test]
-fn export_memories_returns_removed_error() {
-    let server = test_server();
-    let params = json!({"name": "export_memories", "arguments": {}});
-    let resp = server.handle_request("tools/call", Some(&params), json!(400));
-    let result = resp.result.unwrap();
-    assert_eq!(result["isError"], true);
-    let text = result["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("removed"));
-}
-
-#[test]
-fn import_memories_returns_removed_error() {
-    let server = test_server();
-    let params = json!({"name": "import_memories", "arguments": {}});
-    let resp = server.handle_request("tools/call", Some(&params), json!(401));
-    let result = resp.result.unwrap();
-    assert_eq!(result["isError"], true);
-    let text = result["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("removed"));
 }

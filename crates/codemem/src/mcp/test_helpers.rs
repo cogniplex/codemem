@@ -39,7 +39,7 @@ pub(crate) fn recall_memories(
     if let Some(mt) = memory_type {
         arguments["memory_type"] = json!(mt);
     }
-    let params = json!({"name": "recall_memory", "arguments": arguments});
+    let params = json!({"name": "recall", "arguments": arguments});
     let resp = server.handle_request("tools/call", Some(&params), json!(2));
     let result = resp.result.unwrap();
     result["content"][0]["text"].as_str().unwrap().to_string()

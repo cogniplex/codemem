@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 30 MCP tools (+ legacy aliases for backwards compatibility), 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), 14 enrichment types, optional LLM observation compression, real-time file watching, cross-session pattern detection, a REST/SSE API, and a React web UI.
+Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 32 MCP tools, 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), 14 enrichment types, optional LLM observation compression, real-time file watching, cross-session pattern detection, a REST/SSE API, and a React web UI.
 
 ## Workspace Structure (6 crates)
 
@@ -14,7 +14,7 @@ Codemem is a standalone Rust memory engine for AI coding assistants — a single
 | codemem-storage | rusqlite (bundled) WAL mode + usearch HNSW vector index + petgraph graph engine. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning), `vector.rs` (HNSW 768-dim cosine, M=16), `graph/` (traversal with BFS/DFS/kind-aware filtering, algorithms: PageRank, Louvain, SCC, betweenness, topological, cached centrality, graph compaction, package nodes) |
 | codemem-embeddings | Pluggable via `from_env()`: Candle (local BERT, default), Ollama, OpenAI-compatible. `CachedProvider` wrapper, BAAI/bge-base-en-v1.5 (768-dim), LRU cache 10K. Safe concurrency via `LockPoisoned` error handling |
 | codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing for Cargo.toml/package.json/go.mod/pyproject.toml), `hooks/` (lifecycle hook handlers for 9 tool types: Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/ListDir, trigger-based auto-insights), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `enrichment.rs` (14 enrichment types), `bm25.rs` (Okapi BM25 scoring with serialization), `scoring.rs` (hybrid scoring helpers), `recall.rs` (unified recall with temporal edge filtering), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `persistence.rs` (index persistence with cold-start-aware compaction), `metrics.rs` (operational metrics) |
-| codemem | Unified binary + library crate with three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 30 MCP tools + legacy aliases, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 19 commands, lifecycle hooks, config management) |
+| codemem | Unified binary + library crate with three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 32 MCP tools, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 19 commands, lifecycle hooks, config management) |
 | codemem-bench | Criterion benchmarks, 20% regression threshold |
 
 ## Web UI (`ui/`)
@@ -45,7 +45,7 @@ Multi-agent team for codebase analysis, installed by `codemem init`:
 | `security-reviewer.md` | Auth, validation, trust boundaries | 3 |
 | `test-mapper.md` | Testing patterns, coverage, organization | 3 |
 
-The team lead has all 30 codemem tools + team orchestration. Specialized agents have a restricted subset (memory + graph tools, no Agent/TeamCreate/TaskCreate). Multiple instances of each role are spawned based on repo size (2-10 baseline scanners, 1-20 deep analysts, 0-3 cross-cutting reviewers).
+The team lead has all 32 codemem tools + team orchestration. Specialized agents have a restricted subset (memory + graph tools, no Agent/TeamCreate/TaskCreate). Multiple instances of each role are spawned based on repo size (2-10 baseline scanners, 1-20 deep analysts, 0-3 cross-cutting reviewers).
 
 ## Key Design Decisions
 
@@ -77,7 +77,7 @@ The team lead has all 30 codemem tools + team orchestration. Specialized agents 
 - **Chunking improvements**: O(log n) parent resolution via SymbolIntervalIndex, configurable overlap_lines, merged chunks preserve comma-separated node_kind labels
 - **Reference improvements**: Rust grouped import decomposition (`std::{HashMap, HashSet}`), reference deduplication by (source, target, kind), AST reuse (parse once for both symbols and references)
 - **BM25 persistence**: Index serializable via JSON for fast startup without re-indexing
-- **MCP tool consolidation**: 30 primary tools (down from 43), with legacy aliases for backwards compatibility. Key merges: `recall` (unified recall/expansion/impact), `consolidate` (unified 6 modes), `codemem_status` (unified stats/health/metrics), `search_code` (unified semantic/text/hybrid), `get_symbol_graph` (unified deps/impact)
+- **MCP tool consolidation**: 32 tools. Key merges: `recall` (unified recall/expansion/impact), `consolidate` (unified 6 modes), `codemem_status` (unified stats/health/metrics), `search_code` (unified semantic/text/hybrid), `get_symbol_graph` (unified deps/impact)
 - **Auto-linking**: `store_memory` auto-detects code references (CamelCase, backticks, qualified paths, file paths) in content and links to matching graph nodes
 - **Enrichment config**: `EnrichmentConfig` with tunable thresholds for git history, performance analysis, insight confidence, and semantic dedup (cosine > 0.90)
 - **Persistent config**: TOML config at `~/.codemem/config.toml` with scoring weights, vector/graph tuning, embedding provider, chunking, enrichment, and storage settings. Loaded at startup; partial configs merge with defaults
@@ -119,6 +119,6 @@ All checks must pass on push to main:
 ## Documentation
 
 - [Architecture](docs/architecture.md) — System design with Mermaid diagrams
-- [MCP Tools](docs/mcp-tools.md) — All 30 tools reference (+ legacy aliases)
+- [MCP Tools](docs/mcp-tools.md) — All 32 tools reference
 - [CLI Reference](docs/cli-reference.md) — All 19 commands
 - [Comparison](docs/comparison.md) — vs claude-mem, AgentDB, AutoMem, and more

@@ -767,41 +767,6 @@ Enrich the knowledge graph with git history: commit counts, churn rate, CO_CHANG
 
 ---
 
-## Legacy Tool Aliases
-
-The following old tool names are still accepted for backwards compatibility. They are transparently mapped to the new unified tools:
-
-| Legacy Name | Maps To | Notes |
-|-------------|---------|-------|
-| `recall_memory` | `recall` | Direct alias |
-| `recall_with_expansion` | `recall` | Sets `expand=true` |
-| `recall_with_impact` | `recall` | Sets `include_impact=true` |
-| `update_memory` | `refine_memory` | Sets `destructive=true` |
-| `codemem_stats` | `codemem_status` | Sets `include=["stats"]` |
-| `codemem_health` | `codemem_status` | Sets `include=["health"]` |
-| `codemem_metrics` | `codemem_status` | Sets `include=["metrics"]` |
-| `consolidate_decay` | `consolidate` | Sets `mode="decay"` |
-| `consolidate_creative` | `consolidate` | Sets `mode="creative"` |
-| `consolidate_cluster` | `consolidate` | Sets `mode="cluster"` |
-| `consolidate_forget` | `consolidate` | Sets `mode="forget"` |
-| `consolidate_summarize` | `consolidate` | Sets `mode="summarize"` |
-| `consolidation_status` | `consolidate` | Sets `mode="auto"` |
-| `pattern_insights` | `detect_patterns` | Sets `format="markdown"` |
-| `search_symbols` | `search_code` | Sets `mode="text"` |
-| `get_dependencies` | `get_symbol_graph` | Direct alias |
-| `get_impact` | `get_symbol_graph` | Direct alias |
-| `get_clusters` | `find_related_groups` | Direct alias |
-| `get_pagerank` | `find_important_nodes` | Direct alias |
-| `enrich_security` | via `enrich_codebase` | Legacy pass-through |
-| `enrich_performance` | via `enrich_codebase` | Legacy pass-through |
-
-**Removed tools** (return error if called):
-- `set_scoring_weights` — Use `codemem config set scoring.<key> <value>` CLI or config.toml
-- `export_memories` — Use `codemem export` CLI
-- `import_memories` — Use `codemem import` CLI
-
----
-
 ## Reference Tables
 
 ### Relationship Types (24)

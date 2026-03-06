@@ -73,7 +73,7 @@ fn consolidate_decay_reduces_importance() {
     server.engine.storage.insert_memory(&memory).unwrap();
 
     // Run decay with default threshold (30 days)
-    let params = json!({"name": "consolidate_decay", "arguments": {}});
+    let params = json!({"name": "consolidate", "arguments": {"mode": "decay"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(1));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -101,7 +101,8 @@ fn consolidate_decay_skips_recent_memories() {
     store_memory(&server, "recently accessed memory", "context", &[]);
 
     // Run decay
-    let params = json!({"name": "consolidate_decay", "arguments": {"threshold_days": 30}});
+    let params =
+        json!({"name": "consolidate", "arguments": {"mode": "decay", "threshold_days": 30}});
     let resp = server.handle_request("tools/call", Some(&params), json!(1));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -145,7 +146,7 @@ fn consolidate_creative_creates_edges() {
     }
 
     // Run creative cycle
-    let params = json!({"name": "consolidate_creative", "arguments": {}});
+    let params = json!({"name": "consolidate", "arguments": {"mode": "creative"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(1));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -165,7 +166,7 @@ fn consolidate_creative_skips_same_type() {
     store_memory(&server, "insight one about rust", "insight", &["rust"]);
     store_memory(&server, "insight two about rust", "insight", &["rust"]);
 
-    let params = json!({"name": "consolidate_creative", "arguments": {}});
+    let params = json!({"name": "consolidate", "arguments": {"mode": "creative"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(1));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -204,7 +205,7 @@ fn consolidate_forget_deletes_low_importance() {
     assert_eq!(server.engine.storage.memory_count().unwrap(), 1);
 
     // Run forget
-    let params = json!({"name": "consolidate_forget", "arguments": {}});
+    let params = json!({"name": "consolidate", "arguments": {"mode": "forget"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(1));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -244,7 +245,7 @@ fn consolidate_forget_keeps_accessed_memories() {
     // This memory has access_count = 5, so it should NOT be forgotten
     // (forget only targets memories with access_count == 0)
 
-    let params = json!({"name": "consolidate_forget", "arguments": {}});
+    let params = json!({"name": "consolidate", "arguments": {"mode": "forget"}});
     let resp = server.handle_request("tools/call", Some(&params), json!(1));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -301,7 +302,7 @@ fn consolidate_forget_custom_threshold() {
     assert_eq!(server.engine.storage.memory_count().unwrap(), 2);
 
     // Forget with threshold 0.5 should delete both
-    let params = json!({"name": "consolidate_forget", "arguments": {"importance_threshold": 0.5}});
+    let params = json!({"name": "consolidate", "arguments": {"mode": "forget", "importance_threshold": 0.5}});
     let resp = server.handle_request("tools/call", Some(&params), json!(1));
     let result = resp.result.unwrap();
     let text = result["content"][0]["text"].as_str().unwrap();
@@ -331,8 +332,8 @@ fn recall_with_impact_returns_impact_data() {
     // Recall with impact (text fallback, no embeddings)
     let result = call_tool(
         &server,
-        "recall_with_impact",
-        json!({"query": "error handling"}),
+        "recall",
+        json!({"query": "error handling", "include_impact": true}),
     );
     let text = result["content"][0]["text"].as_str().unwrap();
 
@@ -528,8 +529,9 @@ fn consolidate_forget_with_target_tags() {
 
     // Forget only static-analysis tagged memories below 0.5
     let params = json!({
-        "name": "consolidate_forget",
+        "name": "consolidate",
         "arguments": {
+            "mode": "forget",
             "importance_threshold": 0.5,
             "target_tags": ["static-analysis"]
         }
@@ -578,8 +580,9 @@ fn consolidate_forget_with_max_access_count() {
 
     // Forget only with max_access_count=0 (only never-accessed)
     let params = json!({
-        "name": "consolidate_forget",
+        "name": "consolidate",
         "arguments": {
+            "mode": "forget",
             "importance_threshold": 0.5,
             "target_tags": ["static-analysis"],
             "max_access_count": 0

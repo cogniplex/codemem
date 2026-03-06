@@ -11,10 +11,10 @@ fn handle_tools_call_store() {
     assert!(resp.result.is_some());
     assert!(resp.error.is_none());
 
-    // Verify it actually stored (codemem_stats is a legacy alias for codemem_status(include: ["stats"]))
+    // Verify it actually stored
     let stats_resp = server.handle_request(
         "tools/call",
-        Some(&json!({"name": "codemem_stats", "arguments": {}})),
+        Some(&json!({"name": "codemem_status", "arguments": {"include": ["stats"]}})),
         json!(4),
     );
     let stats = stats_resp.result.unwrap();
@@ -40,7 +40,7 @@ fn handle_store_and_recall() {
 
     // Recall it (text search fallback, no embeddings in test)
     let recall_params = json!({
-        "name": "recall_memory",
+        "name": "recall",
         "arguments": {"query": "rust memory safety"}
     });
     let resp = server.handle_request("tools/call", Some(&recall_params), json!(2));
@@ -190,7 +190,7 @@ fn recall_filters_by_namespace() {
 
     // Recall with namespace filter "/projects/a"
     let params = json!({
-        "name": "recall_memory",
+        "name": "recall",
         "arguments": {"query": "rust", "namespace": "/projects/a"}
     });
     let resp = server.handle_request("tools/call", Some(&params), json!(100));
@@ -578,7 +578,7 @@ fn recall_with_exclude_tags_filters_out() {
 
     // Recall without filter — both should appear
     let params = json!({
-        "name": "recall_memory",
+        "name": "recall",
         "arguments": { "query": "rust" }
     });
     let resp = server.handle_request("tools/call", Some(&params), json!(500));
@@ -589,7 +589,7 @@ fn recall_with_exclude_tags_filters_out() {
 
     // Recall with exclude_tags=["static-analysis"] — only the regular one
     let params = json!({
-        "name": "recall_memory",
+        "name": "recall",
         "arguments": { "query": "rust", "exclude_tags": ["static-analysis"] }
     });
     let resp = server.handle_request("tools/call", Some(&params), json!(501));
@@ -641,7 +641,7 @@ fn recall_with_min_importance_filters() {
 
     // Recall with min_importance=0.5 — only the high importance one
     let params = json!({
-        "name": "recall_memory",
+        "name": "recall",
         "arguments": { "query": "rust", "min_importance": 0.5 }
     });
     let resp = server.handle_request("tools/call", Some(&params), json!(502));
