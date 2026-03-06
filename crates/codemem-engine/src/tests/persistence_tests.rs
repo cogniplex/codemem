@@ -129,10 +129,7 @@ fn edge_weight_for_custom_config() {
 #[test]
 fn edge_weight_for_fixed_types() {
     let config = GraphConfig::default();
-    assert_eq!(
-        edge_weight_for(&RelationshipType::Implements, &config),
-        0.8
-    );
+    assert_eq!(edge_weight_for(&RelationshipType::Implements, &config), 0.8);
     assert_eq!(edge_weight_for(&RelationshipType::Inherits, &config), 0.8);
     assert_eq!(edge_weight_for(&RelationshipType::DependsOn, &config), 0.7);
     assert_eq!(edge_weight_for(&RelationshipType::CoChanged, &config), 0.6);
@@ -140,15 +137,9 @@ fn edge_weight_for_fixed_types() {
         edge_weight_for(&RelationshipType::EvolvedInto, &config),
         0.7
     );
-    assert_eq!(
-        edge_weight_for(&RelationshipType::Summarizes, &config),
-        0.7
-    );
+    assert_eq!(edge_weight_for(&RelationshipType::Summarizes, &config), 0.7);
     assert_eq!(edge_weight_for(&RelationshipType::PartOf, &config), 0.4);
-    assert_eq!(
-        edge_weight_for(&RelationshipType::RelatesTo, &config),
-        0.3
-    );
+    assert_eq!(edge_weight_for(&RelationshipType::RelatesTo, &config), 0.3);
     assert_eq!(
         edge_weight_for(&RelationshipType::SharesTheme, &config),
         0.3
@@ -228,9 +219,9 @@ fn persist_creates_contains_edges_for_packages() {
 
     // pkg:src/ -> pkg:src/util/ CONTAINS edge
     let src_edges = graph.get_edges("pkg:src/").unwrap();
-    let has_util_edge = src_edges.iter().any(|e| {
-        e.dst == "pkg:src/util/" && e.relationship == RelationshipType::Contains
-    });
+    let has_util_edge = src_edges
+        .iter()
+        .any(|e| e.dst == "pkg:src/util/" && e.relationship == RelationshipType::Contains);
     assert!(has_util_edge, "src/ should contain src/util/");
 
     // pkg:src/util/ -> file:src/util/helper.rs CONTAINS edge
@@ -283,9 +274,9 @@ fn persist_creates_file_to_symbol_contains_edge() {
 
     let graph = engine.lock_graph().unwrap();
     let file_edges = graph.get_edges("file:src/main.rs").unwrap();
-    let has_sym_edge = file_edges.iter().any(|e| {
-        e.dst == "sym:process" && e.relationship == RelationshipType::Contains
-    });
+    let has_sym_edge = file_edges
+        .iter()
+        .any(|e| e.dst == "sym:process" && e.relationship == RelationshipType::Contains);
     assert!(has_sym_edge, "file should contain symbol");
 }
 
@@ -357,7 +348,10 @@ fn persist_creates_reference_edges() {
     let has_calls_edge = caller_edges
         .iter()
         .any(|e| e.dst == "sym:callee" && e.relationship == RelationshipType::Calls);
-    assert!(has_calls_edge, "should create Calls edge from caller to callee");
+    assert!(
+        has_calls_edge,
+        "should create Calls edge from caller to callee"
+    );
 }
 
 // ── persist_index_results: chunk nodes ──────────────────────────────
@@ -407,10 +401,7 @@ fn persist_creates_file_to_chunk_edge() {
     let has_chunk_edge = file_edges
         .iter()
         .any(|e| e.dst.starts_with("chunk:") && e.relationship == RelationshipType::Contains);
-    assert!(
-        has_chunk_edge,
-        "file should have CONTAINS edge to chunk"
-    );
+    assert!(has_chunk_edge, "file should have CONTAINS edge to chunk");
 }
 
 #[test]
@@ -610,7 +601,11 @@ fn compact_preserves_high_value_chunks() {
     let mut files = HashSet::new();
     files.insert("src/main.rs".to_string());
 
-    let symbols = vec![make_symbol("important_fn", "src/main.rs", SymbolKind::Function)];
+    let symbols = vec![make_symbol(
+        "important_fn",
+        "src/main.rs",
+        SymbolKind::Function,
+    )];
     // One chunk with a parent symbol (high value due to structural parent)
     let mut chunk = make_chunk("src/main.rs", 0, Some("important_fn"));
     chunk.non_ws_chars = 200; // large, high value
@@ -691,12 +686,17 @@ fn persist_end_to_end_multi_file() {
     }];
 
     let result = make_index_result(symbols, chunks, files, edges);
-    let pr = engine.persist_index_results(&result, Some("test-ns")).unwrap();
+    let pr = engine
+        .persist_index_results(&result, Some("test-ns"))
+        .unwrap();
 
     assert_eq!(pr.files_created, 3);
     assert_eq!(pr.symbols_stored, 3);
     assert_eq!(pr.edges_resolved, 1);
-    assert!(pr.packages_created >= 2, "should create pkg:src/ and pkg:src/util/");
+    assert!(
+        pr.packages_created >= 2,
+        "should create pkg:src/ and pkg:src/util/"
+    );
 
     // Verify the call edge exists
     let graph = engine.lock_graph().unwrap();
@@ -737,7 +737,10 @@ fn persist_cleans_stale_chunks_on_reindex() {
     // (delete_graph_nodes_by_prefix is called before re-inserting chunks)
     // Note: the graph may still have the node from the first pass if it
     // wasn't cleaned from the in-memory graph, but storage should be clean.
-    let stored = engine.storage.get_graph_node("chunk:src/main.rs:1").unwrap();
+    let stored = engine
+        .storage
+        .get_graph_node("chunk:src/main.rs:1")
+        .unwrap();
     assert!(
         stored.is_none(),
         "stale chunk should be removed from storage on re-index"

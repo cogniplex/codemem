@@ -498,7 +498,10 @@ fn activity_insights_response_serialization() {
 
     let json = serde_json::to_value(&resp).unwrap();
     assert_eq!(json["git_summary"]["total_annotated_files"], 50);
-    assert_eq!(json["git_summary"]["top_authors"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        json["git_summary"]["top_authors"].as_array().unwrap().len(),
+        2
+    );
 }
 
 #[test]

@@ -161,7 +161,14 @@ fn store_insight_returns_id_on_success() {
 fn store_insight_creates_memory_in_storage() {
     let engine = CodememEngine::for_testing();
     let id = engine
-        .store_insight("Architecture uses layered design", "architecture", &[], 0.7, None, &[])
+        .store_insight(
+            "Architecture uses layered design",
+            "architecture",
+            &[],
+            0.7,
+            None,
+            &[],
+        )
         .unwrap();
 
     let memory = engine.storage.get_memory(&id).unwrap().unwrap();
@@ -175,7 +182,14 @@ fn store_insight_creates_memory_in_storage() {
 fn store_insight_tags_include_track_and_static_analysis() {
     let engine = CodememEngine::for_testing();
     let id = engine
-        .store_insight("test content unique abc", "testing", &["custom-tag"], 0.5, None, &[])
+        .store_insight(
+            "test content unique abc",
+            "testing",
+            &["custom-tag"],
+            0.5,
+            None,
+            &[],
+        )
         .unwrap();
 
     let memory = engine.storage.get_memory(&id).unwrap().unwrap();
@@ -450,9 +464,7 @@ fn enrich_security_matches_multiple_patterns() {
         let mut graph = engine.lock_graph().unwrap();
         graph.add_node(file_node("config/.env")).unwrap();
         graph.add_node(file_node("src/jwt_handler.rs")).unwrap();
-        graph
-            .add_node(file_node("src/token_validator.rs"))
-            .unwrap();
+        graph.add_node(file_node("src/token_validator.rs")).unwrap();
     }
 
     let result = engine.enrich_security(None).unwrap();
@@ -638,9 +650,7 @@ fn enrich_architecture_detects_known_patterns() {
         graph
             .add_node(package_node("pkg:models", "models"))
             .unwrap();
-        graph
-            .add_node(package_node("pkg:views", "views"))
-            .unwrap();
+        graph.add_node(package_node("pkg:views", "views")).unwrap();
     }
 
     let result = engine.enrich_architecture(None).unwrap();
@@ -719,11 +729,7 @@ fn enrich_test_mapping_links_test_to_function_by_calls_edge() {
             .add_node(function_node("fn:compute", "compute", "src/math.rs"))
             .unwrap();
         graph
-            .add_node(test_node(
-                "test:my_test",
-                "my_test",
-                "tests/math_test.rs",
-            ))
+            .add_node(test_node("test:my_test", "my_test", "tests/math_test.rs"))
             .unwrap();
         // Test calls compute
         graph
@@ -1052,8 +1058,7 @@ fn enrich_hot_complex_detects_overlap() {
         let mut graph = engine.lock_graph().unwrap();
 
         let mut file = file_node("src/risky.rs");
-        file.payload
-            .insert("git_churn_rate".into(), json!(10.0));
+        file.payload.insert("git_churn_rate".into(), json!(10.0));
         graph.add_node(file).unwrap();
 
         let mut func = function_node("fn:risky_fn", "risky_fn", "src/risky.rs");
@@ -1080,8 +1085,7 @@ fn enrich_hot_complex_ignores_low_complexity() {
         let mut graph = engine.lock_graph().unwrap();
 
         let mut file = file_node("src/simple.rs");
-        file.payload
-            .insert("git_churn_rate".into(), json!(8.0));
+        file.payload.insert("git_churn_rate".into(), json!(8.0));
         graph.add_node(file).unwrap();
 
         let mut func = function_node("fn:easy", "easy", "src/simple.rs");
@@ -1269,18 +1273,10 @@ fn enrich_change_impact_counts_callers_from_symbol_edges() {
         let mut graph = engine.lock_graph().unwrap();
         graph.add_node(file_node("src/target.rs")).unwrap();
         graph
-            .add_node(function_node(
-                "fn:target_fn",
-                "target_fn",
-                "src/target.rs",
-            ))
+            .add_node(function_node("fn:target_fn", "target_fn", "src/target.rs"))
             .unwrap();
         graph
-            .add_node(function_node(
-                "fn:caller_fn",
-                "caller_fn",
-                "src/caller.rs",
-            ))
+            .add_node(function_node("fn:caller_fn", "caller_fn", "src/caller.rs"))
             .unwrap();
         graph
             .add_edge(make_edge(
@@ -1291,9 +1287,7 @@ fn enrich_change_impact_counts_callers_from_symbol_edges() {
             .unwrap();
     }
 
-    let result = engine
-        .enrich_change_impact("src/target.rs", None)
-        .unwrap();
+    let result = engine.enrich_change_impact("src/target.rs", None).unwrap();
     assert!(
         result.details["callers"].as_u64().unwrap() >= 1,
         "should detect caller from another file"

@@ -142,9 +142,7 @@ fn forget_with_custom_max_access_count() {
         ))
         .unwrap();
 
-    let result = engine
-        .consolidate_forget(Some(0.1), None, Some(5))
-        .unwrap();
+    let result = engine.consolidate_forget(Some(0.1), None, Some(5)).unwrap();
     assert!(
         result.affected >= 1,
         "should forget memory with access_count <= max_access_count"
@@ -191,10 +189,7 @@ fn cluster_no_duplicates() {
     assert_eq!(result.cycle, "cluster");
     // Without embeddings, no semantic duplicates should be found
     // (content hashes are different)
-    assert_eq!(
-        result.affected, 0,
-        "distinct memories should not be merged"
-    );
+    assert_eq!(result.affected, 0, "distinct memories should not be merged");
 }
 
 #[test]
@@ -329,10 +324,7 @@ fn consolidation_status_after_decay() {
     engine.consolidate_decay(None).unwrap();
 
     let status = engine.consolidation_status().unwrap();
-    assert!(
-        !status.is_empty(),
-        "should have at least one status entry"
-    );
+    assert!(!status.is_empty(), "should have at least one status entry");
     assert!(
         status.iter().any(|s| s.cycle_type == "decay"),
         "should include decay entry"

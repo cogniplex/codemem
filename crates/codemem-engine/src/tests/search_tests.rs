@@ -112,11 +112,7 @@ fn graph_memory_estimate_with_nodes() {
         };
         graph.add_node(node).unwrap();
     }
-    assert_eq!(
-        engine.graph_memory_estimate(),
-        200,
-        "1 node * 200 bytes"
-    );
+    assert_eq!(engine.graph_memory_estimate(), 200, "1 node * 200 bytes");
 }
 
 // ── summary_tree ────────────────────────────────────────────────────
@@ -145,9 +141,7 @@ fn summary_tree_single_node() {
         graph.add_node(node).unwrap();
     }
 
-    let tree = engine
-        .summary_tree("pkg:mypackage", 3, false)
-        .unwrap();
+    let tree = engine.summary_tree("pkg:mypackage", 3, false).unwrap();
     assert_eq!(tree.id, "pkg:mypackage");
     assert_eq!(tree.kind, "package");
     assert_eq!(tree.label, "mypackage");

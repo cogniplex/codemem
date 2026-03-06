@@ -15,10 +15,7 @@ fn test_api_server(tmp: &tempfile::TempDir) -> ApiServer {
 }
 
 /// Helper: send a request to the router and return (status, body-as-string).
-async fn send(
-    router: axum::Router,
-    request: Request<Body>,
-) -> (StatusCode, String) {
+async fn send(router: axum::Router, request: Request<Body>) -> (StatusCode, String) {
     let response = tower::ServiceExt::oneshot(router, request)
         .await
         .expect("oneshot request");
@@ -704,10 +701,7 @@ async fn get_consolidation_status_shows_all_cycles() {
     let json: serde_json::Value = serde_json::from_str(&body).unwrap();
     let cycles = json["cycles"].as_array().unwrap();
     assert_eq!(cycles.len(), 5);
-    let cycle_names: Vec<&str> = cycles
-        .iter()
-        .filter_map(|c| c["cycle"].as_str())
-        .collect();
+    let cycle_names: Vec<&str> = cycles.iter().filter_map(|c| c["cycle"].as_str()).collect();
     assert!(cycle_names.contains(&"decay"));
     assert!(cycle_names.contains(&"creative"));
     assert!(cycle_names.contains(&"cluster"));
@@ -928,12 +922,12 @@ async fn list_recipes_returns_predefined() {
     assert_eq!(status, StatusCode::OK);
     let json: serde_json::Value = serde_json::from_str(&body).unwrap();
     let recipes = json.as_array().unwrap();
-    assert!(recipes.len() >= 3, "Should have at least 3 predefined recipes");
+    assert!(
+        recipes.len() >= 3,
+        "Should have at least 3 predefined recipes"
+    );
 
-    let ids: Vec<&str> = recipes
-        .iter()
-        .filter_map(|r| r["id"].as_str())
-        .collect();
+    let ids: Vec<&str> = recipes.iter().filter_map(|r| r["id"].as_str()).collect();
     assert!(ids.contains(&"full-analysis"));
     assert!(ids.contains(&"quick-index"));
     assert!(ids.contains(&"graph-analysis"));

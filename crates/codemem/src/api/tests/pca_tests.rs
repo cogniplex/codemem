@@ -4,11 +4,8 @@ use ndarray::Array2;
 #[test]
 fn pca_top_k_returns_k_eigenvectors() {
     // 3x3 symmetric positive-definite matrix
-    let matrix = Array2::from_shape_vec(
-        (3, 3),
-        vec![2.0, 1.0, 0.0, 1.0, 3.0, 1.0, 0.0, 1.0, 2.0],
-    )
-    .unwrap();
+    let matrix =
+        Array2::from_shape_vec((3, 3), vec![2.0, 1.0, 0.0, 1.0, 3.0, 1.0, 0.0, 1.0, 2.0]).unwrap();
 
     let eigenvectors = power_iteration_top_k(&matrix, 2, 100);
     assert_eq!(eigenvectors.len(), 2);
@@ -89,11 +86,8 @@ fn pca_top_k_zero_matrix() {
 #[test]
 fn pca_eigenvectors_are_approximately_orthogonal() {
     // Symmetric matrix with distinct eigenvalues
-    let matrix = Array2::from_shape_vec(
-        (3, 3),
-        vec![5.0, 1.0, 0.5, 1.0, 3.0, 0.5, 0.5, 0.5, 1.0],
-    )
-    .unwrap();
+    let matrix =
+        Array2::from_shape_vec((3, 3), vec![5.0, 1.0, 0.5, 1.0, 3.0, 0.5, 0.5, 0.5, 1.0]).unwrap();
 
     let eigenvectors = power_iteration_top_k(&matrix, 3, 200);
     assert_eq!(eigenvectors.len(), 3);

@@ -319,7 +319,10 @@ fn recall_scores_low_for_no_token_overlap() {
         .unwrap();
     // Store a matching memory
     engine
-        .persist_memory(&make_memory("match1", "quantum chromodynamics gluon plasma"))
+        .persist_memory(&make_memory(
+            "match1",
+            "quantum chromodynamics gluon plasma",
+        ))
         .unwrap();
 
     let results = engine
@@ -336,8 +339,14 @@ fn recall_scores_low_for_no_token_overlap() {
     // BM25 fallback may still return results due to importance/confidence/recency
     // scoring components, but the matching memory should score higher
     if results.len() >= 2 {
-        let match_score = results.iter().find(|r| r.memory.id == "match1").map(|r| r.score);
-        let no_match_score = results.iter().find(|r| r.memory.id == "no1").map(|r| r.score);
+        let match_score = results
+            .iter()
+            .find(|r| r.memory.id == "match1")
+            .map(|r| r.score);
+        let no_match_score = results
+            .iter()
+            .find(|r| r.memory.id == "no1")
+            .map(|r| r.score);
         if let (Some(ms), Some(nms)) = (match_score, no_match_score) {
             assert!(ms >= nms, "matching memory should score >= non-matching");
         }
@@ -377,10 +386,7 @@ fn recall_with_expansion_finds_graph_connected_memories() {
     let results = engine
         .recall_with_expansion("architecture decision", 10, 2, None)
         .unwrap();
-    assert!(
-        !results.is_empty(),
-        "should find memories via expansion"
-    );
+    assert!(!results.is_empty(), "should find memories via expansion");
 }
 
 #[test]
@@ -510,10 +516,7 @@ fn delete_namespace_removes_all_memories() {
 
     // Verify they're gone from storage
     for i in 0..3 {
-        let m = engine
-            .storage
-            .get_memory(&format!("del-{i}"))
-            .unwrap();
+        let m = engine.storage.get_memory(&format!("del-{i}")).unwrap();
         assert!(m.is_none(), "deleted memory should be gone");
     }
 

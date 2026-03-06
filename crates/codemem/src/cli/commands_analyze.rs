@@ -66,20 +66,22 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
     // Use explicit --namespace if provided, otherwise default to the derived basename
     let enrich_ns = namespace.unwrap_or(ns);
 
-    match engine.enrich_git_history(path_str, days, Some(enrich_ns)) {
-        Ok(r) => println!("  Git history:      {} insights stored", r.insights_stored),
-        Err(e) => println!("  Git history:      skipped ({e})"),
+    let enrichment = engine.run_enrichments(path_str, &[], days, Some(enrich_ns), None);
+    if let Some(obj) = enrichment.results.as_object() {
+        for (name, detail) in obj {
+            let status = if detail.get("error").is_some() {
+                format!("skipped ({})", detail["error"].as_str().unwrap_or("error"))
+            } else {
+                "done".to_string()
+            };
+            println!("  {name:20} {status}");
+        }
     }
-
-    match engine.enrich_security(Some(enrich_ns)) {
-        Ok(r) => println!("  Security:         {} insights stored", r.insights_stored),
-        Err(e) => println!("  Security:         skipped ({e})"),
-    }
-
-    match engine.enrich_performance(10, Some(enrich_ns)) {
-        Ok(r) => println!("  Performance:      {} insights stored", r.insights_stored),
-        Err(e) => println!("  Performance:      skipped ({e})"),
-    }
+    println!(
+        "  {} analyses: {} insights stored",
+        enrichment.results.as_object().map_or(0, |o| o.len()),
+        enrichment.total_insights
+    );
 
     // ── Step 3: PageRank ────────────────────────────────────────────────────
     println!("\nStep 3/4: Computing PageRank...");

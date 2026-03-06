@@ -44,6 +44,14 @@ pub struct EnrichResult {
     pub details: serde_json::Value,
 }
 
+/// Result from running multiple enrichment analyses.
+pub struct EnrichmentPipelineResult {
+    /// JSON object with one key per analysis (e.g. "git", "security", etc.).
+    pub results: serde_json::Value,
+    /// Total number of insights stored across all analyses.
+    pub total_insights: usize,
+}
+
 impl CodememEngine {
     /// Store an Insight memory through a 3-phase pipeline:
     /// 1. Semantic dedup check (reject near-duplicates before persisting)
@@ -144,6 +152,93 @@ impl CodememEngine {
         self.auto_link_to_code_nodes(&id, content, links);
 
         Some(id)
+    }
+
+    /// Run selected enrichment analyses (or all 14 if `analyses` is empty).
+    ///
+    /// Parameters:
+    /// - `path`: project root (needed for git, blame, change_impact, complexity, code_smells, security_scan)
+    /// - `analyses`: which analyses to run; empty = all (except change_impact which needs file_path)
+    /// - `days`: git history lookback days
+    /// - `namespace`: optional namespace filter
+    /// - `file_path`: optional, needed only for change_impact
+    pub fn run_enrichments(
+        &self,
+        path: &str,
+        analyses: &[String],
+        days: u64,
+        namespace: Option<&str>,
+        file_path: Option<&str>,
+    ) -> EnrichmentPipelineResult {
+        let run_all = analyses.is_empty();
+        let mut results = json!({});
+        let mut total_insights: usize = 0;
+
+        let root = Path::new(path);
+        let project_root = Some(root);
+
+        macro_rules! run_analysis {
+            ($name:expr, $call:expr) => {
+                if run_all || analyses.iter().any(|a| a == $name) {
+                    match $call {
+                        Ok(r) => {
+                            total_insights += r.insights_stored;
+                            results[$name] = r.details;
+                        }
+                        Err(e) => {
+                            results[$name] = json!({"error": format!("{e}")});
+                        }
+                    }
+                }
+            };
+        }
+
+        run_analysis!("git", self.enrich_git_history(path, days, namespace));
+        run_analysis!("security", self.enrich_security(namespace));
+        run_analysis!("performance", self.enrich_performance(10, namespace));
+        run_analysis!(
+            "complexity",
+            self.enrich_complexity(namespace, project_root)
+        );
+        run_analysis!(
+            "code_smells",
+            self.enrich_code_smells(namespace, project_root)
+        );
+        run_analysis!(
+            "security_scan",
+            self.enrich_security_scan(namespace, project_root)
+        );
+        run_analysis!("architecture", self.enrich_architecture(namespace));
+        run_analysis!("test_mapping", self.enrich_test_mapping(namespace));
+        run_analysis!("api_surface", self.enrich_api_surface(namespace));
+        run_analysis!("doc_coverage", self.enrich_doc_coverage(namespace));
+        run_analysis!("hot_complex", self.enrich_hot_complex(namespace));
+        run_analysis!("blame", self.enrich_blame(path, namespace));
+        run_analysis!("quality", self.enrich_quality_stratification(namespace));
+
+        // change_impact requires a file_path, so it is not included in run_all
+        if analyses.iter().any(|a| a == "change_impact") {
+            let fp = file_path.unwrap_or("");
+            if fp.is_empty() {
+                results["change_impact"] =
+                    json!({"error": "change_impact requires 'file_path' parameter"});
+            } else {
+                match self.enrich_change_impact(fp, namespace) {
+                    Ok(r) => {
+                        total_insights += r.insights_stored;
+                        results["change_impact"] = r.details;
+                    }
+                    Err(e) => {
+                        results["change_impact"] = json!({"error": format!("{e}")});
+                    }
+                }
+            }
+        }
+
+        EnrichmentPipelineResult {
+            results,
+            total_insights,
+        }
     }
 
     /// Store a Pattern memory for code smell detection (E7).

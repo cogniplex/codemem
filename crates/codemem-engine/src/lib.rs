@@ -79,7 +79,7 @@ pub use bm25::Bm25Index;
 pub use metrics::InMemoryMetrics;
 
 // Re-export enrichment types
-pub use enrichment::EnrichResult;
+pub use enrichment::{EnrichResult, EnrichmentPipelineResult};
 
 // Re-export persistence types
 pub use persistence::{edge_weight_for, IndexPersistResult};

@@ -44,7 +44,12 @@ fn recall_with_impact_empty() {
 fn recall_with_impact_returns_impact_data() {
     let engine = CodememEngine::for_testing();
 
-    let m = make_memory_typed("imp1", "architecture decision about modules", MemoryType::Context, None);
+    let m = make_memory_typed(
+        "imp1",
+        "architecture decision about modules",
+        MemoryType::Context,
+        None,
+    );
     engine.persist_memory(&m).unwrap();
 
     let results = engine
@@ -64,8 +69,18 @@ fn recall_with_impact_finds_connected_decisions() {
     let engine = CodememEngine::for_testing();
 
     // Create a context memory and a decision memory, link them
-    let m1 = make_memory_typed("ctx1", "context about database schema design", MemoryType::Context, None);
-    let m2 = make_memory_typed("dec1", "decision about database schema design", MemoryType::Decision, None);
+    let m1 = make_memory_typed(
+        "ctx1",
+        "context about database schema design",
+        MemoryType::Context,
+        None,
+    );
+    let m2 = make_memory_typed(
+        "dec1",
+        "decision about database schema design",
+        MemoryType::Decision,
+        None,
+    );
     engine.persist_memory(&m1).unwrap();
     engine.persist_memory(&m2).unwrap();
 
@@ -104,7 +119,12 @@ fn recall_with_impact_finds_connected_decisions() {
 fn recall_with_impact_finds_dependent_files() {
     let engine = CodememEngine::for_testing();
 
-    let m = make_memory_typed("dep1", "memory about file dependency tracking", MemoryType::Context, None);
+    let m = make_memory_typed(
+        "dep1",
+        "memory about file dependency tracking",
+        MemoryType::Context,
+        None,
+    );
     engine.persist_memory(&m).unwrap();
 
     let now = chrono::Utc::now();
@@ -209,9 +229,7 @@ fn decision_chain_finds_decisions_by_file_path() {
         let _ = graph.add_edge(edge);
     }
 
-    let chain = engine
-        .get_decision_chain(Some("src/db.rs"), None)
-        .unwrap();
+    let chain = engine.get_decision_chain(Some("src/db.rs"), None).unwrap();
     assert_eq!(chain.chain_length, 2, "should find both decisions");
     assert_eq!(chain.file_path.as_deref(), Some("src/db.rs"));
 }
@@ -231,10 +249,7 @@ fn decision_chain_finds_decisions_by_topic() {
     let chain = engine
         .get_decision_chain(None, Some("authentication"))
         .unwrap();
-    assert!(
-        chain.chain_length >= 1,
-        "should find decision by topic"
-    );
+    assert!(chain.chain_length >= 1, "should find decision by topic");
     assert_eq!(chain.topic.as_deref(), Some("authentication"));
 }
 
@@ -316,9 +331,7 @@ fn node_coverage_no_memories() {
             .unwrap();
     }
 
-    let coverage = engine
-        .node_coverage(&["file:test.rs"])
-        .unwrap();
+    let coverage = engine.node_coverage(&["file:test.rs"]).unwrap();
     assert_eq!(coverage.len(), 1);
     assert_eq!(coverage[0].memory_count, 0);
     assert!(!coverage[0].has_coverage);
@@ -360,9 +373,7 @@ fn node_coverage_with_memory_link() {
         let _ = graph.add_edge(edge);
     }
 
-    let coverage = engine
-        .node_coverage(&["file:covered.rs"])
-        .unwrap();
+    let coverage = engine.node_coverage(&["file:covered.rs"]).unwrap();
     assert_eq!(coverage.len(), 1);
     assert_eq!(coverage[0].memory_count, 1);
     assert!(coverage[0].has_coverage);
