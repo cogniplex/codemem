@@ -396,10 +396,6 @@ pub(crate) fn codemem_db_path() -> PathBuf {
         .join("codemem.db")
 }
 
-pub(crate) fn truncate_str(s: &str, max: usize) -> String {
-    crate::truncate_str(s, max)
-}
-
 #[cfg(test)]
 #[path = "tests/main_tests.rs"]
 mod tests;

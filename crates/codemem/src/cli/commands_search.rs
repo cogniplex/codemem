@@ -41,7 +41,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
                     "  [{:.3}] [{}] {}",
                     similarity, memory.memory_type, memory.id
                 );
-                println!("         {}", super::truncate_str(&memory.content, 120));
+                println!("         {}", crate::truncate_str(&memory.content, 120));
                 if !memory.tags.is_empty() {
                     println!("         tags: {}", memory.tags.join(", "));
                 }
@@ -55,7 +55,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
                     }
                 }
                 println!("  [{:.3}] [{}] {}", similarity, node.kind, node.id);
-                println!("         {}", super::truncate_str(&node.label, 120));
+                println!("         {}", crate::truncate_str(&node.label, 120));
                 println!();
                 shown += 1;
             }
@@ -93,7 +93,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
                     "  [{}] {} (importance: {:.1})",
                     memory.memory_type, memory.id, memory.importance
                 );
-                println!("    {}", super::truncate_str(&memory.content, 120));
+                println!("    {}", crate::truncate_str(&memory.content, 120));
                 println!();
                 found += 1;
             }
@@ -114,7 +114,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
             }
         }
         println!("  [{}] {} (graph node)", node.kind, node.id);
-        println!("    {}", super::truncate_str(&node.label, 120));
+        println!("    {}", crate::truncate_str(&node.label, 120));
         println!();
         found += 1;
     }

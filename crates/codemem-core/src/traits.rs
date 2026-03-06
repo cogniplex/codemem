@@ -403,16 +403,6 @@ pub trait StorageBackend: Send + Sync {
         memory_type: Option<&str>,
     ) -> Result<Vec<MemoryNode>, CodememError>;
 
-    /// Get edges filtered by namespace (edges where both src and dst nodes have the given namespace).
-    fn graph_edges_for_namespace(&self, namespace: &str) -> Result<Vec<Edge>, CodememError>;
-
-    // ── Temporal Edge Queries ───────────────────────────────────────
-
-    /// Get edges active at a specific timestamp. Default: no temporal filtering.
-    fn get_edges_at_time(&self, node_id: &str, _timestamp: i64) -> Result<Vec<Edge>, CodememError> {
-        self.get_edges_for_node(node_id)
-    }
-
     /// Fetch stale memories with access metadata for power-law decay.
     /// Returns (id, importance, access_count, last_accessed_at).
     fn get_stale_memories_for_decay(

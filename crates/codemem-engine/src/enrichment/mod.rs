@@ -18,12 +18,8 @@ mod security;
 mod security_scan;
 mod test_mapping;
 
-use crate::scoring::truncate_content;
 use crate::CodememEngine;
-use codemem_core::{
-    Edge, GraphBackend, GraphNode, MemoryNode, MemoryType, NodeKind, RelationshipType,
-    VectorBackend,
-};
+use codemem_core::{Edge, GraphBackend, MemoryNode, MemoryType, RelationshipType, VectorBackend};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -243,6 +239,7 @@ impl CodememEngine {
 
     /// Store a Pattern memory for code smell detection (E7).
     /// Importance is fixed at 0.5 for code smells.
+    /// Uses the full persist pipeline (storage → BM25 → graph → embedding → vector).
     pub(super) fn store_pattern_memory(
         &self,
         content: &str,
@@ -276,42 +273,28 @@ impl CodememEngine {
             last_accessed_at: now,
         };
 
-        if self.storage.insert_memory(&memory).is_err() {
+        if self.persist_memory_no_save(&memory).is_err() {
             return None;
         }
 
-        // Minimal pipeline: BM25 + graph node + links
-        if let Ok(mut bm25) = self.lock_bm25() {
-            bm25.add_document(&id, content);
-        }
-
-        let graph_node = GraphNode {
-            id: id.clone(),
-            kind: NodeKind::Memory,
-            label: truncate_content(content, 80),
-            payload: HashMap::new(),
-            centrality: 0.0,
-            memory_id: Some(id.clone()),
-            namespace: namespace.map(String::from),
-        };
-        let _ = self.storage.insert_graph_node(&graph_node);
-        if let Ok(mut graph) = self.lock_graph() {
-            let _ = graph.add_node(graph_node);
-
-            for link_id in links {
-                let edge = Edge {
-                    id: format!("{id}-RELATES_TO-{link_id}"),
-                    src: id.clone(),
-                    dst: link_id.clone(),
-                    relationship: RelationshipType::RelatesTo,
-                    weight: 0.3,
-                    properties: HashMap::new(),
-                    created_at: now,
-                    valid_from: None,
-                    valid_to: None,
-                };
-                let _ = self.storage.insert_graph_edge(&edge);
-                let _ = graph.add_edge(edge);
+        // Post-step: RELATES_TO edges to linked nodes
+        if !links.is_empty() {
+            if let Ok(mut graph) = self.lock_graph() {
+                for link_id in links {
+                    let edge = Edge {
+                        id: format!("{id}-RELATES_TO-{link_id}"),
+                        src: id.clone(),
+                        dst: link_id.clone(),
+                        relationship: RelationshipType::RelatesTo,
+                        weight: 0.3,
+                        properties: HashMap::new(),
+                        created_at: now,
+                        valid_from: None,
+                        valid_to: None,
+                    };
+                    let _ = self.storage.insert_graph_edge(&edge);
+                    let _ = graph.add_edge(edge);
+                }
             }
         }
 

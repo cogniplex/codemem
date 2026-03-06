@@ -462,7 +462,7 @@ impl Bm25Index {
 
     /// Recompute average document length and total_doc_len from stored lengths.
     /// Public for use after deserialization to reconstruct the running total.
-    pub fn recompute_avg_doc_len(&mut self) {
+    pub(crate) fn recompute_avg_doc_len(&mut self) {
         let total: usize = self.doc_lengths.values().sum();
         self.total_doc_len = total;
         if self.doc_count == 0 {

@@ -1,6 +1,5 @@
 //! `StorageBackend` trait implementation for Storage.
 
-use crate::graph_persistence::{edge_from_row, extract_edge_tuple};
 use crate::{MemoryRow, Storage};
 use codemem_core::{
     CodememError, ConsolidationLogEntry, Edge, GraphNode, MemoryNode, NodeKind, Session,
@@ -439,36 +438,6 @@ impl StorageBackend for Storage {
         Ok(())
     }
 
-    // ── Temporal Edges ────────────────────────────────────────────────
-
-    fn get_edges_at_time(&self, node_id: &str, timestamp: i64) -> Result<Vec<Edge>, CodememError> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to
-                 FROM graph_edges
-                 WHERE (src = ?1 OR dst = ?1)
-                   AND (valid_from IS NULL OR valid_from <= ?2)
-                   AND (valid_to IS NULL OR valid_to > ?2)",
-            )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
-
-        let edges = stmt
-            .query_map(params![node_id, timestamp], extract_edge_tuple)
-            .map_err(|e| CodememError::Storage(e.to_string()))?
-            .filter_map(|r| match r {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    tracing::warn!("Failed to process edge row: {e}");
-                    None
-                }
-            })
-            .filter_map(edge_from_row)
-            .collect();
-
-        Ok(edges)
-    }
-
     fn get_stale_memories_for_decay(
         &self,
         threshold_ts: i64,
@@ -683,8 +652,6 @@ impl StorageBackend for Storage {
 
         Ok(result)
     }
-
-    delegate_storage!(graph_edges_for_namespace(&self, namespace: &str) -> Result<Vec<Edge>, CodememError>);
 
     // ── Session Activity (delegated) ──────────────────────────────────
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::truncate_str;
 use clap::Parser;
 
 #[test]

@@ -135,8 +135,7 @@ pub fn detect_language(path: &Path) -> Option<&'static str> {
 pub struct FileWatcher {
     _debouncer: notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>,
     receiver: Receiver<WatchEvent>,
-    #[allow(dead_code)]
-    gitignore: Arc<Option<Gitignore>>,
+    _gitignore: Arc<Option<Gitignore>>,
 }
 
 impl FileWatcher {
@@ -223,7 +222,7 @@ impl FileWatcher {
         Ok(Self {
             _debouncer: debouncer,
             receiver: rx,
-            gitignore,
+            _gitignore: gitignore,
         })
     }
 

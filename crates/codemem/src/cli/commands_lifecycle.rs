@@ -145,7 +145,7 @@ pub(crate) fn cmd_context(storage: &dyn StorageBackend) -> anyhow::Result<()> {
                     "| {} | {} | {} |\n",
                     date,
                     s.memory_count,
-                    super::truncate_str(summary, 80)
+                    crate::truncate_str(summary, 80)
                 ));
             }
             sections.push(sec);
@@ -196,7 +196,7 @@ pub(crate) fn cmd_context(storage: &dyn StorageBackend) -> anyhow::Result<()> {
                 "| {} | {} | {} |\n",
                 m.memory_type,
                 tags,
-                super::truncate_str(&m.content.replace('\n', " "), 80)
+                crate::truncate_str(&m.content.replace('\n', " "), 80)
             ));
         }
         sec.push_str("\n*Use `recall_memory` MCP tool for full details.*");
@@ -385,7 +385,7 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
 
     // Store prompt as a Context memory via the full persist pipeline
     // (BM25 + graph node + embedding + auto-linking)
-    let content = format!("User prompt: {}", super::truncate_str(prompt, 2000));
+    let content = format!("User prompt: {}", crate::truncate_str(prompt, 2000));
     let content_hash = codemem_engine::hooks::content_hash(&content);
 
     let now = chrono::Utc::now();
@@ -561,11 +561,11 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
                     .content
                     .strip_prefix("User prompt: ")
                     .unwrap_or(&m.content);
-                prompts.push(super::truncate_str(text, 120).to_string());
+                prompts.push(crate::truncate_str(text, 120).to_string());
             }
 
             if m.memory_type == codemem_core::MemoryType::Decision {
-                decisions.push(super::truncate_str(&m.content, 120).to_string());
+                decisions.push(crate::truncate_str(&m.content, 120).to_string());
             }
 
             session_memories.push(m);
