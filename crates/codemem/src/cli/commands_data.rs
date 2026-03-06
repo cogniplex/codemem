@@ -382,7 +382,19 @@ struct FileChange {
 }
 
 /// Batch window duration: events within this window are consolidated.
-const BATCH_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const BATCH_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Compute importance score for a batch of file changes.
+/// Scales from 0.3 (1 file) to 0.8 (10+ files).
+pub(crate) fn batch_importance(file_count: usize) -> f64 {
+    (0.3 + (file_count as f64 * 0.05).min(0.5)).min(0.8)
+}
+
+/// Returns true when a batch of file changes is trivial
+/// (1-2 files, all modifications, no creates/deletes).
+pub(crate) fn is_trivial_batch(file_count: usize, created: usize, deleted: usize) -> bool {
+    file_count <= 2 && created == 0 && deleted == 0
+}
 
 /// Core watch loop used by both `cmd_watch` (foreground) and `cmd_serve` (background).
 ///
@@ -516,7 +528,7 @@ fn flush_batch(
     // Only store memories for significant batches (3+ files, or any created/deleted).
     let created = batch.iter().filter(|f| f.event_type == "created").count();
     let deleted = batch.iter().filter(|f| f.event_type == "deleted").count();
-    if batch.len() <= 2 && created == 0 && deleted == 0 {
+    if is_trivial_batch(batch.len(), created, deleted) {
         if !quiet {
             tracing::debug!(
                 "[batch] Skipping trivial change ({} modified files)",
@@ -683,7 +695,7 @@ fn flush_batch(
     }
 
     // Importance scales with batch size: more files = more significant change
-    let importance = (0.3 + (batch.len() as f64 * 0.05).min(0.5)).min(0.8);
+    let importance = batch_importance(batch.len());
 
     let hash = codemem_storage::Storage::content_hash(&content);
 
@@ -727,3 +739,7 @@ fn flush_batch(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/commands_data_tests.rs"]
+mod tests;

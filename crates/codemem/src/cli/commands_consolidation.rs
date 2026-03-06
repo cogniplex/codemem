@@ -2,7 +2,23 @@
 
 use codemem_engine::CodememEngine;
 
+/// All valid consolidation cycle types.
+pub(crate) const VALID_CYCLES: &[&str] = &["decay", "creative", "cluster", "forget"];
+
+/// Returns `true` if the given cycle name is a known consolidation cycle.
+pub(crate) fn is_valid_cycle(cycle: &str) -> bool {
+    VALID_CYCLES.contains(&cycle)
+}
+
 pub(crate) fn cmd_consolidate(cycle: &str) -> anyhow::Result<()> {
+    if !is_valid_cycle(cycle) {
+        anyhow::bail!(
+            "Unknown cycle type: '{}'. Valid types: {}",
+            cycle,
+            VALID_CYCLES.join(", ")
+        );
+    }
+
     let db_path = super::codemem_db_path();
     let engine = CodememEngine::from_db_path(&db_path)?;
 
@@ -13,12 +29,7 @@ pub(crate) fn cmd_consolidate(cycle: &str) -> anyhow::Result<()> {
         "creative" => engine.consolidate_creative()?,
         "cluster" => engine.consolidate_cluster(None)?,
         "forget" => engine.consolidate_forget(None, None, None)?,
-        _ => {
-            anyhow::bail!(
-                "Unknown cycle type: '{}'. Valid types: decay, creative, cluster, forget",
-                cycle
-            );
-        }
+        _ => unreachable!("is_valid_cycle check above"),
     };
 
     println!(
@@ -48,8 +59,7 @@ pub(crate) fn cmd_consolidate_status() -> anyhow::Result<()> {
     }
 
     // Show cycles that have never been run
-    let all_cycles = ["decay", "creative", "cluster", "forget"];
-    for cycle in &all_cycles {
+    for cycle in VALID_CYCLES {
         if !entries.iter().any(|r| r.cycle_type == *cycle) {
             println!("  {:<10} never run", cycle);
         }
@@ -57,3 +67,7 @@ pub(crate) fn cmd_consolidate_status() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/commands_consolidation_tests.rs"]
+mod tests;

@@ -9,6 +9,9 @@ pub mod routes;
 pub mod sse;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 use crate::mcp::McpServer;
 use axum::{
     routing::{get, post},

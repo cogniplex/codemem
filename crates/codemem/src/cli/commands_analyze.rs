@@ -115,3 +115,7 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
     println!("\nDone. Run `codemem stats` to see updated totals.");
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/commands_analyze_tests.rs"]
+mod tests;

@@ -511,7 +511,7 @@ impl CodememEngine {
 /// An edge is active if:
 /// - `valid_from` is None or <= `now`
 /// - `valid_to` is None or > `now`
-fn is_edge_active(edge: &codemem_core::Edge, now: chrono::DateTime<chrono::Utc>) -> bool {
+pub(crate) fn is_edge_active(edge: &codemem_core::Edge, now: chrono::DateTime<chrono::Utc>) -> bool {
     if let Some(valid_to) = edge.valid_to {
         if valid_to < now {
             return false;

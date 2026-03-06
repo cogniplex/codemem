@@ -36,3 +36,7 @@ pub(crate) fn cmd_migrate() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/commands_migrate_tests.rs"]
+mod tests;

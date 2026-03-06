@@ -47,6 +47,26 @@ mod integration_tests;
 #[path = "tests/enrichment_tests.rs"]
 mod enrichment_tests;
 
+#[cfg(test)]
+#[path = "tests/recall_tests.rs"]
+mod recall_tests;
+
+#[cfg(test)]
+#[path = "tests/search_tests.rs"]
+mod search_tests;
+
+#[cfg(test)]
+#[path = "tests/consolidation_tests.rs"]
+mod consolidation_tests;
+
+#[cfg(test)]
+#[path = "tests/analysis_tests.rs"]
+mod analysis_tests;
+
+#[cfg(test)]
+#[path = "tests/persistence_tests.rs"]
+mod persistence_tests;
+
 // Re-export key index types at crate root for convenience
 pub use index::{
     ChunkConfig, CodeChunk, CodeParser, Dependency, IndexAndResolveResult, IndexProgress,

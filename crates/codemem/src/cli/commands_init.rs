@@ -567,3 +567,7 @@ pub(crate) fn batch_embed_existing(db_path: &std::path::Path) {
         println!("  Embedded and indexed {} memories.", embedded);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/commands_init_tests.rs"]
+mod tests;

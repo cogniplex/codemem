@@ -156,3 +156,7 @@ pub(crate) fn cmd_stats() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/commands_search_tests.rs"]
+mod tests;
