@@ -106,12 +106,6 @@ export interface NamespaceItem {
   memory_count: number
 }
 
-export interface NamespaceStats {
-  namespace: string
-  memory_count: number
-  type_distribution: Record<string, number>
-}
-
 export interface Repository {
   id: string
   path: string
@@ -251,23 +245,3 @@ export interface VectorPoint {
   label: string
 }
 
-// ── Recipe Events ─────────────────────────────────────────────────────────
-
-export interface RecipeStartEvent {
-  recipe: string
-  name: string
-  total_steps: number
-}
-
-export interface StepStartEvent {
-  step: number
-  tool: string
-  description: string
-}
-
-export interface StepResultEvent {
-  step: number
-  tool: string
-  success: boolean
-  result: string
-}

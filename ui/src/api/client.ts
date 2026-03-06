@@ -61,10 +61,6 @@ export const api = {
     request<import('./types').CommunitiesResponse>(`/api/graph/communities?resolution=${params?.resolution ?? 1.0}`),
   pagerank: (top?: number) =>
     request<{ scores: import('./types').PagerankEntry[] }>(`/api/graph/pagerank?top=${top ?? 20}`),
-  shortestPath: (from: string, to: string) =>
-    request<import('./types').SubgraphResponse>(`/api/graph/shortest-path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
-  impact: (id: string) =>
-    request<import('./types').SubgraphResponse>(`/api/graph/impact/${encodeURIComponent(id)}`),
   graphBrowse: (params?: { namespace?: string; kind?: string; q?: string; offset?: number; limit?: number }) => {
     const search = new URLSearchParams()
     if (params?.namespace) search.set('namespace', params.namespace)
@@ -81,14 +77,11 @@ export const api = {
 
   // Namespaces
   namespaces: () => request<import('./types').NamespaceItem[]>('/api/namespaces'),
-  namespaceStats: (ns: string) => request<import('./types').NamespaceStats>(`/api/namespaces/${encodeURIComponent(ns)}/stats`),
 
   // Repos
   repos: () => request<import('./types').Repository[]>('/api/repos'),
   registerRepo: (body: { path: string; name?: string }) =>
     request<import('./types').IdResponse>('/api/repos', { method: 'POST', body: JSON.stringify(body) }),
-  deleteRepo: (id: string) =>
-    request<import('./types').MessageResponse>(`/api/repos/${id}`, { method: 'DELETE' }),
   indexRepo: (id: string) =>
     request<import('./types').MessageResponse>(`/api/repos/${id}/index`, { method: 'POST' }),
   repo: (id: string) => request<import('./types').Repository>(`/api/repos/${id}`),
@@ -100,10 +93,6 @@ export const api = {
     if (params?.limit !== undefined) search.set('limit', String(params.limit))
     return request<import('./types').SessionResponse[]>(`/api/sessions?${search}`)
   },
-  startSession: (namespace?: string) =>
-    request<import('./types').IdResponse>('/api/sessions', { method: 'POST', body: JSON.stringify({ namespace }) }),
-  endSession: (id: string, summary?: string) =>
-    request<import('./types').MessageResponse>(`/api/sessions/${id}/end`, { method: 'POST', body: JSON.stringify({ summary }) }),
 
   // Timeline & Distribution
   timeline: (params?: { namespace?: string; from?: string; to?: string }) => {
@@ -162,8 +151,6 @@ export const api = {
 
   // Config
   config: () => request<Record<string, unknown>>('/api/config'),
-  updateConfig: (body: Record<string, unknown>) =>
-    request<import('./types').MessageResponse>('/api/config', { method: 'PUT', body: JSON.stringify(body) }),
   updateScoringWeights: (weights: Partial<import('./types').ScoreBreakdown>) =>
     request<import('./types').MessageResponse>('/api/config/scoring', { method: 'PUT', body: JSON.stringify(weights) }),
 }

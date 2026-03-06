@@ -6,7 +6,7 @@ import { api } from './client'
 // Stats & Health
 export const useStats = () => useQuery({ queryKey: ['stats'], queryFn: api.stats, refetchInterval: 10000 })
 export const useHealth = () => useQuery({ queryKey: ['health'], queryFn: api.health })
-export const useMetrics = () => useQuery({ queryKey: ['metrics'], queryFn: api.metrics })
+
 
 // Memories
 export const useMemories = (params?: Parameters<typeof api.memories>[0]) =>
@@ -14,26 +14,6 @@ export const useMemories = (params?: Parameters<typeof api.memories>[0]) =>
 
 export const useMemory = (id: string) =>
   useQuery({ queryKey: ['memory', id], queryFn: () => api.memory(id), enabled: !!id })
-
-export const useStoreMemory = () => {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: api.storeMemory,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['memories'] }),
-  })
-}
-
-export const useUpdateMemory = () => {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; content?: string; importance?: number }) =>
-      api.updateMemory(id, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['memories'] })
-      qc.invalidateQueries({ queryKey: ['memory'] })
-    },
-  })
-}
 
 export const useDeleteMemory = () => {
   const qc = useQueryClient()
@@ -56,9 +36,6 @@ export const useNeighbors = (id: string, depth?: number) =>
 
 export const useCommunities = (resolution?: number, enabled = true) =>
   useQuery({ queryKey: ['communities', resolution], queryFn: () => api.communities({ resolution }), enabled })
-
-export const usePagerank = (top?: number) =>
-  useQuery({ queryKey: ['pagerank', top], queryFn: () => api.pagerank(top) })
 
 export const useGraphBrowse = (params?: Parameters<typeof api.graphBrowse>[0]) =>
   useQuery({ queryKey: ['graph-browse', params], queryFn: () => api.graphBrowse(params) })
@@ -110,13 +87,6 @@ export const useTimeline = (params?: Parameters<typeof api.timeline>[0]) =>
 
 export const useDistribution = (namespace?: string) =>
   useQuery({ queryKey: ['distribution', namespace], queryFn: () => api.distribution(namespace) })
-
-// Patterns
-export const usePatterns = (namespace?: string) =>
-  useQuery({ queryKey: ['patterns', namespace], queryFn: () => api.patterns(namespace) })
-
-export const usePatternInsights = (namespace?: string) =>
-  useQuery({ queryKey: ['pattern-insights', namespace], queryFn: () => api.patternInsights(namespace) })
 
 // Consolidation
 export const useConsolidationStatus = () =>
