@@ -73,6 +73,7 @@ impl super::CodememEngine {
         let mut graph = self.lock_graph()?;
 
         // ── File nodes ──────────────────────────────────────────────────────
+        let mut file_nodes = Vec::with_capacity(seen_files.len());
         for file_path in seen_files {
             let node_id = format!("file:{file_path}");
             let mut payload = HashMap::new();
@@ -80,7 +81,7 @@ impl super::CodememEngine {
                 "file_path".to_string(),
                 serde_json::Value::String(file_path.clone()),
             );
-            let node = GraphNode {
+            file_nodes.push(GraphNode {
                 id: node_id,
                 kind: NodeKind::File,
                 label: file_path.clone(),
@@ -88,13 +89,17 @@ impl super::CodememEngine {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: ns_string.clone(),
-            };
-            let _ = self.storage.insert_graph_node(&node);
+            });
+        }
+        let _ = self.storage.insert_graph_nodes_batch(&file_nodes);
+        for node in file_nodes {
             let _ = graph.add_node(node);
         }
 
         // ── Package (directory) nodes ───────────────────────────────────────
         let mut created_dirs: HashSet<String> = HashSet::new();
+        let mut dir_nodes = Vec::new();
+        let mut dir_edges = Vec::new();
         for file_path in seen_files {
             let p = std::path::Path::new(file_path);
             let mut ancestors: Vec<String> = Vec::new();
@@ -111,7 +116,7 @@ impl super::CodememEngine {
             for (i, dir_str) in ancestors.iter().enumerate() {
                 let pkg_id = format!("pkg:{dir_str}/");
                 if created_dirs.insert(pkg_id.clone()) {
-                    let node = GraphNode {
+                    dir_nodes.push(GraphNode {
                         id: pkg_id.clone(),
                         kind: NodeKind::Package,
                         label: format!("{dir_str}/"),
@@ -119,9 +124,7 @@ impl super::CodememEngine {
                         centrality: 0.0,
                         memory_id: None,
                         namespace: ns_string.clone(),
-                    };
-                    let _ = self.storage.insert_graph_node(&node);
-                    let _ = graph.add_node(node);
+                    });
                 }
                 // CONTAINS edge from parent dir to this dir
                 if i > 0 {
@@ -147,8 +150,7 @@ impl super::CodememEngine {
                             properties: HashMap::new(),
                             created_at: now,
                         };
-                        let _ = self.storage.insert_graph_edge(&edge);
-                        let _ = graph.add_edge(edge);
+                        dir_edges.push(edge);
                     }
                 }
             }
@@ -157,7 +159,7 @@ impl super::CodememEngine {
                 let parent_pkg_id = format!("pkg:{last_dir}/");
                 let file_node_id = format!("file:{file_path}");
                 let edge_id = format!("contains:{parent_pkg_id}->{file_node_id}");
-                let edge = Edge {
+                dir_edges.push(Edge {
                     id: edge_id,
                     src: parent_pkg_id,
                     dst: file_node_id,
@@ -167,13 +169,21 @@ impl super::CodememEngine {
                     valid_to: None,
                     properties: HashMap::new(),
                     created_at: now,
-                };
-                let _ = self.storage.insert_graph_edge(&edge);
-                let _ = graph.add_edge(edge);
+                });
             }
+        }
+        let _ = self.storage.insert_graph_nodes_batch(&dir_nodes);
+        for node in dir_nodes {
+            let _ = graph.add_node(node);
+        }
+        let _ = self.storage.insert_graph_edges_batch(&dir_edges);
+        for edge in dir_edges {
+            let _ = graph.add_edge(edge);
         }
 
         // ── Symbol nodes ────────────────────────────────────────────────────
+        let mut sym_nodes = Vec::with_capacity(all_symbols.len());
+        let mut sym_edges = Vec::with_capacity(all_symbols.len());
         for sym in all_symbols {
             let kind = NodeKind::from(sym.kind);
 
@@ -245,8 +255,9 @@ impl super::CodememEngine {
                 );
             }
 
+            let sym_node_id = format!("sym:{}", sym.qualified_name);
             let node = GraphNode {
-                id: format!("sym:{}", sym.qualified_name),
+                id: sym_node_id.clone(),
                 kind,
                 label: sym.qualified_name.clone(),
                 payload,
@@ -254,14 +265,11 @@ impl super::CodememEngine {
                 memory_id: None,
                 namespace: ns_string.clone(),
             };
-
-            let sym_node_id = node.id.clone();
-            let _ = self.storage.insert_graph_node(&node);
-            let _ = graph.add_node(node);
+            sym_nodes.push(node);
 
             // CONTAINS edge: file → symbol
             let file_node_id = format!("file:{}", sym.file_path);
-            let contains_edge = Edge {
+            sym_edges.push(Edge {
                 id: format!("contains:{file_node_id}->{sym_node_id}"),
                 src: file_node_id,
                 dst: sym_node_id,
@@ -271,14 +279,21 @@ impl super::CodememEngine {
                 valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
-            };
-            let _ = self.storage.insert_graph_edge(&contains_edge);
-            let _ = graph.add_edge(contains_edge);
+            });
+        }
+        let _ = self.storage.insert_graph_nodes_batch(&sym_nodes);
+        for node in sym_nodes {
+            let _ = graph.add_node(node);
+        }
+        let _ = self.storage.insert_graph_edges_batch(&sym_edges);
+        for edge in sym_edges {
+            let _ = graph.add_edge(edge);
         }
 
         // ── Resolved reference edges ────────────────────────────────────────
-        for edge in edges {
-            let e = Edge {
+        let ref_edges: Vec<Edge> = edges
+            .iter()
+            .map(|edge| Edge {
                 id: format!(
                     "ref:{}->{}:{}",
                     edge.source_qualified_name, edge.target_qualified_name, edge.relationship
@@ -291,8 +306,10 @@ impl super::CodememEngine {
                 valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
-            };
-            let _ = self.storage.insert_graph_edge(&e);
+            })
+            .collect();
+        let _ = self.storage.insert_graph_edges_batch(&ref_edges);
+        for e in ref_edges {
             let _ = graph.add_edge(e);
         }
 
@@ -303,7 +320,8 @@ impl super::CodememEngine {
             let _ = self.storage.delete_graph_nodes_by_prefix(&prefix);
         }
 
-        let mut chunk_count = 0usize;
+        let mut chunk_nodes = Vec::with_capacity(all_chunks.len());
+        let mut chunk_edges = Vec::with_capacity(all_chunks.len() * 2);
         for chunk in all_chunks {
             let chunk_id = format!("chunk:{}:{}", chunk.file_path, chunk.index);
 
@@ -332,7 +350,7 @@ impl super::CodememEngine {
                 );
             }
 
-            let node = GraphNode {
+            chunk_nodes.push(GraphNode {
                 id: chunk_id.clone(),
                 kind: NodeKind::Chunk,
                 label: format!(
@@ -343,14 +361,11 @@ impl super::CodememEngine {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: ns_string.clone(),
-            };
-
-            let _ = self.storage.insert_graph_node(&node);
-            let _ = graph.add_node(node);
+            });
 
             // CONTAINS edge: file → chunk
             let file_node_id = format!("file:{}", chunk.file_path);
-            let file_chunk_edge = Edge {
+            chunk_edges.push(Edge {
                 id: format!("contains:{file_node_id}->{chunk_id}"),
                 src: file_node_id,
                 dst: chunk_id.clone(),
@@ -360,14 +375,12 @@ impl super::CodememEngine {
                 valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
-            };
-            let _ = self.storage.insert_graph_edge(&file_chunk_edge);
-            let _ = graph.add_edge(file_chunk_edge);
+            });
 
             // CONTAINS edge: parent symbol → chunk
             if let Some(ref parent_sym) = chunk.parent_symbol {
                 let parent_node_id = format!("sym:{parent_sym}");
-                let contains_edge = Edge {
+                chunk_edges.push(Edge {
                     id: format!("contains:{parent_node_id}->{chunk_id}"),
                     src: parent_node_id,
                     dst: chunk_id,
@@ -377,12 +390,17 @@ impl super::CodememEngine {
                     valid_to: None,
                     properties: HashMap::new(),
                     created_at: now,
-                };
-                let _ = self.storage.insert_graph_edge(&contains_edge);
-                let _ = graph.add_edge(contains_edge);
+                });
             }
-
-            chunk_count += 1;
+        }
+        let chunk_count = chunk_nodes.len();
+        let _ = self.storage.insert_graph_nodes_batch(&chunk_nodes);
+        for node in chunk_nodes {
+            let _ = graph.add_node(node);
+        }
+        let _ = self.storage.insert_graph_edges_batch(&chunk_edges);
+        for edge in chunk_edges {
+            let _ = graph.add_edge(edge);
         }
         drop(graph);
 
@@ -426,6 +444,8 @@ impl super::CodememEngine {
             // The vector lock is acquired per-batch (not held across all batches)
             // so that remote embedding providers (Ollama/OpenAI) don't block
             // vector reads for the entire duration.
+            // Persistence batch size: how many items to embed + flush per round.
+            // Separate from the GPU batch size (configured on EmbeddingService).
             const EMBED_CHUNK_SIZE: usize = 64;
 
             // all_pairs is ordered: symbols first, then chunks (via chain).
@@ -440,12 +460,19 @@ impl super::CodememEngine {
                 let texts: Vec<&str> = chunk.iter().map(|(_, t)| t.as_str()).collect();
                 match emb.embed_batch(&texts) {
                     Ok(embeddings) => {
+                        // Batch-store embeddings to SQLite
+                        let pairs: Vec<(&str, &[f32])> = chunk
+                            .iter()
+                            .zip(embeddings.iter())
+                            .map(|((id, _), emb)| (id.as_str(), emb.as_slice()))
+                            .collect();
+                        if let Err(e) = self.storage.store_embeddings_batch(&pairs) {
+                            tracing::warn!("Failed to batch-store embeddings: {e}");
+                        }
+                        // Insert into in-memory vector index (no batch API)
                         let mut vec = self.lock_vector()?;
-                        for ((id, _), embedding) in chunk.iter().zip(embeddings) {
-                            if let Err(e) = self.storage.store_embedding(id, &embedding) {
-                                tracing::warn!("Failed to store embedding for {id}: {e}");
-                            }
-                            if let Err(e) = vec.insert(id, &embedding) {
+                        for ((id, _), embedding) in chunk.iter().zip(embeddings.iter()) {
+                            if let Err(e) = vec.insert(id, embedding) {
                                 tracing::warn!("Failed to insert {id} into vector index: {e}");
                             }
                             if done < sym_count {
