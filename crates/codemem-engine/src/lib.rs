@@ -187,6 +187,18 @@ impl CodememEngine {
 
     /// Create an engine from a database path, loading all backends.
     pub fn from_db_path(db_path: &Path) -> Result<Self, CodememError> {
+        // Ensure parent directory exists (e.g. ~/.codemem/)
+        if let Some(parent) = db_path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    CodememError::Storage(format!(
+                        "Failed to create database directory {}: {e}",
+                        parent.display()
+                    ))
+                })?;
+            }
+        }
+
         let config = CodememConfig::load_or_default();
 
         // Wire StorageConfig into Storage::open
