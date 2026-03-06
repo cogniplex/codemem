@@ -816,5 +816,13 @@ impl McpServer {
 }
 
 #[cfg(test)]
-#[path = "tests/tools_graph_tests.rs"]
-mod tests;
+#[path = "tests/tools_graph_core_tests.rs"]
+mod tools_graph_core_tests;
+
+#[cfg(test)]
+#[path = "tests/tools_graph_structural_tests.rs"]
+mod tools_graph_structural_tests;
+
+#[cfg(test)]
+#[path = "tests/tools_graph_compaction_tests.rs"]
+mod tools_graph_compaction_tests;

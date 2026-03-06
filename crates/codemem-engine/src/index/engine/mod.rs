@@ -713,5 +713,13 @@ fn clean_block_doc_comment(text: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "../tests/engine_tests.rs"]
-mod tests;
+#[path = "../tests/engine_symbols_tests.rs"]
+mod engine_symbols_tests;
+
+#[cfg(test)]
+#[path = "../tests/engine_references_tests.rs"]
+mod engine_references_tests;
+
+#[cfg(test)]
+#[path = "../tests/engine_cross_cutting_tests.rs"]
+mod engine_cross_cutting_tests;

@@ -405,5 +405,13 @@ impl McpServer {
 }
 
 #[cfg(test)]
-#[path = "tests/tools_memory_tests.rs"]
-mod tests;
+#[path = "tests/tools_memory_crud_tests.rs"]
+mod crud_tests;
+
+#[cfg(test)]
+#[path = "tests/tools_memory_advanced_tests.rs"]
+mod advanced_tests;
+
+#[cfg(test)]
+#[path = "tests/tools_memory_quality_tests.rs"]
+mod quality_tests;
