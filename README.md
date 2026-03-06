@@ -45,34 +45,30 @@ Downloads the local embedding model (~440MB, one-time), registers lifecycle hook
 
 ### That's it
 
-Codemem now automatically captures context, injects prior knowledge at session start, and provides 30 MCP tools to your assistant.
+Codemem now automatically captures context, injects prior knowledge at session start, and provides 32 MCP tools to your assistant.
 
 ### Map your codebase (optional)
 
-Index your codebase to build a structural knowledge graph with call relationships, dependency edges, and PageRank-based importance scores:
+Run the full analysis pipeline -- indexes your codebase with tree-sitter, runs 14 enrichment analyses (git history, complexity, security, architecture, etc.), computes PageRank, and detects architectural clusters:
 
 ```bash
-codemem index
+codemem analyze
 ```
 
-Then use the built-in [code-mapper agent](examples/agents/code-mapper.md) to analyze architecture, detect clusters, and store insights:
+Then launch the [code-mapper agent](examples/agents/code-mapper.md) to do deep, agent-driven analysis -- it spawns a team of specialized agents that traverse the knowledge graph, discover patterns, and store architectural insights:
 
-```
-# In your AI assistant, the code-mapper agent runs these MCP tools:
-find_important_nodes { "top_k": 20 }              # Find most important symbols
-find_related_groups { "resolution": 1.0 }          # Detect architectural modules
-get_symbol_graph { "qualified_name": "...", "depth": 2 }  # Blast radius analysis
-search_code { "query": "database connection" }              # Semantic code search
+```bash
+claude --agent code-mapper
 ```
 
-See [`examples/agents/code-mapper.md`](examples/agents/code-mapper.md) for the full workflow.
+See [Index & Enrich Pipeline](docs/pipeline.md) for what happens under the hood.
 
 ## Key Features
 
-- **Graph-vector hybrid architecture** -- HNSW vector search (768-dim) + petgraph knowledge graph with 25 algorithms (PageRank, Louvain, betweenness centrality, BFS/DFS, and more)
-- **30 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (14 enrichment types), consolidation, impact analysis, session context, pattern detection over JSON-RPC (legacy tool names still accepted)
+- **Graph-vector hybrid architecture** -- HNSW vector search (768-dim) + petgraph knowledge graph (PageRank, Louvain community detection, betweenness centrality, BFS/DFS, SCC, topological sort, and more)
+- **32 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (14 enrichment types), consolidation, impact analysis, session context, pattern detection over JSON-RPC
 - **4 lifecycle hooks** -- Automatic context injection (SessionStart), prompt capture (UserPromptSubmit), observation capture (PostToolUse), and session summaries (Stop)
-- **9-component hybrid scoring** -- Vector similarity, graph strength, BM25 token overlap, temporal alignment, tag matching, importance, confidence, and recency
+- **8-component hybrid scoring** -- Vector similarity, graph strength, BM25 token overlap, temporal alignment, tag matching, importance, confidence, and recency
 - **Code-aware indexing** -- tree-sitter structural extraction for 14 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) with manifest parsing (Cargo.toml, package.json, go.mod, pyproject.toml)
 - **Contextual embeddings** -- Metadata and graph context enriched before embedding for higher recall precision
 - **Pluggable embeddings** -- Candle (local BERT, default), Ollama, or any OpenAI-compatible API
@@ -99,7 +95,7 @@ graph LR
 ```
 
 1. **Passively captures** what your AI reads, searches, and edits via lifecycle hooks
-2. **Actively recalls** relevant context via MCP tools with 9-component hybrid scoring
+2. **Actively recalls** relevant context via MCP tools with 8-component hybrid scoring
 3. **Injects context** at session start so your assistant picks up where it left off
 
 ### Hybrid scoring
@@ -107,12 +103,12 @@ graph LR
 | Component | Weight |
 |-----------|--------|
 | Vector similarity | 25% |
-| Graph strength (PageRank + betweenness + degree + cluster) | 25% |
+| Graph strength (PageRank + betweenness + degree + cluster) | 20% |
 | BM25 token overlap | 15% |
 | Temporal | 10% |
-| Tags | 10% |
-| Importance | 5% |
-| Confidence | 5% |
+| Importance | 10% |
+| Confidence | 10% |
+| Tag matching | 5% |
 | Recency | 5% |
 
 Weights are configurable via `codemem config set scoring.<key> <value>` and persist in `~/.codemem/config.toml`.
@@ -148,7 +144,7 @@ Scoring weights, vector/graph tuning, and storage settings persist in `~/.codeme
 
 ## MCP Tools
 
-30 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation. Legacy tool names from v0.7.0 are still accepted.
+32 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
 
 | Category | Tools |
 |----------|-------|
@@ -158,7 +154,7 @@ Scoring weights, vector/graph tuning, and storage settings persist in `~/.codeme
 | Consolidation & Patterns (3) | `consolidate`, `detect_patterns`, `get_decision_chain` |
 | Namespace (3) | `list_namespaces`, `namespace_stats`, `delete_namespace` |
 | Session & Context (2) | `session_checkpoint`, `session_context` |
-| Enrichment (3) | `enrich_codebase`, `analyze_codebase`, `enrich_git_history` |
+| Enrichment (5) | `enrich_codebase`, `analyze_codebase`, `enrich_git_history`, `enrich_security`, `enrich_performance` |
 
 ## CLI
 
@@ -193,7 +189,8 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 ## Documentation
 
 - [Architecture](docs/architecture.md) -- System design, data flow diagrams, storage schema
-- [MCP Tools Reference](docs/mcp-tools.md) -- All 30 tools with parameters and examples
+- [Index & Enrich Pipeline](docs/pipeline.md) -- Step-by-step data flow from source files to annotated graph
+- [MCP Tools Reference](docs/mcp-tools.md) -- All 32 tools with parameters and examples
 - [CLI Reference](docs/cli-reference.md) -- All 19 commands
 - [Comparison](docs/comparison.md) -- vs Mem0, Zep/Graphiti, Letta, claude-mem, and more
 
@@ -203,7 +200,7 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 git clone https://github.com/cogniplex/codemem.git
 cd codemem
 cargo build --release          # Optimized binary at target/release/codemem
-cargo test --workspace         # Run all 531 tests
+cargo test --workspace         # Run all 755 tests
 cargo bench                    # Criterion benchmarks
 ```
 

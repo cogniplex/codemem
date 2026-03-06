@@ -13,7 +13,7 @@ Codemem is a standalone Rust memory engine for AI coding assistants — a single
 | codemem-core | Shared types (`types.rs`), traits (`traits.rs`), errors (`error.rs`), config (`config.rs`): MemoryNode, Edge, Session, DetectedPattern, CodememConfig, ChunkingConfig, EnrichmentConfig, 7 MemoryTypes, 24 RelationshipTypes, 13 NodeKinds, ScoringWeights, VectorBackend/GraphBackend/StorageBackend traits |
 | codemem-storage | rusqlite (bundled) WAL mode + usearch HNSW vector index + petgraph graph engine. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning), `vector.rs` (HNSW 768-dim cosine, M=16), `graph/` (traversal with BFS/DFS/kind-aware filtering, algorithms: PageRank, Louvain, SCC, betweenness, topological, cached centrality, graph compaction, package nodes) |
 | codemem-embeddings | Pluggable via `from_env()`: Candle (local BERT, default), Ollama, OpenAI-compatible. `CachedProvider` wrapper, BAAI/bge-base-en-v1.5 (768-dim), LRU cache 10K. Safe concurrency via `LockPoisoned` error handling |
-| codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing for Cargo.toml/package.json/go.mod/pyproject.toml), `hooks/` (lifecycle hook handlers for 9 tool types: Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/ListDir, trigger-based auto-insights), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `enrichment.rs` (14 enrichment types), `bm25.rs` (Okapi BM25 scoring with serialization), `scoring.rs` (hybrid scoring helpers), `recall.rs` (unified recall with temporal edge filtering), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `persistence.rs` (index persistence with cold-start-aware compaction), `metrics.rs` (operational metrics) |
+| codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing for Cargo.toml/package.json/go.mod/pyproject.toml), `hooks/` (lifecycle hook handlers for 9 tool types: Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/ListDir, trigger-based auto-insights, `extractors.rs` + `triggers.rs`), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `enrichment/` (14 enrichment types, one file per analysis + `run_enrichments()` pipeline), `consolidation/` (5 cycles: decay, creative, cluster, forget, summarize + union-find), `persistence/` (index persistence + compaction), `analysis.rs` (decision chains, session checkpoints, impact analysis), `search.rs` (semantic/text/hybrid code search), `recall.rs` (unified recall with temporal edge filtering), `bm25.rs` (Okapi BM25 scoring with serialization), `scoring.rs` (hybrid scoring helpers), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `metrics.rs` (operational metrics) |
 | codemem | Unified binary + library crate with three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 32 MCP tools, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 19 commands, lifecycle hooks, config management) |
 | codemem-bench | Criterion benchmarks, 20% regression threshold |
 
@@ -53,7 +53,7 @@ The team lead has all 32 codemem tools + team orchestration. Specialized agents 
 - **Contextual embeddings**: Text enriched with metadata + graph context before embedding
 - **7 memory types**: Decision, Pattern, Preference, Style, Habit, Insight, Context
 - **24 relationship types**: RELATES_TO, LEADS_TO, PART_OF, REINFORCES, CONTRADICTS, EVOLVED_INTO, DERIVED_FROM, INVALIDATED_BY, DEPENDS_ON, IMPORTS, EXTENDS, CALLS, CONTAINS, SUPERSEDES, BLOCKS, IMPLEMENTS, INHERITS, SIMILAR_TO, PRECEDED_BY, EXEMPLIFIES, EXPLAINS, SHARES_THEME, SUMMARIZES, CO_CHANGED
-- **9-component hybrid scoring**: vector_similarity 25%, graph_strength 20% (PageRank 40% + betweenness 30% + degree 20% + cluster 10%), BM25_token_overlap 15%, temporal 10%, importance 10%, confidence 10%, tag_matching 5%, recency 5%
+- **8-component hybrid scoring**: vector_similarity 25%, graph_strength 20% (PageRank 40% + betweenness 30% + degree 20% + cluster 10%), token_overlap 15%, temporal 10%, importance 10%, confidence 10%, tag_matching 5%, recency 5%
 - **BM25 scoring**: Okapi BM25 (k1=1.2, b=0.75) with code-aware tokenizer (camelCase/snake_case splitting)
 - **4 lifecycle hooks**: SessionStart (context injection + pending analysis), UserPromptSubmit (prompt capture via full persist pipeline), PostToolUse (observation capture from 9 tool types with 5 auto-insight triggers), Stop (session summary + change tracking via full persist pipeline)
 - **Change batching**: Stop hook stores `pending-analysis` tagged memories with edited file lists; SessionStart surfaces these for code-mapper agent analysis
@@ -92,7 +92,7 @@ candle-core/nn/transformers (ML inference), usearch (HNSW), rusqlite (bundled SQ
 
 ```bash
 cargo build                    # Build all crates
-cargo test --workspace         # Run all tests (531 tests)
+cargo test --workspace         # Run all tests (755 tests)
 cargo bench                    # Run benchmarks
 cargo build --release          # Optimized release binary
 cargo install --path crates/codemem      # Install CLI binary
@@ -119,6 +119,7 @@ All checks must pass on push to main:
 ## Documentation
 
 - [Architecture](docs/architecture.md) — System design with Mermaid diagrams
+- [Index & Enrich Pipeline](docs/pipeline.md) — Step-by-step data flow from source files to annotated graph
 - [MCP Tools](docs/mcp-tools.md) — All 32 tools reference
 - [CLI Reference](docs/cli-reference.md) — All 19 commands
 - [Comparison](docs/comparison.md) — vs claude-mem, AgentDB, AutoMem, and more

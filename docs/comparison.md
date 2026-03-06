@@ -33,7 +33,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 | **Storage** | Single SQLite file + HNSW index | Triple-store: vector DB (24+ providers) + graph DB (Neo4j/Memgraph) + relational DB |
 | **Auto-capture** | 4 lifecycle hooks capture Read/Grep/Edit/Write automatically + trigger-based auto-insights | Manual `add()` calls only |
 | **Code awareness** | 14 language extractors, CST-aware chunking, structural indexing | General-purpose fact extraction from conversations |
-| **Recall scoring** | 9-component hybrid (vector + graph strength via PageRank/betweenness + BM25 + temporal + tags + importance + confidence + recency) | Vector similarity + optional graph traversal + reranking (Cohere, etc.) |
+| **Recall scoring** | 8-component hybrid (vector + graph strength via PageRank/betweenness + BM25 + temporal + tags + importance + confidence + recency) | Vector similarity + optional graph traversal + reranking (Cohere, etc.) |
 | **Memory scoping** | Namespace-scoped (per project directory) | Multi-level: User, Session, Agent state |
 | **Contextual embeddings** | Yes (metadata + graph context enrichment at ingestion) | No |
 | **Local-only** | Yes, fully offline with Candle BERT | Requires external embedding API; local via Ollama possible |
@@ -52,7 +52,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 | **Benchmarks** | Inspired by AutoMem/HippoRAG research | #1 on LongMemEval, LoCoMo, ConvoMem |
 | **Modalities** | Code-focused (text + code indexing) | Multi-modal (PDFs, images/OCR, video transcription, code) |
 | **Connectors** | Lifecycle hooks (automatic) | Google Drive, Gmail, Notion, OneDrive, GitHub (real-time sync) |
-| **Recall** | 9-component hybrid scoring | Auto-extraction + contradiction detection + forgetting, ~50ms |
+| **Recall** | 8-component hybrid scoring | Auto-extraction + contradiction detection + forgetting, ~50ms |
 | **Offline** | Yes, fully local | No (cloud API required) |
 | **Dependencies** | None | Cloud account or self-hosted setup |
 
@@ -69,7 +69,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 | **Graph model** | 24 relationship types, 25 algorithms (PageRank, Louvain, betweenness, SCC) | Temporal knowledge graph with bi-temporal data model |
 | **Graph backends** | In-process (petgraph + SQLite) | Neo4j, FalkorDB, Kuzu, Amazon Neptune |
 | **Time handling** | Temporal edges (valid_from/valid_to) + recency scoring (5%) + temporal alignment (10%) | First-class bi-temporal relationships (event time + ingestion time), point-in-time queries |
-| **Retrieval** | 9-component hybrid scoring | Hybrid: semantic embeddings + BM25 + graph traversal |
+| **Retrieval** | 8-component hybrid scoring | Hybrid: semantic embeddings + BM25 + graph traversal |
 | **Updates** | Explicit store/update/consolidate with provenance tracking | Real-time incremental graph updates (no batch recomputation) |
 | **Custom entities** | 7 memory types + 13 node kinds | Custom entity definitions via Pydantic models |
 
@@ -118,7 +118,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 |--------|--------|---------------|
 | **Scope** | Full memory engine (capture + recall + graph + consolidation + auto-insights) | Code search/retrieval only |
 | **Code parsing** | ast-grep (14 languages) + CST-aware chunking | AST splitting (14 languages) |
-| **MCP tools** | 30 tools | 4 tools (index, search, clear, status) |
+| **MCP tools** | 32 tools | 4 tools (index, search, clear, status) |
 | **Memory** | Persistent across sessions with 7 memory types | Index only (no persistent learning) |
 | **Embedding** | Pluggable: Candle (local, default), Ollama, OpenAI-compatible | External API required (OpenAI/Voyage/Ollama/Gemini) |
 | **Search** | Hybrid (vector + graph + BM25 + temporal + tags + ...) | Hybrid (BM25 + dense vector) |
@@ -140,7 +140,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 | **Hooks** | 4 lifecycle hooks + trigger-based auto-insights | 5 lifecycle hooks |
 | **Knowledge graph** | petgraph with 25 algorithms (PageRank, Louvain, betweenness, SCC) | None |
 | **Code intelligence** | ast-grep indexing (14 languages), CST-aware chunking, structural relationships | None (stores raw text observations) |
-| **Scoring** | 9-component hybrid (vector + graph + BM25 + temporal + tags + importance + confidence + recency) | FTS5 keyword + Chroma vector (separate) |
+| **Scoring** | 8-component hybrid (vector + graph + BM25 + temporal + tags + importance + confidence + recency) | FTS5 keyword + Chroma vector (separate) |
 | **Embeddings** | Pluggable: Candle BERT (Metal/CUDA, default), Ollama, OpenAI-compatible | Chroma (external process via uvx) |
 | **BM25** | Okapi BM25 with code-aware tokenizer (camelCase/snake_case splitting) | SQLite FTS5 (not code-aware) |
 | **Observation compression** | Pluggable LLM (Ollama/OpenAI/Anthropic), optional | Claude Agent SDK (always on) |
@@ -164,7 +164,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 |--------|--------|---------|
 | **Benchmark** | Inspired by AutoMem's LoCoMo research | 90.53% LoCoMo accuracy (SOTA at time of publication) |
 | **Architecture** | Single binary (SQLite + usearch + petgraph) | Flask API + FalkorDB + Qdrant |
-| **Scoring** | 9-component hybrid | 9-component hybrid (semantic, lexical, graph, temporal, importance) |
+| **Scoring** | 8-component hybrid | 8-component hybrid (semantic, lexical, graph, temporal, importance) |
 | **Consolidation** | 5 neuroscience-inspired cycles | Zettelkasten-inspired clustering |
 | **Enrichment** | Just-in-time + git history + security + performance enrichment | Just-in-time enrichment on recall |
 | **Embeddings** | Pluggable: Candle (local), Ollama, OpenAI-compatible | Qdrant + Voyage AI |
@@ -181,7 +181,7 @@ Codemem was directly inspired by AutoMem's research. The key difference is packa
 |--------|--------|----------------|
 | **Memory model** | 7 typed memories + 24 relationship types | 5 sectors: Episodic, Semantic, Procedural, Emotional, Reflective |
 | **Graph** | petgraph with 25 algorithms | Temporal knowledge graph with valid_from/valid_to |
-| **Scoring** | 9-component hybrid | Composite: salience + recency + coactivation |
+| **Scoring** | 8-component hybrid | Composite: salience + recency + coactivation |
 | **Decay** | Power-law consolidation cycle (configurable) | Adaptive decay per sector |
 | **Explainability** | Score breakdown per component | "Waypoint" traces for recall |
 | **Migration** | N/A | Import from Mem0, Zep, Supermemory |
@@ -228,7 +228,7 @@ The AI memory landscape has matured significantly since early 2025. Multiple too
 
 Most tools remain Python-based, require external services (vector DBs, graph DBs, embedding APIs), and target general-purpose conversation memory. The trend is toward multi-modal memory (images, video, documents), cloud-hosted APIs with SaaS connectors, and increasingly sophisticated temporal reasoning.
 
-Codemem occupies a unique position: a **single Rust binary** purpose-built for **AI coding assistants**, combining the best research ideas (graph-vector hybrid from AutoMem/HippoRAG, CST-aware chunking inspired by the cAST paper, contextual embeddings, neuroscience-inspired consolidation) into a **zero-dependency, offline-first** package with **30 MCP tools**, **self-editing memory**, **trigger-based auto-insights**, **14 enrichment types**, and **14-language structural code intelligence**. The tradeoff is intentional: Codemem drops cloud-scale multi-tenancy, multi-modal support, and pluggable backend architecture in favor of simplicity, speed, and local-first operation.
+Codemem occupies a unique position: a **single Rust binary** purpose-built for **AI coding assistants**, combining the best research ideas (graph-vector hybrid from AutoMem/HippoRAG, CST-aware chunking inspired by the cAST paper, contextual embeddings, neuroscience-inspired consolidation) into a **zero-dependency, offline-first** package with **32 MCP tools**, **self-editing memory**, **trigger-based auto-insights**, **14 enrichment types**, and **14-language structural code intelligence**. The tradeoff is intentional: Codemem drops cloud-scale multi-tenancy, multi-modal support, and pluggable backend architecture in favor of simplicity, speed, and local-first operation.
 
 Install in one line:
 

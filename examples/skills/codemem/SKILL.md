@@ -1,7 +1,7 @@
 ---
 name: codemem
 description: >
-  Quick reference for all 30 codemem MCP tools. Use when working with the codemem
+  Quick reference for all 32 codemem MCP tools. Use when working with the codemem
   knowledge graph — finding code, traversing relationships, storing memories,
   or running analysis.
 user-invocable: true
@@ -10,7 +10,7 @@ argument-hint: "[query or topic]"
 
 # Codemem Tool Guide
 
-Quick reference for codemem's 30 MCP tools. If arguments were provided, use them as context for the most relevant tool below.
+Quick reference for codemem's 32 MCP tools. If arguments were provided, use them as context for the most relevant tool below.
 
 $ARGUMENTS
 

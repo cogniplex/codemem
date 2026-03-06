@@ -59,7 +59,7 @@ codemem init --path ~/projects/my-monorepo
 
 ## `codemem search`
 
-Search stored memories using 9-component hybrid scoring (vector similarity, graph strength, token overlap, temporal, tags, importance, confidence, recency).
+Search stored memories using 8-component hybrid scoring (vector similarity, graph strength, token overlap, temporal, tags, importance, confidence, recency).
 
 **Syntax**
 
@@ -104,7 +104,7 @@ codemem stats
 
 ## `codemem serve`
 
-Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 30 MCP tools (plus legacy aliases for backwards compatibility).
+Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 32 MCP tools (plus legacy aliases for backwards compatibility).
 
 **Syntax**
 

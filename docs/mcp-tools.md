@@ -1,9 +1,7 @@
 # Codemem MCP Tools API Reference
 
-Codemem exposes 30 tools over JSON-RPC 2.0 (stdio transport). All requests use the
+Codemem exposes 32 tools over JSON-RPC 2.0 (stdio transport). All requests use the
 `tools/call` method with `{"name": "<tool>", "arguments": {...}}` as params.
-
-Legacy tool names (from v0.7.0 and earlier) are still accepted and transparently mapped to the new unified tools.
 
 ---
 
@@ -118,7 +116,7 @@ Store a new memory with auto-embedding, type classification, and graph linking. 
 
 ### recall
 
-Unified memory search: 9-component hybrid scoring with optional graph expansion and impact analysis. Replaces the former `recall_memory`, `recall_with_expansion`, and `recall_with_impact` tools.
+Unified memory search: 8-component hybrid scoring with optional graph expansion and impact analysis.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -698,18 +696,19 @@ Get session context: recent memories, pending analyses, active patterns, and foc
 
 ---
 
-## Enrichment (3 tools)
+## Enrichment (5 tools)
 
 ### enrich_codebase
 
-Composite enrichment: runs git history, security, and performance analysis in one call. Select which analyses to run via the `analyses` parameter.
+Composite enrichment: runs all 14 enrichment analyses in one call (or a selected subset). Analyses: `git`, `security`, `performance`, `complexity`, `code_smells`, `security_scan`, `architecture`, `test_mapping`, `api_surface`, `doc_coverage`, `hot_complex`, `blame`, `quality`, `change_impact` (requires `file_path`).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `path` | string | yes | -- | Absolute path to the git repository root |
 | `days` | integer | no | `90` | Number of days of git history to analyze |
 | `namespace` | string | no | -- | Namespace scope |
-| `analyses` | string[] | no | all | Which analyses to run: `"git"`, `"security"`, `"performance"` |
+| `analyses` | string[] | no | all 14 | Which analyses to run (empty = all except change_impact) |
+| `file_path` | string | no | -- | Required for `change_impact` analysis |
 
 ```json
 {
@@ -726,7 +725,7 @@ Composite enrichment: runs git history, security, and performance analysis in on
 
 ### analyze_codebase
 
-Full pipeline: index -> enrich (git+security+performance) -> PageRank -> clusters -> summary. One-shot command to fully analyze a codebase.
+Full pipeline: index -> enrich (all 14 analyses) -> PageRank -> clusters -> summary. One-shot command to fully analyze a codebase.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -761,6 +760,46 @@ Enrich the knowledge graph with git history: commit counts, churn rate, CO_CHANG
   "arguments": {
     "path": "/Users/dev/myproject",
     "days": 180
+  }
+}
+```
+
+---
+
+### enrich_security
+
+Analyze graph nodes for security-related patterns: auth checks, validation, trust boundaries.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `namespace` | string | no | -- | Namespace scope |
+
+```json
+{
+  "name": "enrich_security",
+  "arguments": {
+    "namespace": "/Users/dev/myproject"
+  }
+}
+```
+
+---
+
+### enrich_performance
+
+Analyze graph nodes for performance hotspots using centrality and connectivity metrics.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `namespace` | string | no | -- | Namespace scope |
+| `top` | integer | no | `10` | Number of top performance hotspots to return |
+
+```json
+{
+  "name": "enrich_performance",
+  "arguments": {
+    "namespace": "/Users/dev/myproject",
+    "top": 20
   }
 }
 ```
@@ -810,7 +849,7 @@ Enrich the knowledge graph with git history: commit counts, churn rate, CO_CHANG
 | `insight` | A non-obvious finding or realization |
 | `context` | General contextual information (default) |
 
-### Hybrid Scoring Components (9)
+### Hybrid Scoring Components (8)
 
 | Component | Default Weight | Description |
 |-----------|---------------|-------------|

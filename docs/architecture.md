@@ -6,7 +6,7 @@ Codemem is a standalone Rust memory engine for AI coding assistants. A single bi
 
 `codemem init` registers 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop) and a stdio MCP server. The PostToolUse hook intercepts Read/Grep/Edit/Write tool calls, extracts structured observations (file paths, symbols, diff summaries), embeds them with BAAI/bge-base-en-v1.5 (768-dim, contextually enriched with metadata + graph neighbors), and stores them as typed memory nodes (Decision, Pattern, Insight, etc.) with graph edges (CALLS, IMPORTS, EVOLVED_INTO, etc.) in a single SQLite WAL database + usearch HNSW index. SessionStart injects prior context; Stop generates a structured session summary.
 
-Recall uses 9-component hybrid scoring: vector cosine (25%), graph strength via PageRank/betweenness/degree/cluster coefficient (20%), Okapi BM25 with camelCase/snake_case tokenization (15%), temporal alignment (10%), importance (10%), confidence (10%), tag matching (5%), recency (5%). The unified `recall` tool supports optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`). The graph layer (petgraph) runs 25 algorithms — PageRank, Louvain community detection, betweenness centrality, SCC, topological sort — cached per session. Recall filters expired temporal edges (valid_to < now) during graph expansion. All weights are configurable via `config.toml` and persist across restarts.
+Recall uses 8-component hybrid scoring: vector cosine (25%), graph strength via PageRank/betweenness/degree/cluster coefficient (20%), Okapi BM25 with camelCase/snake_case tokenization (15%), temporal alignment (10%), importance (10%), confidence (10%), tag matching (5%), recency (5%). The unified `recall` tool supports optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`). The graph layer (petgraph) runs 25 algorithms — PageRank, Louvain community detection, betweenness centrality, SCC, topological sort — cached per session. Recall filters expired temporal edges (valid_to < now) during graph expansion. All weights are configurable via `config.toml` and persist across restarts.
 
 Consolidation runs 5 cycles: Decay (power-law `importance × 0.9^(days/30) × (1 + log₂(access_count) × 0.1)`), Creative (O(n log n) vector KNN + Union-Find to create SHARES_THEME edges across memory types), Cluster (cosine similarity > 0.92 deduplication), Summarize (LLM-powered connected-component summarization via Ollama/OpenAI/Anthropic), Forget (prune below threshold). Memories support self-editing: `refine_memory` creates EVOLVED_INTO provenance chains, `split_memory` decomposes via PART_OF edges, `merge_memories` combines via SUMMARIZES edges — all with temporal edge tracking (valid_from/valid_to).
 
@@ -20,7 +20,7 @@ The following diagram shows the full Codemem system: AI assistant integration po
 graph TB
     subgraph "AI Coding Assistant"
         H[4 Lifecycle Hooks<br/>SessionStart, UserPromptSubmit,<br/>PostToolUse, Stop]
-        M[MCP Tools<br/>30 tools via JSON-RPC stdio]
+        M[MCP Tools<br/>32 tools via JSON-RPC stdio]
     end
 
     subgraph "Codemem Binary (codemem crate)"
@@ -101,8 +101,8 @@ flowchart TD
 | codemem-core | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`), config (`config.rs`: `CodememConfig`, `ChunkingConfig`, `EnrichmentConfig` TOML persistence). 7 `MemoryType`s, 5 `PatternType`s, 24 `RelationshipType`s, 13 `NodeKind`s, `ScoringWeights` |
 | codemem-storage | rusqlite (bundled) WAL mode + usearch HNSW vector index + petgraph graph engine. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning), `vector.rs` (HNSW 768-dim cosine, M=16, efConstruction=200), `graph/` (traversal with BFS/DFS/kind-aware filtering, algorithms: PageRank, Louvain, SCC, betweenness, topological, cached centrality, graph compaction, package nodes) |
 | codemem-embeddings | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization. Safe concurrency via `LockPoisoned` error handling |
-| codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing for Cargo.toml/package.json/go.mod/pyproject.toml, reference resolution with Rust grouped import decomposition), `hooks/` (PostToolUse JSON parser, per-tool extractors for Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/ListDir, diff-aware memory, trigger-based auto-insights), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `enrichment.rs` (14 enrichment types: git history, security, performance, complexity, architecture, test mapping, API surface, doc coverage, change impact, code smells, hot+complex correlation, blame/ownership, advanced security scanning, quality stratification), `bm25.rs` (Okapi BM25 scoring with serialization), `scoring.rs` (hybrid scoring helpers), `recall.rs` (unified recall with temporal edge filtering), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `metrics.rs` (operational metrics), `persistence.rs` (index persistence with cold-start-aware compaction) |
-| codemem | Unified binary + library. Three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 30 MCP tools + legacy aliases, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 19 commands, lifecycle hooks, config management, multi-format export) |
+| codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing, reference resolution), `hooks/` (PostToolUse JSON parser, per-tool extractors for 9 tool types, diff-aware memory, trigger-based auto-insights), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `enrichment/` (14 enrichment types, one file per analysis + `run_enrichments()` pipeline), `consolidation/` (5 cycles: decay, creative, cluster, forget, summarize), `persistence/` (index persistence + compaction), `analysis.rs` (decision chains, session checkpoints, impact analysis), `search.rs` (semantic/text/hybrid code search), `recall.rs` (unified recall with temporal edge filtering), `bm25.rs` (Okapi BM25 scoring with serialization), `scoring.rs` (hybrid scoring helpers), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `metrics.rs` (operational metrics) |
+| codemem | Unified binary + library. Three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 32 MCP tools, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 19 commands, lifecycle hooks, config management, multi-format export) |
 | codemem-bench | Criterion benchmarks (vector, storage, graph), 20% CI regression threshold |
 
 ---
@@ -229,7 +229,7 @@ sequenceDiagram
 
 ## 5. Data Flow -- Active Recall (MCP)
 
-When an AI assistant calls `recall`, the query goes through embedding, HNSW search, metadata fetch, and 9-component hybrid scoring before results are returned. Optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`) add additional passes.
+When an AI assistant calls `recall`, the query goes through embedding, HNSW search, metadata fetch, and 8-component hybrid scoring before results are returned. Optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`) add additional passes.
 
 ```mermaid
 sequenceDiagram
@@ -247,12 +247,12 @@ sequenceDiagram
     Vec-->>MCP: Candidate IDs + distances
     MCP->>Store: Fetch MemoryNodes
     MCP->>Graph: Get edges for scoring
-    MCP->>MCP: 9-component hybrid scoring
+    MCP->>MCP: 8-component hybrid scoring
     Note over MCP: Vector 25% + Graph 25%<br/>Token 15% + Temporal 10%<br/>Tags 10% + Importance 5%<br/>Confidence 5% + Recency 5%
     MCP-->>AI: Ranked results with scores
 ```
 
-**9-component hybrid scoring breakdown:**
+**8-component hybrid scoring breakdown:**
 
 | Component | Weight | Source |
 |-----------|--------|--------|
@@ -780,7 +780,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 | Tool | Description |
 |------|-------------|
 | `store_memory` | Store a new memory with auto-embedding, type classification, graph linking, and auto-linking to code nodes |
-| `recall` | Unified search: 9-component hybrid scoring with optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`) |
+| `recall` | Unified search: 8-component hybrid scoring with optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`) |
 | `delete_memory` | Delete a memory and its embedding |
 | `associate_memories` | Create a typed relationship between two nodes in the knowledge graph |
 | `refine_memory` | Refine a memory (default: new version via EVOLVED_INTO; `destructive=true`: update in-place) |
@@ -825,11 +825,11 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 | `session_checkpoint` | Mid-session progress report with activity summary and pattern detection |
 | `session_context` | Recent memories, pending analyses, active patterns, and focus areas |
 
-### Enrichment (3)
+### Enrichment (5)
 | Tool | Description |
 |------|-------------|
-| `enrich_codebase` | Composite enrichment: git history + security + performance in one call |
-| `analyze_codebase` | Full pipeline: index -> enrich -> PageRank -> clusters -> summary |
+| `enrich_codebase` | Composite enrichment: runs all 14 analyses (or a selected subset) in one call |
+| `analyze_codebase` | Full pipeline: index -> enrich (all 14) -> PageRank -> clusters -> summary |
 | `enrich_git_history` | Git commit history analysis with CO_CHANGED edges and activity insights |
-
-Legacy tool names (`recall_memory`, `update_memory`, `consolidate_decay`, `get_pagerank`, etc.) are still accepted and transparently mapped. See [MCP Tools Reference](mcp-tools.md#legacy-tool-aliases) for the full mapping.
+| `enrich_security` | Security pattern analysis: auth checks, validation, trust boundaries |
+| `enrich_performance` | Performance hotspot analysis using centrality and connectivity metrics |
