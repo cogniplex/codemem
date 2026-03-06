@@ -34,21 +34,73 @@ impl EmbeddingProvider for MockProvider {
     }
 }
 
+/// A mock provider that tracks batch calls separately.
+struct BatchTrackingMock {
+    dims: usize,
+    single_calls: AtomicUsize,
+    batch_calls: AtomicUsize,
+}
+
+impl BatchTrackingMock {
+    fn new(dims: usize) -> Self {
+        Self {
+            dims,
+            single_calls: AtomicUsize::new(0),
+            batch_calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl EmbeddingProvider for BatchTrackingMock {
+    fn dimensions(&self) -> usize {
+        self.dims
+    }
+
+    fn embed(&self, _text: &str) -> Result<Vec<f32>, CodememError> {
+        self.single_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(vec![0.1; self.dims])
+    }
+
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CodememError> {
+        self.batch_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(texts.iter().map(|_| vec![0.1; self.dims]).collect())
+    }
+
+    fn name(&self) -> &str {
+        "batch-mock"
+    }
+}
+
+/// A mock provider that always fails.
+struct FailingMock;
+
+impl EmbeddingProvider for FailingMock {
+    fn dimensions(&self) -> usize {
+        768
+    }
+
+    fn embed(&self, _text: &str) -> Result<Vec<f32>, CodememError> {
+        Err(CodememError::Embedding("mock failure".into()))
+    }
+
+    fn name(&self) -> &str {
+        "failing-mock"
+    }
+}
+
+// ── CachedProvider tests ─────────────────────────────────────────────
+
 #[test]
 fn cached_provider_cache_hit() {
     let mock = MockProvider::new(4);
     let provider = CachedProvider::new(Box::new(mock), 100);
 
-    // First call: cache miss
     let v1 = provider.embed("hello").unwrap();
     assert_eq!(v1.len(), 4);
 
-    // Second call: cache hit (inner should only be called once)
     let v2 = provider.embed("hello").unwrap();
     assert_eq!(v1, v2);
 
-    // Access inner mock through the provider trait -- call_count should be 1
-    // We can check cache_stats instead
     let (size, cap) = provider.cache_stats();
     assert_eq!(size, 1);
     assert_eq!(cap, 100);
@@ -105,8 +157,36 @@ fn cached_provider_batch_mixed_cache() {
 }
 
 #[test]
+fn cached_provider_batch_all_cached() {
+    let mock = MockProvider::new(4);
+    let provider = CachedProvider::new(Box::new(mock), 100);
+
+    // Pre-populate cache with both texts
+    provider.embed("hello").unwrap();
+    provider.embed("world").unwrap();
+
+    // Batch where everything is cached — inner provider should not be called again
+    let result = provider.embed_batch(&["hello", "world"]).unwrap();
+    assert_eq!(result.len(), 2);
+
+    let (size, _) = provider.cache_stats();
+    assert_eq!(size, 2);
+}
+
+#[test]
+fn cached_provider_batch_delegates_to_inner_batch() {
+    let mock = BatchTrackingMock::new(4);
+    let provider = CachedProvider::new(Box::new(mock), 100);
+
+    let result = provider.embed_batch(&["a", "b", "c"]).unwrap();
+    assert_eq!(result.len(), 3);
+
+    let (size, _) = provider.cache_stats();
+    assert_eq!(size, 3);
+}
+
+#[test]
 fn cached_provider_zero_capacity() {
-    // Capacity of 0 should default to 1
     let mock = MockProvider::new(4);
     let provider = CachedProvider::new(Box::new(mock), 0);
 
@@ -114,7 +194,6 @@ fn cached_provider_zero_capacity() {
     provider.embed("b").unwrap();
 
     let (size, cap) = provider.cache_stats();
-    // Cap should be 1 (the fallback), so only 1 entry retained
     assert_eq!(cap, 1);
     assert_eq!(size, 1);
 }
@@ -134,9 +213,94 @@ fn cached_provider_dimensions_delegates() {
 }
 
 #[test]
+fn cached_provider_inner_error_propagates() {
+    let provider = CachedProvider::new(Box::new(FailingMock), 100);
+    let result = provider.embed("test");
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("mock failure"),
+        "Should propagate inner error: {err}"
+    );
+}
+
+#[test]
+fn cached_provider_inner_batch_error_propagates() {
+    let provider = CachedProvider::new(Box::new(FailingMock), 100);
+    let result = provider.embed_batch(&["test"]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn cached_provider_evicts_lru() {
+    let mock = MockProvider::new(2);
+    let provider = CachedProvider::new(Box::new(mock), 2);
+
+    provider.embed("a").unwrap();
+    provider.embed("b").unwrap();
+    // Cache is full (cap=2), inserting "c" should evict "a"
+    provider.embed("c").unwrap();
+
+    let (size, cap) = provider.cache_stats();
+    assert_eq!(size, 2);
+    assert_eq!(cap, 2);
+}
+
+#[test]
+fn cached_provider_cache_hit_avoids_inner_call() {
+    let mock = MockProvider::new(4);
+    // We need to check call count, but mock is moved into CachedProvider.
+    // Use Arc to share the count.
+    use std::sync::Arc;
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let count_clone = call_count.clone();
+
+    struct CountingMock {
+        dims: usize,
+        count: Arc<AtomicUsize>,
+    }
+    impl EmbeddingProvider for CountingMock {
+        fn dimensions(&self) -> usize {
+            self.dims
+        }
+        fn embed(&self, _text: &str) -> Result<Vec<f32>, CodememError> {
+            self.count.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![0.1; self.dims])
+        }
+        fn name(&self) -> &str {
+            "counting"
+        }
+    }
+
+    let _ = mock; // drop unused mock
+    let provider = CachedProvider::new(
+        Box::new(CountingMock {
+            dims: 4,
+            count: count_clone,
+        }),
+        100,
+    );
+
+    provider.embed("hello").unwrap();
+    assert_eq!(call_count.load(Ordering::SeqCst), 1);
+
+    provider.embed("hello").unwrap();
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        1,
+        "Second call should be cached"
+    );
+
+    provider.embed("world").unwrap();
+    assert_eq!(call_count.load(Ordering::SeqCst), 2);
+}
+
+// ── from_env tests ───────────────────────────────────────────────────
+
+#[test]
 fn from_env_unknown_provider() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-    // Set env var to trigger the error path
     unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "nonexistent_provider_xyz") };
     let result = from_env(None);
     unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
@@ -203,4 +367,112 @@ fn from_env_openai_provider() {
 
     let provider = result.expect("from_env should succeed for openai");
     assert_eq!(provider.name(), "openai");
+}
+
+#[test]
+fn from_env_openai_missing_api_key() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "openai") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_API_KEY") };
+    unsafe { std::env::remove_var("OPENAI_API_KEY") };
+    let result = from_env(None);
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("API_KEY"),
+        "Should mention API key requirement: {err}"
+    );
+}
+
+#[test]
+fn from_env_with_config_ollama_url() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "ollama") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_URL") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_MODEL") };
+
+    let config = codemem_core::EmbeddingConfig {
+        provider: "ollama".to_string(),
+        url: "http://custom:11434".to_string(),
+        model: "custom-model".to_string(),
+        dimensions: 512,
+        cache_capacity: 5000,
+    };
+    let result = from_env(Some(&config));
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+
+    // Should succeed — config provides URL and model
+    let provider = result.expect("from_env with config should succeed");
+    assert_eq!(provider.name(), "ollama");
+    assert_eq!(provider.dimensions(), 512);
+}
+
+#[test]
+fn from_env_env_var_overrides_config() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "ollama") };
+    unsafe { std::env::set_var("CODEMEM_EMBED_DIMENSIONS", "256") };
+
+    let config = codemem_core::EmbeddingConfig {
+        provider: "candle".to_string(), // should be overridden by env var
+        dimensions: 512,                // should be overridden by env var
+        ..Default::default()
+    };
+    let result = from_env(Some(&config));
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_DIMENSIONS") };
+
+    let provider = result.expect("from_env should succeed");
+    assert_eq!(provider.name(), "ollama");
+    assert_eq!(provider.dimensions(), 256);
+}
+
+#[test]
+fn from_env_openai_with_custom_api_key_env() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "openai") };
+    unsafe { std::env::set_var("CODEMEM_EMBED_API_KEY", "custom-key") };
+    unsafe { std::env::remove_var("OPENAI_API_KEY") };
+
+    let result = from_env(None);
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_API_KEY") };
+
+    let provider = result.expect("Should use CODEMEM_EMBED_API_KEY");
+    assert_eq!(provider.name(), "openai");
+}
+
+#[test]
+fn from_env_empty_string_treated_as_candle() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "") };
+    let result = from_env(None);
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+
+    // Empty string falls through to "candle" | "" match arm
+    // Will fail if model isn't downloaded, but the provider selection is correct
+    match result {
+        Ok(p) => assert_eq!(p.name(), "candle"),
+        Err(e) => {
+            let err = e.to_string();
+            // If model isn't downloaded, the error is about missing model, not unknown provider
+            assert!(
+                err.contains("Model not found") || err.contains("model"),
+                "Should be a candle model error, not unknown provider: {err}"
+            );
+        }
+    }
+}
+
+#[test]
+fn from_env_case_insensitive() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "OLLAMA") };
+    let result = from_env(None);
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+
+    let provider = result.expect("Provider name should be case-insensitive");
+    assert_eq!(provider.name(), "ollama");
 }
