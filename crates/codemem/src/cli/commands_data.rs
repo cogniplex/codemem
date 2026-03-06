@@ -176,7 +176,7 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
         // Build the set of existing graph node IDs so we can detect
         // Read-then-Edit/Write patterns and create edges.
         let existing_node_ids: std::collections::HashSet<String> = engine
-            .storage
+            .storage()
             .all_graph_nodes()
             .unwrap_or_default()
             .into_iter()
@@ -259,7 +259,7 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
                                 .parent()
                                 .map(|p| p.to_string_lossy().to_string())
                         });
-                        let _ = engine.storage.record_session_activity(
+                        let _ = engine.storage().record_session_activity(
                             sid,
                             &tool_name,
                             file_path_owned.as_deref(),
@@ -269,7 +269,7 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
 
                         // Check triggers and store auto-insights
                         let auto_insights = codemem_engine::hooks::check_triggers(
-                            &*engine.storage,
+                            engine.storage(),
                             sid,
                             &tool_name,
                             file_path_owned.as_deref(),
@@ -322,7 +322,7 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
 
                 // Store graph node if present (e.g., file nodes from hooks)
                 if let Some(ref node) = extracted.graph_node {
-                    let _ = engine.storage.insert_graph_node(node);
+                    let _ = engine.storage().insert_graph_node(node);
                     if let Ok(mut graph) = engine.lock_graph() {
                         let _ = graph.add_node(node.clone());
                     }

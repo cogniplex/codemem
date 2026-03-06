@@ -72,7 +72,7 @@ impl McpServer {
                         valid_from: None,
                         valid_to: None,
                     };
-                    if let Err(e) = self.engine.storage.insert_graph_edge(&edge) {
+                    if let Err(e) = self.engine.storage().insert_graph_edge(&edge) {
                         tracing::warn!("Failed to persist link edge to {link_id}: {e}");
                     }
                     if let Err(e) = graph.add_edge(edge) {
@@ -95,7 +95,7 @@ impl McpServer {
                 "id": id,
                 "memory_type": memory_type.to_string(),
                 "importance": importance,
-                "embedded": self.engine.embeddings.is_some(),
+                "embedded": self.engine.has_embeddings(),
             }))
             .expect("JSON serialization of literal"),
         )

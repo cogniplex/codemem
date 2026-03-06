@@ -70,7 +70,7 @@ fn consolidate_decay_reduces_importance() {
         updated_at: sixty_days_ago,
         last_accessed_at: sixty_days_ago,
     };
-    server.engine.storage.insert_memory(&memory).unwrap();
+    server.engine.storage().insert_memory(&memory).unwrap();
 
     // Run decay with default threshold (30 days)
     let params = json!({"name": "consolidate", "arguments": {"mode": "decay"}});
@@ -85,7 +85,7 @@ fn consolidate_decay_reduces_importance() {
 
     // Verify importance was reduced via power-law:
     // 0.8 * 0.9^(60/30) * (1 + log2(max(0,1))*0.1) = 0.8 * 0.81 * 1.0 ≈ 0.648
-    let retrieved = server.engine.storage.get_memory(&id).unwrap().unwrap();
+    let retrieved = server.engine.storage().get_memory(&id).unwrap().unwrap();
     assert!(
         (retrieved.importance - 0.648).abs() < 0.02,
         "expected ~0.648, got {}",
@@ -137,8 +137,8 @@ fn consolidate_creative_creates_edges() {
     let emb1: Vec<f32> = (0..768).map(|i| i as f32 / 768.0).collect();
     let mut emb2 = emb1.clone();
     emb2[0] += 0.01; // slightly different
-    server.engine.storage.store_embedding(id1, &emb1).unwrap();
-    server.engine.storage.store_embedding(id2, &emb2).unwrap();
+    server.engine.storage().store_embedding(id1, &emb1).unwrap();
+    server.engine.storage().store_embedding(id2, &emb2).unwrap();
     {
         let mut vec = server.lock_vector().unwrap();
         let _ = vec.insert(id1, &emb1);
@@ -199,10 +199,10 @@ fn consolidate_forget_deletes_low_importance() {
         updated_at: now,
         last_accessed_at: now,
     };
-    server.engine.storage.insert_memory(&memory).unwrap();
+    server.engine.storage().insert_memory(&memory).unwrap();
 
     // Verify it exists
-    assert_eq!(server.engine.storage.memory_count().unwrap(), 1);
+    assert_eq!(server.engine.storage().memory_count().unwrap(), 1);
 
     // Run forget
     let params = json!({"name": "consolidate", "arguments": {"mode": "forget"}});
@@ -216,7 +216,7 @@ fn consolidate_forget_deletes_low_importance() {
     assert_eq!(parsed["threshold"], 0.1);
 
     // Verify it's gone
-    assert_eq!(server.engine.storage.memory_count().unwrap(), 0);
+    assert_eq!(server.engine.storage().memory_count().unwrap(), 0);
 }
 
 #[test]
@@ -240,7 +240,7 @@ fn consolidate_forget_keeps_accessed_memories() {
         updated_at: now,
         last_accessed_at: now,
     };
-    server.engine.storage.insert_memory(&memory).unwrap();
+    server.engine.storage().insert_memory(&memory).unwrap();
 
     // This memory has access_count = 5, so it should NOT be forgotten
     // (forget only targets memories with access_count == 0)
@@ -252,7 +252,7 @@ fn consolidate_forget_keeps_accessed_memories() {
     let parsed: Value = serde_json::from_str(text).unwrap();
 
     assert_eq!(parsed["deleted"], 0);
-    assert_eq!(server.engine.storage.memory_count().unwrap(), 1);
+    assert_eq!(server.engine.storage().memory_count().unwrap(), 1);
 }
 
 #[test]
@@ -296,10 +296,10 @@ fn consolidate_forget_custom_threshold() {
             updated_at: now,
             last_accessed_at: now,
         };
-        server.engine.storage.insert_memory(&memory).unwrap();
+        server.engine.storage().insert_memory(&memory).unwrap();
     }
 
-    assert_eq!(server.engine.storage.memory_count().unwrap(), 2);
+    assert_eq!(server.engine.storage().memory_count().unwrap(), 2);
 
     // Forget with threshold 0.5 should delete both
     let params = json!({"name": "consolidate", "arguments": {"mode": "forget", "importance_threshold": 0.5}});
@@ -310,7 +310,7 @@ fn consolidate_forget_custom_threshold() {
 
     assert_eq!(parsed["deleted"], 2);
     assert_eq!(parsed["threshold"], 0.5);
-    assert_eq!(server.engine.storage.memory_count().unwrap(), 0);
+    assert_eq!(server.engine.storage().memory_count().unwrap(), 0);
 }
 
 // ── Impact-Aware Recall & Decision Chain Tests ────────────────────────
@@ -522,10 +522,10 @@ fn consolidate_forget_with_target_tags() {
             updated_at: now,
             last_accessed_at: now,
         };
-        server.engine.storage.insert_memory(&memory).unwrap();
+        server.engine.storage().insert_memory(&memory).unwrap();
     }
 
-    assert_eq!(server.engine.storage.memory_count().unwrap(), 2);
+    assert_eq!(server.engine.storage().memory_count().unwrap(), 2);
 
     // Forget only static-analysis tagged memories below 0.5
     let params = json!({
@@ -543,7 +543,7 @@ fn consolidate_forget_with_target_tags() {
 
     assert_eq!(parsed["deleted"], 1);
     // The manual insight should survive
-    assert_eq!(server.engine.storage.memory_count().unwrap(), 1);
+    assert_eq!(server.engine.storage().memory_count().unwrap(), 1);
 }
 
 #[test]
@@ -573,10 +573,10 @@ fn consolidate_forget_with_max_access_count() {
             updated_at: now,
             last_accessed_at: now,
         };
-        server.engine.storage.insert_memory(&memory).unwrap();
+        server.engine.storage().insert_memory(&memory).unwrap();
     }
 
-    assert_eq!(server.engine.storage.memory_count().unwrap(), 2);
+    assert_eq!(server.engine.storage().memory_count().unwrap(), 2);
 
     // Forget only with max_access_count=0 (only never-accessed)
     let params = json!({
@@ -594,5 +594,5 @@ fn consolidate_forget_with_max_access_count() {
     let parsed: Value = serde_json::from_str(text).unwrap();
 
     assert_eq!(parsed["deleted"], 1);
-    assert_eq!(server.engine.storage.memory_count().unwrap(), 1);
+    assert_eq!(server.engine.storage().memory_count().unwrap(), 1);
 }

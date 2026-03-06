@@ -68,7 +68,7 @@ fn search_symbols_db_fallback() {
         memory_id: None,
         namespace: None,
     };
-    server.engine.storage.insert_graph_node(&node).unwrap();
+    server.engine.storage().insert_graph_node(&node).unwrap();
 
     // Cache is None — search_symbols should fall through to DB
     let results = server
@@ -134,7 +134,7 @@ fn get_symbol_info_db_fallback() {
         memory_id: None,
         namespace: None,
     };
-    server.engine.storage.insert_graph_node(&node).unwrap();
+    server.engine.storage().insert_graph_node(&node).unwrap();
 
     // Cache is None — get_symbol_info should fall through to DB
     let params =
@@ -321,10 +321,10 @@ fn get_dependencies_for_symbol() {
         namespace: None,
     };
 
-    server.engine.storage.insert_graph_node(&node_a).unwrap();
-    server.engine.storage.insert_graph_node(&node_b).unwrap();
+    server.engine.storage().insert_graph_node(&node_a).unwrap();
+    server.engine.storage().insert_graph_node(&node_b).unwrap();
     {
-        let mut graph = server.engine.graph.lock().unwrap();
+        let mut graph = server.engine.lock_graph().unwrap();
         graph.add_node(node_a).unwrap();
         graph.add_node(node_b).unwrap();
         let edge = Edge {
@@ -369,8 +369,8 @@ fn get_pagerank_with_nodes() {
             memory_id: None,
             namespace: None,
         };
-        server.engine.storage.insert_graph_node(&node).unwrap();
-        server.engine.graph.lock().unwrap().add_node(node).unwrap();
+        server.engine.storage().insert_graph_node(&node).unwrap();
+        server.engine.lock_graph().unwrap().add_node(node).unwrap();
     }
 
     let edge1 = Edge {
@@ -396,7 +396,7 @@ fn get_pagerank_with_nodes() {
         valid_to: None,
     };
     {
-        let mut graph = server.engine.graph.lock().unwrap();
+        let mut graph = server.engine.lock_graph().unwrap();
         graph.add_edge(edge1).unwrap();
         graph.add_edge(edge2).unwrap();
     }
@@ -445,15 +445,23 @@ fn graph_traverse_with_exclude_kinds() {
         namespace: None,
     };
 
-    server.engine.storage.insert_graph_node(&file_node).unwrap();
-    server.engine.storage.insert_graph_node(&func_node).unwrap();
     server
         .engine
-        .storage
+        .storage()
+        .insert_graph_node(&file_node)
+        .unwrap();
+    server
+        .engine
+        .storage()
+        .insert_graph_node(&func_node)
+        .unwrap();
+    server
+        .engine
+        .storage()
         .insert_graph_node(&chunk_node)
         .unwrap();
     {
-        let mut graph = server.engine.graph.lock().unwrap();
+        let mut graph = server.engine.lock_graph().unwrap();
         graph.add_node(file_node).unwrap();
         graph.add_node(func_node).unwrap();
         graph.add_node(chunk_node).unwrap();
@@ -523,11 +531,11 @@ fn graph_traverse_with_include_relationships() {
             memory_id: None,
             namespace: None,
         };
-        server.engine.storage.insert_graph_node(&node).unwrap();
-        server.engine.graph.lock().unwrap().add_node(node).unwrap();
+        server.engine.storage().insert_graph_node(&node).unwrap();
+        server.engine.lock_graph().unwrap().add_node(node).unwrap();
     }
     {
-        let mut graph = server.engine.graph.lock().unwrap();
+        let mut graph = server.engine.lock_graph().unwrap();
         let calls_edge = Edge {
             id: "e-calls".to_string(),
             src: "sym:a".to_string(),

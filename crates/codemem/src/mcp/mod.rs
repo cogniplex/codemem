@@ -145,23 +145,23 @@ impl McpServer {
     // ── Public Accessors (for REST API layer) ─────────────────────────────
 
     pub fn storage(&self) -> &dyn StorageBackend {
-        &*self.engine.storage
+        self.engine.storage()
     }
 
     pub fn graph(&self) -> &Mutex<GraphEngine> {
-        &self.engine.graph
+        self.engine.graph_mutex()
     }
 
     pub fn vector(&self) -> &Mutex<HnswIndex> {
-        &self.engine.vector
+        self.engine.vector_mutex()
     }
 
     pub fn embeddings(&self) -> Option<&Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
-        self.engine.embeddings.as_ref()
+        self.engine.embeddings_mutex()
     }
 
     pub fn bm25(&self) -> &Mutex<bm25::Bm25Index> {
-        &self.engine.bm25_index
+        self.engine.bm25_mutex()
     }
 
     pub fn reload_graph(&self) -> Result<(), CodememError> {
@@ -169,15 +169,15 @@ impl McpServer {
     }
 
     pub fn db_path(&self) -> Option<&Path> {
-        self.engine.db_path.as_deref()
+        self.engine.db_path()
     }
 
     pub fn config(&self) -> &codemem_core::CodememConfig {
-        &self.engine.config
+        self.engine.config()
     }
 
     pub fn metrics_collector(&self) -> &std::sync::Arc<metrics::InMemoryMetrics> {
-        &self.engine.metrics
+        self.engine.metrics()
     }
 
     pub fn save_index(&self) {
@@ -268,8 +268,12 @@ impl McpServer {
         let start = std::time::Instant::now();
         let result = self.dispatch_tool_inner(name, args);
         let elapsed = start.elapsed().as_secs_f64() * 1000.0;
-        codemem_core::Metrics::record_latency(&*self.engine.metrics, name, elapsed);
-        codemem_core::Metrics::increment_counter(&*self.engine.metrics, "tool_calls_total", 1);
+        codemem_core::Metrics::record_latency(self.engine.metrics().as_ref(), name, elapsed);
+        codemem_core::Metrics::increment_counter(
+            self.engine.metrics().as_ref(),
+            "tool_calls_total",
+            1,
+        );
         result
     }
 

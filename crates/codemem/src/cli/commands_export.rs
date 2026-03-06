@@ -306,7 +306,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
 
     // Load incremental state
     let mut change_detector = codemem_engine::index::incremental::ChangeDetector::new();
-    change_detector.load_from_storage(&*engine.storage);
+    change_detector.load_from_storage(engine.storage());
 
     let mut indexer = codemem_engine::Indexer::with_change_detector(change_detector);
 
@@ -365,7 +365,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
         .collect();
 
     let nodes_stored = graph_nodes.len();
-    engine.storage.insert_graph_nodes_batch(&graph_nodes)?;
+    engine.storage().insert_graph_nodes_batch(&graph_nodes)?;
 
     // Collect all edges, filtering out edges that reference nodes not in the graph
     // (e.g., external stdlib symbols that weren't indexed)
@@ -395,7 +395,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
         .collect();
 
     let edges_stored = graph_edges.len();
-    engine.storage.insert_graph_edges_batch(&graph_edges)?;
+    engine.storage().insert_graph_edges_batch(&graph_edges)?;
 
     println!(" done");
     println!("  Graph nodes:    {}", nodes_stored);
@@ -443,7 +443,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
             .iter()
             .map(|(id, emb)| (id.as_str(), emb.as_slice()))
             .collect();
-        let _ = engine.storage.store_embeddings_batch(&sym_batch_refs);
+        let _ = engine.storage().store_embeddings_batch(&sym_batch_refs);
 
         println!(); // newline after progress
         if symbols_embedded > 0 {
@@ -455,7 +455,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
     // Save incremental state
     indexer
         .change_detector()
-        .save_to_storage(&*engine.storage)?;
+        .save_to_storage(engine.storage())?;
 
     if verbose {
         println!("\nSymbols:");

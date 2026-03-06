@@ -24,7 +24,7 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
     println!("Step 1/4: Indexing {}...", root.display());
 
     let mut change_detector = codemem_engine::index::incremental::ChangeDetector::new();
-    change_detector.load_from_storage(&*engine.storage);
+    change_detector.load_from_storage(engine.storage());
 
     let mut indexer = codemem_engine::Indexer::with_change_detector(change_detector);
     let resolved = indexer.index_and_resolve(root)?;
@@ -58,7 +58,7 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
 
     indexer
         .change_detector()
-        .save_to_storage(&*engine.storage)?;
+        .save_to_storage(engine.storage())?;
 
     // ── Step 2: Enrich ──────────────────────────────────────────────────────
     println!("\nStep 2/4: Enriching...");

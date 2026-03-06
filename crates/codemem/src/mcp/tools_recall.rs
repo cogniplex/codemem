@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 impl McpServer {
     /// MCP tool: list_namespaces -- list all namespaces with memory counts and inline stats.
     pub(crate) fn tool_list_namespaces(&self) -> ToolResult {
-        let namespaces = match self.engine.storage.list_namespaces() {
+        let namespaces = match self.engine.storage().list_namespaces() {
             Ok(ns) => ns,
             Err(e) => return ToolResult::tool_error(format!("Storage error: {e}")),
         };
@@ -28,7 +28,7 @@ impl McpServer {
                     }));
                 }
                 Err(_) => {
-                    let count = match self.engine.storage.list_memory_ids_for_namespace(ns) {
+                    let count = match self.engine.storage().list_memory_ids_for_namespace(ns) {
                         Ok(ids) => ids.len(),
                         Err(_) => 0,
                     };

@@ -47,12 +47,12 @@ fn graph_strength_zero_when_no_edges() {
     let id = stored["id"].as_str().unwrap();
 
     // Verify graph strength is 0 for a memory with no edges
-    let graph = server.engine.graph.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
     let edges = graph.get_edges(id).unwrap();
     assert_eq!(edges.len(), 0);
 
-    let memory = server.engine.storage.get_memory(id).unwrap().unwrap();
-    let bm25 = server.engine.bm25_index.lock().unwrap();
+    let memory = server.engine.storage().get_memory(id).unwrap().unwrap();
+    let bm25 = server.engine.lock_bm25().unwrap();
     let breakdown = compute_score(&memory, &["isolated"], 0.0, &graph, &bm25, Utc::now());
     assert_eq!(breakdown.graph_strength, 0.0);
 }
@@ -83,10 +83,18 @@ fn graph_strength_increases_with_code_edges() {
         namespace: None,
     };
 
-    server.engine.storage.insert_graph_node(&sym_node).unwrap();
-    server.engine.storage.insert_graph_node(&file_node).unwrap();
+    server
+        .engine
+        .storage()
+        .insert_graph_node(&sym_node)
+        .unwrap();
+    server
+        .engine
+        .storage()
+        .insert_graph_node(&file_node)
+        .unwrap();
     {
-        let mut graph = server.engine.graph.lock().unwrap();
+        let mut graph = server.engine.lock_graph().unwrap();
         graph.add_node(sym_node).unwrap();
         graph.add_node(file_node).unwrap();
 
@@ -122,9 +130,9 @@ fn graph_strength_increases_with_code_edges() {
     }
 
     // Score: the memory linked to 2 code nodes should have graph_strength > 0
-    let graph = server.engine.graph.lock().unwrap();
-    let memory = server.engine.storage.get_memory(src_id).unwrap().unwrap();
-    let bm25 = server.engine.bm25_index.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
+    let memory = server.engine.storage().get_memory(src_id).unwrap().unwrap();
+    let bm25 = server.engine.lock_bm25().unwrap();
     let breakdown = compute_score(&memory, &["rust"], 0.0, &graph, &bm25, Utc::now());
     assert!(
         breakdown.graph_strength > 0.0,
@@ -156,9 +164,9 @@ fn graph_strength_caps_at_one() {
     }
 
     // The graph_strength formula caps at 1.0 via .min(1.0)
-    let graph = server.engine.graph.lock().unwrap();
-    let memory = server.engine.storage.get_memory(src_id).unwrap().unwrap();
-    let bm25 = server.engine.bm25_index.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
+    let memory = server.engine.storage().get_memory(src_id).unwrap().unwrap();
+    let bm25 = server.engine.lock_bm25().unwrap();
     let breakdown = compute_score(&memory, &["hub"], 0.0, &graph, &bm25, Utc::now());
     assert!(
         breakdown.graph_strength <= 1.0,
@@ -190,9 +198,13 @@ fn recall_uses_default_scoring_weights() {
 fn tool_metrics_returns_snapshot() {
     let server = test_server();
     // Record some metrics manually
-    codemem_core::Metrics::record_latency(&*server.engine.metrics, "recall_memory", 12.5);
-    codemem_core::Metrics::increment_counter(&*server.engine.metrics, "tool_calls_total", 1);
-    codemem_core::Metrics::record_gauge(&*server.engine.metrics, "memory_count", 7.0);
+    codemem_core::Metrics::record_latency(server.engine.metrics().as_ref(), "recall_memory", 12.5);
+    codemem_core::Metrics::increment_counter(
+        server.engine.metrics().as_ref(),
+        "tool_calls_total",
+        1,
+    );
+    codemem_core::Metrics::record_gauge(server.engine.metrics().as_ref(), "memory_count", 7.0);
 
     let result = server.tool_codemem_status(&serde_json::json!({"include": ["metrics"]}));
     assert!(!result.is_error);

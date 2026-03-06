@@ -30,7 +30,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
                 break;
             }
             let similarity = 1.0 - *distance as f64;
-            if let Some(memory) = engine.storage.get_memory(id)? {
+            if let Some(memory) = engine.storage().get_memory(id)? {
                 // Apply namespace filter
                 if let Some(ns) = namespace {
                     if memory.namespace.as_deref() != Some(ns) {
@@ -47,7 +47,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
                 }
                 println!();
                 shown += 1;
-            } else if let Some(node) = engine.storage.get_graph_node(id)? {
+            } else if let Some(node) = engine.storage().get_graph_node(id)? {
                 // Fallback: symbol/graph node (e.g. sym:* IDs from code indexing)
                 if let Some(ns) = namespace {
                     if node.namespace.as_deref() != Some(ns) {
@@ -65,9 +65,9 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
 
     // Fallback: text search
     let ids = if let Some(ns) = namespace {
-        engine.storage.list_memory_ids_for_namespace(ns)?
+        engine.storage().list_memory_ids_for_namespace(ns)?
     } else {
-        engine.storage.list_memory_ids()?
+        engine.storage().list_memory_ids()?
     };
 
     if ids.is_empty() {
@@ -87,7 +87,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
         if found >= k {
             break;
         }
-        if let Some(memory) = engine.storage.get_memory(id)? {
+        if let Some(memory) = engine.storage().get_memory(id)? {
             if memory.content.to_lowercase().contains(&query_lower) {
                 println!(
                     "  [{}] {} (importance: {:.1})",
@@ -102,7 +102,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
 
     // Also search graph nodes by label
     let gn_results = engine
-        .storage
+        .storage()
         .search_graph_nodes(&query_lower, namespace, k)?;
     for node in &gn_results {
         if found >= k {
@@ -129,7 +129,7 @@ pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyh
 pub(crate) fn cmd_stats() -> anyhow::Result<()> {
     let db_path = super::codemem_db_path();
     let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
-    let stats = engine.storage.stats()?;
+    let stats = engine.storage().stats()?;
 
     println!("Codemem Statistics");
     println!("  Memories:    {}", stats.memory_count);

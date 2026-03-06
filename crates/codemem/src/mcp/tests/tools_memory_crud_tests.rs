@@ -168,7 +168,7 @@ fn recall_filters_by_namespace() {
             updated_at: now,
             last_accessed_at: now,
         };
-        server.engine.storage.insert_memory(&memory).unwrap();
+        server.engine.storage().insert_memory(&memory).unwrap();
 
         // Add graph node so graph scoring works
         let graph_node = GraphNode {
@@ -182,10 +182,10 @@ fn recall_filters_by_namespace() {
         };
         server
             .engine
-            .storage
+            .storage()
             .insert_graph_node(&graph_node)
             .unwrap();
-        let _ = server.engine.graph.lock().unwrap().add_node(graph_node);
+        let _ = server.engine.lock_graph().unwrap().add_node(graph_node);
     }
 
     // Recall with namespace filter "/projects/a"
@@ -237,7 +237,7 @@ fn store_memory_with_namespace() {
     let id = stored["id"].as_str().unwrap();
 
     // Retrieve and verify namespace is set
-    let memory = server.engine.storage.get_memory(id).unwrap().unwrap();
+    let memory = server.engine.storage().get_memory(id).unwrap().unwrap();
     assert_eq!(memory.namespace.as_deref(), Some("/my/project"));
 }
 
@@ -267,7 +267,7 @@ fn store_memory_with_links() {
     let linked_id = stored["id"].as_str().unwrap();
 
     // Verify edges were created
-    let graph = server.engine.graph.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
     let edges = graph.get_edges(linked_id).unwrap();
     assert_eq!(edges.len(), 2);
     for edge in &edges {
@@ -303,7 +303,7 @@ fn refine_creates_evolved_into_edge() {
     assert_ne!(old_id, new_id);
 
     // Verify EVOLVED_INTO edge exists in storage
-    let edges = server.engine.storage.get_edges_for_node(old_id).unwrap();
+    let edges = server.engine.storage().get_edges_for_node(old_id).unwrap();
     let evolved_edges: Vec<_> = edges
         .iter()
         .filter(|e| e.relationship == RelationshipType::EvolvedInto)
@@ -330,7 +330,7 @@ fn refine_preserves_old_memory() {
     server.handle_request("tools/call", Some(&params), json!(101));
 
     // Old memory should still exist and be unchanged
-    let old_memory = server.engine.storage.get_memory(old_id).unwrap().unwrap();
+    let old_memory = server.engine.storage().get_memory(old_id).unwrap().unwrap();
     assert_eq!(old_memory.content, "keep this content");
     assert_eq!(old_memory.memory_type, MemoryType::Decision);
 }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 #[test]
 fn compaction_creates_package_nodes() {
     let server = test_server();
-    let mut graph = server.engine.graph.lock().unwrap();
+    let mut graph = server.engine.lock_graph().unwrap();
 
     // Simulate file nodes for a directory tree: src/auth/middleware.rs, src/api/handler.rs
     let files = vec!["src/auth/middleware.rs", "src/api/handler.rs", "src/lib.rs"];
@@ -33,7 +33,7 @@ fn compaction_creates_package_nodes() {
     // Now call compact_graph which won't prune anything but we can test
     // that the package node creation happened during index_codebase.
     // Instead, manually create pkg nodes to test the summary tree tool.
-    let mut graph = server.engine.graph.lock().unwrap();
+    let mut graph = server.engine.lock_graph().unwrap();
     for dir in &["src/", "src/auth/", "src/api/"] {
         let node = GraphNode {
             id: format!("pkg:{dir}"),
@@ -103,7 +103,7 @@ fn compaction_prunes_low_score_chunks() {
 
     // Create a file node and many chunk nodes
     let file_path = "test/main.rs";
-    let mut graph = server.engine.graph.lock().unwrap();
+    let mut graph = server.engine.lock_graph().unwrap();
 
     let file_node = GraphNode {
         id: format!("file:{file_path}"),
@@ -138,7 +138,7 @@ fn compaction_prunes_low_score_chunks() {
             memory_id: None,
             namespace: Some("test".to_string()),
         };
-        let _ = server.engine.storage.insert_graph_node(&node);
+        let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
 
         // Add CONTAINS edge from file to chunk
@@ -153,7 +153,7 @@ fn compaction_prunes_low_score_chunks() {
             properties: HashMap::new(),
             created_at: now,
         };
-        let _ = server.engine.storage.insert_graph_edge(&edge);
+        let _ = server.engine.storage().insert_graph_edge(&edge);
         let _ = graph.add_edge(edge);
     }
     drop(graph);
@@ -169,7 +169,7 @@ fn compaction_prunes_low_score_chunks() {
     );
 
     // Remaining chunk nodes should be <= max_retained_chunks_per_file
-    let graph = server.engine.graph.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
     let remaining_chunks: Vec<_> = graph
         .get_all_nodes()
         .into_iter()
@@ -188,7 +188,7 @@ fn compaction_preserves_memory_linked_chunks() {
     let now = chrono::Utc::now();
 
     let file_path = "test/linked.rs";
-    let mut graph = server.engine.graph.lock().unwrap();
+    let mut graph = server.engine.lock_graph().unwrap();
 
     let file_node = GraphNode {
         id: format!("file:{file_path}"),
@@ -222,7 +222,7 @@ fn compaction_preserves_memory_linked_chunks() {
             memory_id: None,
             namespace: Some("test".to_string()),
         };
-        let _ = server.engine.storage.insert_graph_node(&node);
+        let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
 
         let edge = Edge {
@@ -236,7 +236,7 @@ fn compaction_preserves_memory_linked_chunks() {
             properties: HashMap::new(),
             created_at: now,
         };
-        let _ = server.engine.storage.insert_graph_edge(&edge);
+        let _ = server.engine.storage().insert_graph_edge(&edge);
         let _ = graph.add_edge(edge);
     }
 
@@ -264,7 +264,7 @@ fn compaction_preserves_memory_linked_chunks() {
         properties: HashMap::new(),
         created_at: now,
     };
-    let _ = server.engine.storage.insert_graph_edge(&link_edge);
+    let _ = server.engine.storage().insert_graph_edge(&link_edge);
     let _ = graph.add_edge(link_edge);
     drop(graph);
 
@@ -273,7 +273,7 @@ fn compaction_preserves_memory_linked_chunks() {
     server.engine.compact_graph(&seen);
 
     // The memory-linked chunk (chunk:0) should survive compaction
-    let graph = server.engine.graph.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
     let chunk0 = graph.get_node(&format!("chunk:{file_path}:0")).unwrap();
     assert!(
         chunk0.is_some(),
@@ -285,7 +285,7 @@ fn compaction_preserves_memory_linked_chunks() {
 fn summary_tree_excludes_chunks_by_default() {
     let server = test_server();
     let now = chrono::Utc::now();
-    let mut graph = server.engine.graph.lock().unwrap();
+    let mut graph = server.engine.lock_graph().unwrap();
 
     // Build a small tree: pkg:src/ -> file:src/main.rs -> chunk:src/main.rs:0
     let pkg = GraphNode {
@@ -379,7 +379,7 @@ fn compaction_prunes_low_score_symbols() {
     let now = chrono::Utc::now();
 
     let file_path = "test/symbols.rs";
-    let mut graph = server.engine.graph.lock().unwrap();
+    let mut graph = server.engine.lock_graph().unwrap();
 
     let file_node = GraphNode {
         id: format!("file:{file_path}"),
@@ -391,7 +391,7 @@ fn compaction_prunes_low_score_symbols() {
         namespace: Some("test".to_string()),
     };
     let _ = graph.add_node(file_node.clone());
-    let _ = server.engine.storage.insert_graph_node(&file_node);
+    let _ = server.engine.storage().insert_graph_node(&file_node);
 
     // Create 20 symbols: mix of public/private, with/without CALLS edges
     for i in 0..20 {
@@ -418,7 +418,7 @@ fn compaction_prunes_low_score_symbols() {
             memory_id: None,
             namespace: Some("test".to_string()),
         };
-        let _ = server.engine.storage.insert_graph_node(&node);
+        let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
 
         // Add CONTAINS edge from file to symbol
@@ -433,7 +433,7 @@ fn compaction_prunes_low_score_symbols() {
             properties: HashMap::new(),
             created_at: now,
         };
-        let _ = server.engine.storage.insert_graph_edge(&edge);
+        let _ = server.engine.storage().insert_graph_edge(&edge);
         let _ = graph.add_edge(edge);
     }
 
@@ -453,7 +453,7 @@ fn compaction_prunes_low_score_symbols() {
                 properties: HashMap::new(),
                 created_at: now,
             };
-            let _ = server.engine.storage.insert_graph_edge(&edge);
+            let _ = server.engine.storage().insert_graph_edge(&edge);
             let _ = graph.add_edge(edge);
         }
     }
@@ -470,7 +470,7 @@ fn compaction_prunes_low_score_symbols() {
     );
 
     // Verify private unreferenced symbols were the ones pruned
-    let graph = server.engine.graph.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
     let remaining_syms: Vec<_> = graph
         .get_all_nodes()
         .into_iter()
@@ -489,7 +489,7 @@ fn compaction_preserves_public_symbols() {
     let now = chrono::Utc::now();
 
     let file_path = "test/public.rs";
-    let mut graph = server.engine.graph.lock().unwrap();
+    let mut graph = server.engine.lock_graph().unwrap();
 
     let file_node = GraphNode {
         id: format!("file:{file_path}"),
@@ -501,7 +501,7 @@ fn compaction_preserves_public_symbols() {
         namespace: Some("test".to_string()),
     };
     let _ = graph.add_node(file_node.clone());
-    let _ = server.engine.storage.insert_graph_node(&file_node);
+    let _ = server.engine.storage().insert_graph_node(&file_node);
 
     // Create 20 public symbols with no CALLS edges (low connectivity)
     for i in 0..20 {
@@ -524,7 +524,7 @@ fn compaction_preserves_public_symbols() {
             memory_id: None,
             namespace: Some("test".to_string()),
         };
-        let _ = server.engine.storage.insert_graph_node(&node);
+        let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
 
         let edge = Edge {
@@ -538,7 +538,7 @@ fn compaction_preserves_public_symbols() {
             properties: HashMap::new(),
             created_at: now,
         };
-        let _ = server.engine.storage.insert_graph_edge(&edge);
+        let _ = server.engine.storage().insert_graph_edge(&edge);
         let _ = graph.add_edge(edge);
     }
     drop(graph);
@@ -553,7 +553,7 @@ fn compaction_preserves_public_symbols() {
         "No public symbols should be pruned when public_count >= max_retained"
     );
 
-    let graph = server.engine.graph.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
     let remaining: Vec<_> = graph
         .get_all_nodes()
         .into_iter()
@@ -568,7 +568,7 @@ fn compaction_preserves_structural_anchors() {
     let now = chrono::Utc::now();
 
     let file_path = "test/structural.rs";
-    let mut graph = server.engine.graph.lock().unwrap();
+    let mut graph = server.engine.lock_graph().unwrap();
 
     let file_node = GraphNode {
         id: format!("file:{file_path}"),
@@ -580,7 +580,7 @@ fn compaction_preserves_structural_anchors() {
         namespace: Some("test".to_string()),
     };
     let _ = graph.add_node(file_node.clone());
-    let _ = server.engine.storage.insert_graph_node(&file_node);
+    let _ = server.engine.storage().insert_graph_node(&file_node);
 
     // Create structural nodes (Class, Interface, Module) with low scores:
     // private visibility, no CALLS edges, small code size
@@ -609,7 +609,7 @@ fn compaction_preserves_structural_anchors() {
             memory_id: None,
             namespace: Some("test".to_string()),
         };
-        let _ = server.engine.storage.insert_graph_node(&node);
+        let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
 
         let edge = Edge {
@@ -623,7 +623,7 @@ fn compaction_preserves_structural_anchors() {
             properties: HashMap::new(),
             created_at: now,
         };
-        let _ = server.engine.storage.insert_graph_edge(&edge);
+        let _ = server.engine.storage().insert_graph_edge(&edge);
         let _ = graph.add_edge(edge);
     }
 
@@ -648,7 +648,7 @@ fn compaction_preserves_structural_anchors() {
             memory_id: None,
             namespace: Some("test".to_string()),
         };
-        let _ = server.engine.storage.insert_graph_node(&node);
+        let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
 
         let edge = Edge {
@@ -662,7 +662,7 @@ fn compaction_preserves_structural_anchors() {
             properties: HashMap::new(),
             created_at: now,
         };
-        let _ = server.engine.storage.insert_graph_edge(&edge);
+        let _ = server.engine.storage().insert_graph_edge(&edge);
         let _ = graph.add_edge(edge);
     }
     drop(graph);
@@ -678,7 +678,7 @@ fn compaction_preserves_structural_anchors() {
     );
 
     // But structural anchors must survive
-    let graph = server.engine.graph.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
     for (sym_id, _, _) in &structural_kinds {
         let node = graph.get_node(sym_id).unwrap();
         assert!(

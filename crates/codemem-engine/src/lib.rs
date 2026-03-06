@@ -128,27 +128,23 @@ pub struct IndexCache {
 /// cache-friendly access patterns. The trait abstractions exist for testing and
 /// alternative implementations, but the engine itself benefits from static dispatch.
 pub struct CodememEngine {
-    // TODO(C7): Fields should be `pub(crate)` with accessor methods, but many files
-    // in `crates/codemem/src/` (a different crate) access these fields directly
-    // (e.g., `engine.storage`, `engine.graph.lock()`, `engine.metrics`). These must
-    // remain `pub` until all external callers are migrated to use accessor methods.
-    pub storage: Box<dyn StorageBackend>,
-    pub vector: Mutex<HnswIndex>,
-    pub graph: Mutex<GraphEngine>,
+    pub(crate) storage: Box<dyn StorageBackend>,
+    pub(crate) vector: Mutex<HnswIndex>,
+    pub(crate) graph: Mutex<GraphEngine>,
     /// Optional embedding provider (None if not configured).
-    pub embeddings: Option<Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>>,
+    pub(crate) embeddings: Option<Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>>,
     /// Path to the database file, used to derive the index save path.
-    pub db_path: Option<PathBuf>,
+    pub(crate) db_path: Option<PathBuf>,
     /// Cached index results for structural queries.
-    pub index_cache: Mutex<Option<IndexCache>>,
+    pub(crate) index_cache: Mutex<Option<IndexCache>>,
     /// Configurable scoring weights for the 9-component hybrid scoring system.
-    pub scoring_weights: RwLock<ScoringWeights>,
+    pub(crate) scoring_weights: RwLock<ScoringWeights>,
     /// BM25 index for code-aware token overlap scoring.
-    pub bm25_index: Mutex<Bm25Index>,
+    pub(crate) bm25_index: Mutex<Bm25Index>,
     /// Loaded configuration.
-    pub config: CodememConfig,
+    pub(crate) config: CodememConfig,
     /// Operational metrics collector.
-    pub metrics: Arc<InMemoryMetrics>,
+    pub(crate) metrics: Arc<InMemoryMetrics>,
     /// Dirty flag for batch saves: set after `persist_memory_no_save()`,
     /// cleared by `save_index()`.
     dirty: AtomicBool,
@@ -367,6 +363,55 @@ impl CodememEngine {
         self.scoring_weights
             .write()
             .map_err(|e| CodememError::LockPoisoned(format!("scoring_weights write: {e}")))
+    }
+
+    // ── Public Accessors ──────────────────────────────────────────────────
+
+    /// Access the storage backend.
+    pub fn storage(&self) -> &dyn StorageBackend {
+        &*self.storage
+    }
+
+    /// Whether an embedding provider is configured.
+    pub fn has_embeddings(&self) -> bool {
+        self.embeddings.is_some()
+    }
+
+    /// Access the database path (if backed by a file).
+    pub fn db_path(&self) -> Option<&Path> {
+        self.db_path.as_deref()
+    }
+
+    /// Access the loaded configuration.
+    pub fn config(&self) -> &CodememConfig {
+        &self.config
+    }
+
+    /// Access the metrics collector.
+    pub fn metrics(&self) -> &Arc<InMemoryMetrics> {
+        &self.metrics
+    }
+
+    /// Access the raw graph Mutex (for callers that need `&Mutex<GraphEngine>`).
+    pub fn graph_mutex(&self) -> &Mutex<GraphEngine> {
+        &self.graph
+    }
+
+    /// Access the raw vector Mutex (for callers that need `&Mutex<HnswIndex>`).
+    pub fn vector_mutex(&self) -> &Mutex<HnswIndex> {
+        &self.vector
+    }
+
+    /// Access the raw BM25 Mutex (for callers that need `&Mutex<Bm25Index>`).
+    pub fn bm25_mutex(&self) -> &Mutex<Bm25Index> {
+        &self.bm25_index
+    }
+
+    /// Access the raw embeddings Mutex (for callers that need the `Option<&Mutex<...>>`).
+    pub fn embeddings_mutex(
+        &self,
+    ) -> Option<&Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
+        self.embeddings.as_ref()
     }
 
     /// Check if the engine has unsaved changes (dirty flag is set).

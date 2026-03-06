@@ -35,7 +35,11 @@ fn split_creates_part_of_edges() {
     assert_eq!(parts.len(), 2);
 
     // Verify PART_OF edges exist in storage
-    let edges = server.engine.storage.get_edges_for_node(source_id).unwrap();
+    let edges = server
+        .engine
+        .storage()
+        .get_edges_for_node(source_id)
+        .unwrap();
     let part_of_edges: Vec<_> = edges
         .iter()
         .filter(|e| e.relationship == RelationshipType::PartOf)
@@ -96,7 +100,11 @@ fn merge_creates_summarizes_edges() {
     assert_eq!(source_ids.len(), 2);
 
     // Verify SUMMARIZES edges exist in storage
-    let edges = server.engine.storage.get_edges_for_node(merged_id).unwrap();
+    let edges = server
+        .engine
+        .storage()
+        .get_edges_for_node(merged_id)
+        .unwrap();
     let summarizes_edges: Vec<_> = edges
         .iter()
         .filter(|e| e.relationship == RelationshipType::Summarizes)
@@ -154,7 +162,7 @@ fn merge_missing_source_errors() {
 fn save_index_noop_for_in_memory_server() {
     let server = test_server();
     // db_path is None for in-memory server, save_index should not panic
-    assert!(server.engine.db_path.is_none());
+    assert!(server.engine.db_path().is_none());
     server.save_index(); // should be a no-op
 }
 
@@ -164,7 +172,7 @@ fn from_db_path_sets_db_path() {
     let path = tmp.path().to_path_buf();
 
     let server = McpServer::from_db_path(&path).unwrap();
-    assert_eq!(server.engine.db_path, Some(path));
+    assert_eq!(server.engine.db_path().map(|p| p.to_path_buf()), Some(path));
 }
 
 #[test]

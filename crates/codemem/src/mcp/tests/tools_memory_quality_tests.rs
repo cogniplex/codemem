@@ -31,11 +31,10 @@ fn recall_with_exclude_tags_filters_out() {
         updated_at: now,
         last_accessed_at: now,
     };
-    server.engine.storage.insert_memory(&memory).unwrap();
+    server.engine.storage().insert_memory(&memory).unwrap();
     server
         .engine
-        .bm25_index
-        .lock()
+        .lock_bm25()
         .unwrap()
         .add_document(&id, "rust auto-generated analysis");
 
@@ -93,11 +92,10 @@ fn recall_with_min_importance_filters() {
             updated_at: now,
             last_accessed_at: now,
         };
-        server.engine.storage.insert_memory(&memory).unwrap();
+        server.engine.storage().insert_memory(&memory).unwrap();
         server
             .engine
-            .bm25_index
-            .lock()
+            .lock_bm25()
             .unwrap()
             .add_document(&id, content);
     }
@@ -174,12 +172,12 @@ fn persist_memory_adds_to_all_subsystems() {
     let id = stored["id"].as_str().unwrap();
 
     // Verify storage has the memory
-    let memory = server.engine.storage.get_memory(id).unwrap().unwrap();
+    let memory = server.engine.storage().get_memory(id).unwrap().unwrap();
     assert_eq!(memory.content, "persist pipeline test content");
     assert_eq!(memory.memory_type, MemoryType::Decision);
 
     // Verify BM25 index has the document (score > 0 means it was indexed)
-    let bm25 = server.engine.bm25_index.lock().unwrap();
+    let bm25 = server.engine.lock_bm25().unwrap();
     let bm25_score = bm25.score("persist pipeline test", id);
     assert!(
         bm25_score > 0.0,
@@ -187,7 +185,7 @@ fn persist_memory_adds_to_all_subsystems() {
     );
 
     // Verify graph has a node for this memory
-    let graph = server.engine.graph.lock().unwrap();
+    let graph = server.engine.lock_graph().unwrap();
     let graph_node = graph.get_node(id).unwrap();
     assert!(graph_node.is_some(), "Graph should have a node for {id}");
 }
@@ -210,7 +208,7 @@ fn store_memory_with_importance() {
     let stored: Value = serde_json::from_str(text).unwrap();
     let id = stored["id"].as_str().unwrap();
 
-    let memory = server.engine.storage.get_memory(id).unwrap().unwrap();
+    let memory = server.engine.storage().get_memory(id).unwrap().unwrap();
     assert!(
         (memory.importance - 0.9).abs() < f64::EPSILON,
         "importance should be 0.9, got: {}",
@@ -304,11 +302,10 @@ fn recall_public_api_with_min_confidence() {
             updated_at: now,
             last_accessed_at: now,
         };
-        server.engine.storage.insert_memory(&memory).unwrap();
+        server.engine.storage().insert_memory(&memory).unwrap();
         server
             .engine
-            .bm25_index
-            .lock()
+            .lock_bm25()
             .unwrap()
             .add_document(&id, content);
 
@@ -324,10 +321,10 @@ fn recall_public_api_with_min_confidence() {
         };
         server
             .engine
-            .storage
+            .storage()
             .insert_graph_node(&graph_node)
             .unwrap();
-        let _ = server.engine.graph.lock().unwrap().add_node(graph_node);
+        let _ = server.engine.lock_graph().unwrap().add_node(graph_node);
     }
 
     let results = server

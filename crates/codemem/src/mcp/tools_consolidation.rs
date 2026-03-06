@@ -164,10 +164,10 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .unwrap_or("json");
 
-        let total_sessions = self.engine.storage.session_count(namespace).unwrap_or(10);
+        let total_sessions = self.engine.storage().session_count(namespace).unwrap_or(10);
 
         match codemem_engine::patterns::detect_patterns(
-            &*self.engine.storage,
+            self.engine.storage(),
             namespace,
             min_frequency,
             total_sessions,
@@ -306,7 +306,7 @@ impl McpServer {
         // Get recent memories
         let recent_memories: Vec<Value> = self
             .engine
-            .storage
+            .storage()
             .list_memories_filtered(namespace, None)
             .unwrap_or_default()
             .into_iter()
@@ -326,7 +326,7 @@ impl McpServer {
         // Get pending analyses (tagged with pending-analysis)
         let pending: Vec<Value> = self
             .engine
-            .storage
+            .storage()
             .list_memories_filtered(namespace, None)
             .unwrap_or_default()
             .into_iter()
@@ -341,9 +341,9 @@ impl McpServer {
             .collect();
 
         // Get active patterns
-        let total_sessions = self.engine.storage.session_count(namespace).unwrap_or(10);
+        let total_sessions = self.engine.storage().session_count(namespace).unwrap_or(10);
         let patterns: Vec<Value> = codemem_engine::patterns::detect_patterns(
-            &*self.engine.storage,
+            self.engine.storage(),
             namespace,
             2,
             total_sessions,

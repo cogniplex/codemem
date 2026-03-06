@@ -105,7 +105,7 @@ impl McpServer {
         let mut response = json!({});
 
         if include.contains(&"stats") {
-            let storage_stats = match self.engine.storage.stats() {
+            let storage_stats = match self.engine.storage().stats() {
                 Ok(s) => s,
                 Err(e) => return ToolResult::tool_error(format!("Stats error: {e}")),
             };
@@ -147,17 +147,17 @@ impl McpServer {
                     "relationship_types": graph_stats.relationship_type_counts,
                 },
                 "embeddings": {
-                    "available": self.engine.embeddings.is_some(),
+                    "available": self.engine.has_embeddings(),
                     "cache": cache_info,
                 }
             });
         }
 
         if include.contains(&"health") {
-            let storage_ok = self.engine.storage.stats().is_ok();
+            let storage_ok = self.engine.storage().stats().is_ok();
             let vector_ok = true;
             let graph_ok = true;
-            let embeddings_ok = self.engine.embeddings.is_some();
+            let embeddings_ok = self.engine.has_embeddings();
 
             let healthy = storage_ok && vector_ok && graph_ok;
 
@@ -171,7 +171,7 @@ impl McpServer {
         }
 
         if include.contains(&"metrics") {
-            let snapshot = self.engine.metrics.snapshot();
+            let snapshot = self.engine.metrics().snapshot();
             response["metrics"] = serde_json::to_value(snapshot).unwrap_or(json!({}));
         }
 
