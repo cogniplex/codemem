@@ -38,9 +38,9 @@ pub use codemem_core::EmbeddingProvider;
 
 // ── Candle Embedding Service ────────────────────────────────────────────────
 
-/// Maximum batch size for batched embedding forward passes.
-/// bge-base-en-v1.5 at 768-dim: ~48 MB peak GPU memory per batch of 32.
-const BATCH_SIZE: usize = 32;
+/// Default batch size for batched embedding forward passes.
+/// Configurable via `EmbeddingConfig.batch_size`.
+pub const DEFAULT_BATCH_SIZE: usize = 16;
 
 /// Select the best available compute device.
 ///
@@ -67,20 +67,21 @@ fn select_device() -> Device {
     Device::Cpu
 }
 
-/// Embedding service with Candle inference and LRU caching.
+/// Embedding service with Candle inference (no internal cache — use `CachedProvider` wrapper).
 pub struct EmbeddingService {
     model: Mutex<BertModel>,
     /// Tokenizer pre-configured with truncation (no padding).
     /// Used directly for single embeds; cloned and augmented with padding for batch.
     tokenizer: tokenizers::Tokenizer,
     device: Device,
-    cache: Mutex<LruCache<String, Vec<f32>>>,
+    /// Maximum texts per forward pass (GPU memory trade-off).
+    batch_size: usize,
 }
 
 impl EmbeddingService {
     /// Create a new embedding service, loading model from the given directory.
     /// Expects `model.safetensors`, `config.json`, and `tokenizer.json` in the directory.
-    pub fn new(model_dir: &Path) -> Result<Self, CodememError> {
+    pub fn new(model_dir: &Path, batch_size: usize) -> Result<Self, CodememError> {
         let model_path = model_dir.join("model.safetensors");
         let config_path = model_dir.join("config.json");
         let tokenizer_path = model_dir.join("tokenizer.json");
@@ -137,15 +138,11 @@ impl EmbeddingService {
             }))
             .map_err(|e| CodememError::Embedding(format!("Truncation error: {e}")))?;
 
-        let cache = Mutex::new(LruCache::new(
-            NonZeroUsize::new(CACHE_CAPACITY).expect("CACHE_CAPACITY is non-zero"),
-        ));
-
         Ok(Self {
             model: Mutex::new(model),
             tokenizer,
             device,
-            cache,
+            batch_size,
         })
     }
 
@@ -203,35 +200,7 @@ impl EmbeddingService {
     }
 
     /// Embed a single text string. Returns a 768-dim L2-normalized vector.
-    /// Uses LRU cache for repeated queries.
     pub fn embed(&self, text: &str) -> Result<Vec<f32>, CodememError> {
-        // Check cache
-        {
-            let mut cache = self
-                .cache
-                .lock()
-                .map_err(|e| CodememError::LockPoisoned(format!("embedding cache: {e}")))?;
-            if let Some(cached) = cache.get(text) {
-                return Ok(cached.clone());
-            }
-        }
-
-        let embedding = self.embed_uncached(text)?;
-
-        // Store in cache
-        {
-            let mut cache = self
-                .cache
-                .lock()
-                .map_err(|e| CodememError::LockPoisoned(format!("embedding cache: {e}")))?;
-            cache.put(text.to_string(), embedding.clone());
-        }
-
-        Ok(embedding)
-    }
-
-    /// Embed without caching. Uses mean pooling with attention mask.
-    fn embed_uncached(&self, text: &str) -> Result<Vec<f32>, CodememError> {
         // Tokenize using pre-configured tokenizer (truncation already set in constructor)
         let encoding = self
             .tokenizer
@@ -306,77 +275,19 @@ impl EmbeddingService {
         Ok(embedding)
     }
 
-    /// Embed a batch of texts with cache-aware batching.
-    ///
-    /// Checks the LRU cache first and only runs the model on uncached texts,
-    /// using a true batched forward pass (single GPU/CPU kernel launch per chunk).
-    pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CodememError> {
-        if texts.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Partition into cached and uncached
-        let mut results: Vec<Option<Vec<f32>>> = vec![None; texts.len()];
-        let mut uncached_indices = Vec::new();
-        let mut uncached_texts = Vec::new();
-
-        {
-            let mut cache = self
-                .cache
-                .lock()
-                .map_err(|e| CodememError::LockPoisoned(format!("embedding cache: {e}")))?;
-            for (i, text) in texts.iter().enumerate() {
-                if let Some(cached) = cache.get(*text) {
-                    results[i] = Some(cached.clone());
-                } else {
-                    uncached_indices.push(i);
-                    uncached_texts.push(*text);
-                }
-            }
-        }
-
-        if !uncached_texts.is_empty() {
-            let new_embeddings = self.embed_batch_uncached(&uncached_texts)?;
-
-            let mut cache = self
-                .cache
-                .lock()
-                .map_err(|e| CodememError::LockPoisoned(format!("embedding cache: {e}")))?;
-            for (idx, embedding) in uncached_indices.into_iter().zip(new_embeddings) {
-                cache.put(texts[idx].to_string(), embedding.clone());
-                results[idx] = Some(embedding);
-            }
-        }
-
-        // Verify all texts got embeddings — flatten() would silently drop Nones
-        let expected = texts.len();
-        let output: Vec<Vec<f32>> = results
-            .into_iter()
-            .enumerate()
-            .map(|(i, opt)| {
-                opt.ok_or_else(|| {
-                    CodememError::Embedding(format!(
-                        "Missing embedding for text at index {i} (batch size {expected})"
-                    ))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(output)
-    }
-
-    /// Embed a batch of texts without caching, using a true batched forward pass.
+    /// Embed a batch of texts using a true batched forward pass.
     ///
     /// Tokenizes all texts, pads to the longest sequence in each chunk, runs a
-    /// single forward pass per chunk of up to `BATCH_SIZE` texts, then performs
+    /// single forward pass per chunk of up to `batch_size` texts, then performs
     /// mean pooling and L2 normalization on the batched output.
-    fn embed_batch_uncached(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CodememError> {
+    pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CodememError> {
         if texts.is_empty() {
             return Ok(vec![]);
         }
 
         let mut all_embeddings = Vec::with_capacity(texts.len());
 
-        for chunk in texts.chunks(BATCH_SIZE) {
+        for chunk in texts.chunks(self.batch_size) {
             // Clone tokenizer only for batch path — needs per-chunk padding config.
             // Truncation is already configured on self.tokenizer.
             let mut tokenizer = self.tokenizer.clone();
@@ -474,11 +385,9 @@ impl EmbeddingService {
     }
 
     /// Get cache statistics: (current_size, capacity).
+    /// Always returns (0, 0) — caching is handled by the `CachedProvider` wrapper.
     pub fn cache_stats(&self) -> (usize, usize) {
-        match self.cache.lock() {
-            Ok(cache) => (cache.len(), CACHE_CAPACITY),
-            Err(_) => (0, CACHE_CAPACITY),
-        }
+        (0, 0)
     }
 }
 
@@ -639,6 +548,7 @@ pub fn from_env(
         .and_then(|s| s.parse().ok())
         .unwrap_or_else(|| config.map_or(DIMENSIONS, |c| c.dimensions));
     let cache_capacity = config.map_or(CACHE_CAPACITY, |c| c.cache_capacity);
+    let batch_size = config.map_or(DEFAULT_BATCH_SIZE, |c| c.batch_size);
 
     match provider.as_str() {
         "ollama" => {
@@ -685,8 +595,11 @@ pub fn from_env(
         }
         "candle" | "" => {
             let model_dir = EmbeddingService::default_model_dir();
-            let service = EmbeddingService::new(&model_dir)?;
-            Ok(Box::new(service))
+            let service = EmbeddingService::new(&model_dir, batch_size)?;
+            Ok(Box::new(CachedProvider::new(
+                Box::new(service),
+                cache_capacity,
+            )))
         }
         other => Err(CodememError::Embedding(format!(
             "Unknown embedding provider: '{}'. Use 'candle', 'ollama', or 'openai'.",

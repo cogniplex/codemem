@@ -75,6 +75,13 @@ impl CodememConfig {
             ));
         }
 
+        // Batch size must be positive
+        if self.embedding.batch_size == 0 {
+            return Err(CodememError::Config(
+                "Embedding batch size must be > 0".to_string(),
+            ));
+        }
+
         // Chunk size bounds
         if self.chunking.min_chunk_size >= self.chunking.max_chunk_size {
             return Err(CodememError::Config(
@@ -170,6 +177,8 @@ pub struct EmbeddingConfig {
     pub dimensions: usize,
     /// LRU cache capacity.
     pub cache_capacity: usize,
+    /// Batch size for embedding forward passes (GPU memory trade-off).
+    pub batch_size: usize,
 }
 
 impl Default for EmbeddingConfig {
@@ -180,6 +189,7 @@ impl Default for EmbeddingConfig {
             url: String::new(),
             dimensions: 768,
             cache_capacity: 10_000,
+            batch_size: 16,
         }
     }
 }

@@ -319,7 +319,7 @@ fn from_env_unknown_provider() {
 
 #[test]
 fn embedding_service_missing_model() {
-    match EmbeddingService::new(Path::new("/nonexistent/path")) {
+    match EmbeddingService::new(Path::new("/nonexistent/path"), 16) {
         Err(e) => {
             let err = e.to_string();
             assert!(
@@ -342,6 +342,7 @@ fn default_model_dir_path() {
 fn constants_are_sensible() {
     assert_eq!(DIMENSIONS, 768);
     assert_eq!(CACHE_CAPACITY, 10_000);
+    assert_eq!(DEFAULT_BATCH_SIZE, 16);
     assert_eq!(MODEL_NAME, "bge-base-en-v1.5");
 }
 
@@ -399,6 +400,7 @@ fn from_env_with_config_ollama_url() {
         model: "custom-model".to_string(),
         dimensions: 512,
         cache_capacity: 5000,
+        ..Default::default()
     };
     let result = from_env(Some(&config));
     unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
@@ -416,8 +418,8 @@ fn from_env_env_var_overrides_config() {
     unsafe { std::env::set_var("CODEMEM_EMBED_DIMENSIONS", "256") };
 
     let config = codemem_core::EmbeddingConfig {
-        provider: "candle".to_string(), // should be overridden by env var
-        dimensions: 512,                // should be overridden by env var
+        provider: "candle".to_string(),
+        dimensions: 512,
         ..Default::default()
     };
     let result = from_env(Some(&config));
