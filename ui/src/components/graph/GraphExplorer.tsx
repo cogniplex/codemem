@@ -19,15 +19,21 @@ const ALL_KINDS = new Set([
 export function GraphExplorer() {
   const namespace = useNamespaceStore((s) => s.active)
 
-  const [maxNodes, setMaxNodes] = useState(500)
+  const [maxNodes, setMaxNodes] = useState(1200)
   const [kinds, setKinds] = useState<Set<string>>(new Set(ALL_KINDS))
   const [showCommunities, setShowCommunities] = useState(false)
-  const [showEdges, setShowEdges] = useState(false)
+  const [showEdges, setShowEdges] = useState(true)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [searchLabel, setSearchLabel] = useState('')
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
   const [layoutRunning, setLayoutRunning] = useState(false)
-  const [activeRelationships, setActiveRelationships] = useState<Set<string>>(() => new Set(ALL_RELATIONSHIPS))
+  // Hide noisy high-volume edge types by default — users can toggle them on
+  const [activeRelationships, setActiveRelationships] = useState<Set<string>>(() => {
+    const defaults = new Set(ALL_RELATIONSHIPS)
+    defaults.delete('CO_CHANGED')
+    defaults.delete('CALLS')
+    return defaults
+  })
   const [focusMode, setFocusMode] = useState<{ nodeId: string; depth: number } | null>(null)
 
   // Fetch neighbors for focus mode

@@ -1,21 +1,21 @@
 export const EDGE_COLORS: Record<string, string> = {
   // Structural — blue/cyan
-  CONTAINS: '#3b82f650', PART_OF: '#3b82f650', IMPORTS: '#06b6d4a0',
-  // Execution — subtle so CALLS (97% of edges) doesn't blind you
-  CALLS: '#52525b30', EXTENDS: '#34d39960', IMPLEMENTS: '#22c55ea0', INHERITS: '#4ade8060',
+  CONTAINS: '#3b82f670', PART_OF: '#3b82f670', IMPORTS: '#06b6d4b0',
+  // Execution
+  CALLS: '#52525b50', EXTENDS: '#34d39990', IMPLEMENTS: '#22c55eb0', INHERITS: '#4ade8090',
   // Semantic — purple/violet
-  RELATES_TO: '#8b5cf660', SIMILAR_TO: '#a78bfa60', SHARES_THEME: '#c084fc60',
-  EXPLAINS: '#a78bfa60', EXEMPLIFIES: '#c084fc60', SUMMARIZES: '#8b5cf660',
+  RELATES_TO: '#8b5cf690', SIMILAR_TO: '#a78bfa90', SHARES_THEME: '#c084fc90',
+  EXPLAINS: '#a78bfa90', EXEMPLIFIES: '#c084fc90', SUMMARIZES: '#8b5cf690',
   // Temporal — amber/orange
-  LEADS_TO: '#f59e0b60', PRECEDED_BY: '#fbbf2460', EVOLVED_INTO: '#fb923c60', DERIVED_FROM: '#f9731660',
+  LEADS_TO: '#f59e0b90', PRECEDED_BY: '#fbbf2490', EVOLVED_INTO: '#fb923c90', DERIVED_FROM: '#f9731690',
   // Dependency — teal
-  DEPENDS_ON: '#14b8a660',
+  DEPENDS_ON: '#14b8a690',
   // Negative — red/rose
-  CONTRADICTS: '#ef444480', INVALIDATED_BY: '#f8717180', BLOCKS: '#dc262680', SUPERSEDES: '#fb718580',
+  CONTRADICTS: '#ef4444a0', INVALIDATED_BY: '#f87171a0', BLOCKS: '#dc2626a0', SUPERSEDES: '#fb7185a0',
   // Reinforcement — lime
-  REINFORCES: '#a3e63580',
+  REINFORCES: '#a3e635a0',
   // Co-change
-  CO_CHANGED: '#94a3b860',
+  CO_CHANGED: '#94a3b840',
 }
 
 export const ALL_RELATIONSHIPS = new Set(Object.keys(EDGE_COLORS))

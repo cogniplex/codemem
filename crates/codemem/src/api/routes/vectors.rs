@@ -52,7 +52,7 @@ pub async fn get_vectors(
             let mem = mem_map.get(id.as_str());
             let node = node_map.get(id.as_str());
             EmbeddingRow {
-                memory_id: id,
+                memory_id: id.clone(),
                 embedding,
                 memory_type: mem
                     .map(|m| m.memory_type.to_string())
@@ -63,9 +63,17 @@ pub async fn get_vectors(
                     .and_then(|m| m.namespace.clone())
                     .or_else(|| node.and_then(|n| n.namespace.clone())),
                 content: mem
-                    .map(|m| m.content.clone())
-                    .or_else(|| node.map(|n| n.label.clone()))
-                    .unwrap_or_default(),
+                    .map(|m| {
+                        if m.content.is_empty() {
+                            m.tags.first().cloned().unwrap_or_else(|| id.clone())
+                        } else {
+                            m.content.clone()
+                        }
+                    })
+                    .or_else(|| node.map(|n| {
+                        if n.label.is_empty() { id.clone() } else { n.label.clone() }
+                    }))
+                    .unwrap_or_else(|| id.clone()),
             }
         })
         .collect();

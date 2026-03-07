@@ -85,7 +85,7 @@ export function ExplorerView() {
               <Loader2 size={16} className="animate-spin text-zinc-500" />
             </div>
           )}
-          {data?.nodes.map((node) => (
+          {data?.nodes.toSorted((a, b) => b.degree - a.degree).map((node) => (
             <div key={node.id} className="mb-1.5">
               <BrowseNodeCard
                 node={node}

@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
-import Graph from 'graphology'
-import Sigma from 'sigma'
-import forceAtlas2 from 'graphology-layout-forceatlas2'
+import { useEffect, useRef, useMemo, useCallback, useState } from 'react'
+import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d'
 import type { GraphNode, GraphEdge } from '../../api/types'
 import { KIND_COLORS, EDGE_COLORS } from './constants'
 import { trimLabel } from '../../utils/paths'
+
+const CANVAS_OBJECT_MODE = () => 'replace' as const
 
 const COMMUNITY_PALETTE = [
   '#a78bfa', '#22d3ee', '#34d399', '#fbbf24', '#f87171',
@@ -30,6 +30,26 @@ interface Props {
   focusNodeId?: string | null
 }
 
+interface FGNode {
+  id: string
+  label: string
+  kind: string
+  centrality: number
+  color: string
+  size: number
+  degree: number
+  x?: number
+  y?: number
+}
+
+interface FGLink {
+  source: string
+  target: string
+  relationship: string
+  weight: number
+  color: string
+}
+
 export function SigmaGraph({
   nodes,
   edges,
@@ -44,330 +64,256 @@ export function SigmaGraph({
   focusNodeId,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const sigmaRef = useRef<Sigma | null>(null)
+  const fgRef = useRef<ForceGraphMethods<FGNode, FGLink> | undefined>(undefined)
 
-  // Track graph instance in STATE so React properly detects changes
-  // (refs don't trigger re-renders — this was the expand neighbors bug)
-  const [graphInstance, setGraphInstance] = useState<Graph | null>(null)
-
-  const notifyLayout = useCallback((running: boolean) => {
-    onLayoutRunning?.(running)
-  }, [onLayoutRunning])
-
-  // Build graph when data changes — community coloring is handled
-  // by the node reducer below, not here, to avoid expensive rebuilds.
-  useEffect(() => {
-    const graph = new Graph()
-
-    // First pass: add nodes with placeholder size
-    for (const node of nodes) {
-      graph.addNode(node.id, {
-        label: trimLabel(node.label),
-        size: 3, // placeholder — resized after edges are added
-        color: KIND_COLORS[node.kind] ?? '#71717a',
-        kind: node.kind,
-        centrality: node.centrality,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-      })
-    }
-
-    // Add edges
+  // Build graph data for force-graph
+  const graphData = useMemo(() => {
     const nodeSet = new Set(nodes.map((n) => n.id))
+
+    // Deduplicate edges
     const edgeSet = new Set<string>()
+    const links: FGLink[] = []
     for (const edge of edges) {
       if (nodeSet.has(edge.src) && nodeSet.has(edge.dst) && edge.src !== edge.dst) {
-        const key = edge.src < edge.dst ? `${edge.src}:${edge.dst}` : `${edge.dst}:${edge.src}`
+        const pair = edge.src < edge.dst ? `${edge.src}:${edge.dst}` : `${edge.dst}:${edge.src}`
+        const key = `${pair}:${edge.relationship}`
         if (!edgeSet.has(key)) {
           edgeSet.add(key)
-          const edgeColor = EDGE_COLORS[edge.relationship] ?? '#52525b18'
-          const isCommon = edge.relationship === 'CALLS'
-          graph.addEdgeWithKey(key, edge.src, edge.dst, {
+          links.push({
+            source: edge.src,
+            target: edge.dst,
+            relationship: edge.relationship,
             weight: edge.weight,
-            label: edge.relationship,
-            size: isCommon ? 0.2 : Math.max(0.5, edge.weight * 1.5),
-            color: edgeColor,
+            color: EDGE_COLORS[edge.relationship] ?? '#52525b18',
           })
         }
       }
     }
 
-    // Second pass: size nodes by degree (connections) for structural importance
-    graph.forEachNode((nodeId, attrs) => {
-      const degree = graph.degree(nodeId)
-      // Log-scaled: isolated nodes = 3, 5 connections = 6, 20 = 10, 100+ = 18
-      const size = 3 + Math.min(Math.log1p(degree) * 3, 18)
-      graph.setNodeAttribute(nodeId, 'size', size)
-      // Only show labels for well-connected nodes (reduces clutter)
-      if (degree < 3) {
-        graph.setNodeAttribute(nodeId, 'label', null)
-        graph.setNodeAttribute(nodeId, 'formerLabel', attrs.label)
+    // Compute degree per node
+    const degreeMap = new Map<string, number>()
+    for (const link of links) {
+      degreeMap.set(link.source, (degreeMap.get(link.source) ?? 0) + 1)
+      degreeMap.set(link.target, (degreeMap.get(link.target) ?? 0) + 1)
+    }
+
+    const fgNodes: FGNode[] = nodes.map((node) => {
+      const degree = degreeMap.get(node.id) ?? 0
+      const size = 2 + Math.min(Math.log1p(degree) * 2, 12)
+      return {
+        id: node.id,
+        label: trimLabel(node.label),
+        kind: node.kind,
+        centrality: node.centrality,
+        color: KIND_COLORS[node.kind] ?? '#71717a',
+        size,
+        degree,
       }
     })
 
-    // Pre-compute layout synchronously — fully positions nodes before Sigma
-    // renders, eliminating wiggle. No live supervisor needed after this.
-    const nodeCount = graph.order
-    if (nodeCount > 0) {
-      // Scale iterations with graph size, but cap to avoid freezing
-      const preIterations = nodeCount > 500 ? 300 : nodeCount > 100 ? 200 : 150
-      forceAtlas2.assign(graph, {
-        iterations: preIterations,
-        settings: {
-          gravity: 8,
-          scalingRatio: nodeCount > 300 ? 30 : 15,
-          slowDown: 10,
-          barnesHutOptimize: true,
-          barnesHutTheta: 0.5,
-          strongGravityMode: true,
-          linLogMode: false,
-          adjustSizes: true,
-        },
-      })
-    }
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: graphInstance triggers Sigma re-init
-    setGraphInstance(graph)
-
-    return () => {
-      graph.clear()
-    }
+    return { nodes: fgNodes, links }
   }, [nodes, edges])
 
-  // Init Sigma renderer — depends on graphInstance STATE, not a ref
-  useEffect(() => {
-    if (!containerRef.current || !graphInstance) return
+  // d3-force mutates link.source/target from string → object after simulation starts
+  const linkNodeId = (node: string | FGNode) => typeof node === 'string' ? node : node.id
 
-    const sigma = new Sigma(graphInstance, containerRef.current, {
-      renderLabels: true,
-      labelColor: { color: '#d4d4d8' },
-      labelSize: 11,
-      labelRenderedSizeThreshold: 6,
-      defaultDrawNodeHover: (context, data) => {
-        const attrs = data as Record<string, unknown>
-        const label = (data.label ?? attrs.formerLabel) as string | undefined
-        const kind = (attrs.kind as string) ?? ''
-        const centrality = (attrs.centrality as number) ?? 0
-        const degree = graphInstance.degree(data.key ?? '')
-
-        const PAD = 8
-        const LINE_H = 16
-        const BADGE_H = 18
-        const CARD_W = 200
-
-        // Wrap label into lines
-        const lines: string[] = []
-        if (label) {
-          context.font = '600 12px sans-serif'
-          const words = label.split(/(?=[A-Z/_:.])|[\s]+/)
-          let line = ''
-          for (const word of words) {
-            const test = line + word
-            if (context.measureText(test).width > CARD_W - 2 * PAD && line) {
-              lines.push(line)
-              line = word
-            } else {
-              line = test
-            }
-          }
-          if (line) lines.push(line)
-          if (lines.length > 3) {
-            lines.length = 3
-            lines[2] = lines[2].slice(0, -3) + '...'
-          }
-        }
-
-        const cardH = PAD + BADGE_H + 4 + lines.length * LINE_H + 4 + LINE_H + PAD
-        const cardX = data.x + data.size + 6
-        const cardY = data.y - cardH / 2
-
-        // Shadow
-        context.shadowOffsetX = 0
-        context.shadowOffsetY = 2
-        context.shadowBlur = 12
-        context.shadowColor = 'rgba(0,0,0,0.5)'
-
-        // Card background with rounded corners
-        const r = 6
-        context.beginPath()
-        context.moveTo(cardX + r, cardY)
-        context.lineTo(cardX + CARD_W - r, cardY)
-        context.quadraticCurveTo(cardX + CARD_W, cardY, cardX + CARD_W, cardY + r)
-        context.lineTo(cardX + CARD_W, cardY + cardH - r)
-        context.quadraticCurveTo(cardX + CARD_W, cardY + cardH, cardX + CARD_W - r, cardY + cardH)
-        context.lineTo(cardX + r, cardY + cardH)
-        context.quadraticCurveTo(cardX, cardY + cardH, cardX, cardY + cardH - r)
-        context.lineTo(cardX, cardY + r)
-        context.quadraticCurveTo(cardX, cardY, cardX + r, cardY)
-        context.closePath()
-        context.fillStyle = 'rgba(24,24,27,0.95)'
-        context.fill()
-        context.shadowBlur = 0
-
-        // Kind badge
-        let badgeY = cardY + PAD
-        if (kind) {
-          const badgeColor = KIND_COLORS[kind] ?? '#71717a'
-          context.font = '600 10px sans-serif'
-          const badgeW = context.measureText(kind).width + 12
-          const badgeR = 4
-          context.beginPath()
-          context.moveTo(cardX + PAD + badgeR, badgeY)
-          context.lineTo(cardX + PAD + badgeW - badgeR, badgeY)
-          context.quadraticCurveTo(cardX + PAD + badgeW, badgeY, cardX + PAD + badgeW, badgeY + badgeR)
-          context.lineTo(cardX + PAD + badgeW, badgeY + BADGE_H - badgeR)
-          context.quadraticCurveTo(cardX + PAD + badgeW, badgeY + BADGE_H, cardX + PAD + badgeW - badgeR, badgeY + BADGE_H)
-          context.lineTo(cardX + PAD + badgeR, badgeY + BADGE_H)
-          context.quadraticCurveTo(cardX + PAD, badgeY + BADGE_H, cardX + PAD, badgeY + BADGE_H - badgeR)
-          context.lineTo(cardX + PAD, badgeY + badgeR)
-          context.quadraticCurveTo(cardX + PAD, badgeY, cardX + PAD + badgeR, badgeY)
-          context.closePath()
-          context.fillStyle = badgeColor + '30'
-          context.fill()
-          context.fillStyle = badgeColor
-          context.fillText(kind, cardX + PAD + 6, badgeY + 13)
-          badgeY += BADGE_H + 4
-        }
-
-        // Label lines
-        context.font = '600 12px sans-serif'
-        context.fillStyle = '#f4f4f5'
-        for (const line of lines) {
-          context.fillText(line, cardX + PAD, badgeY + 12)
-          badgeY += LINE_H
-        }
-
-        // Footer: degree + centrality
-        badgeY += 4
-        context.font = '400 10px sans-serif'
-        context.fillStyle = '#a1a1aa'
-        context.fillText(
-          `${degree} connections  ·  ${(centrality * 100).toFixed(1)}% centrality`,
-          cardX + PAD,
-          badgeY + 10,
-        )
-      },
-      renderEdgeLabels: true,
-      edgeLabelColor: { color: '#a1a1aa' },
-      edgeLabelSize: 10,
-      defaultEdgeColor: '#52525b18',
-      defaultNodeColor: '#71717a',
-    })
-    sigmaRef.current = sigma
-
-    sigma.on('clickNode', ({ node }) => {
-      onNodeClick?.(node)
-    })
-
-    return () => {
-      sigma.kill()
-      sigmaRef.current = null
+  // Highlight set: selected node + its neighbors
+  const highlightSet = useMemo(() => {
+    if (!highlightNodeId) return null
+    const set = new Set<string>()
+    set.add(highlightNodeId)
+    for (const link of graphData.links) {
+      const src = linkNodeId(link.source as string | FGNode)
+      const tgt = linkNodeId(link.target as string | FGNode)
+      if (src === highlightNodeId) set.add(tgt)
+      if (tgt === highlightNodeId) set.add(src)
     }
-  }, [graphInstance, onNodeClick, nodes.length, notifyLayout])
+    return set
+  }, [highlightNodeId, graphData.links])
 
-  // Highlight searched node
+  // Configure d3 forces after mount
   useEffect(() => {
-    const sigma = sigmaRef.current
-    if (!sigma || !graphInstance || !searchLabel) return
+    const fg = fgRef.current
+    if (!fg) return
 
+    fg.d3Force('charge')?.strength((node: FGNode) => {
+      // Stronger repulsion for high-degree hub nodes to spread clusters
+      return -30 - (node.degree ?? 0) * 2
+    })
+    fg.d3Force('link')?.distance((link: FGLink) => {
+      // Structural edges (CONTAINS) keep nodes close; weak edges stay loose
+      if (link.relationship === 'CONTAINS' || link.relationship === 'PART_OF') return 20
+      if (link.relationship === 'CALLS' || link.relationship === 'CO_CHANGED') return 80
+      return 40
+    }).strength((link: FGLink) => {
+      if (link.relationship === 'CONTAINS' || link.relationship === 'PART_OF') return 0.8
+      if (link.relationship === 'CALLS' || link.relationship === 'CO_CHANGED') return 0.05
+      return 0.3
+    })
+    fg.d3Force('center')?.strength(0.05)
+
+    fg.d3ReheatSimulation()
+  }, [graphData])
+
+  // Zoom to searched node
+  useEffect(() => {
+    if (!searchLabel || !fgRef.current) return
     const lowerSearch = searchLabel.toLowerCase()
-    let found: string | null = null
-    graphInstance.forEachNode((key, attrs) => {
-      if (!found && attrs.label?.toLowerCase().includes(lowerSearch)) {
-        found = key
-      }
-    })
-
-    if (found) {
-      const attrs = graphInstance.getNodeAttributes(found)
-      sigma.getCamera().animate({ x: attrs.x, y: attrs.y, ratio: 0.3 }, { duration: 300 })
+    const found = graphData.nodes.find((n) => n.label.toLowerCase().includes(lowerSearch))
+    if (found && found.x != null && found.y != null) {
+      fgRef.current.centerAt(found.x, found.y, 300)
+      fgRef.current.zoom(4, 300)
     }
-  }, [searchLabel, graphInstance])
+  }, [searchLabel, graphData.nodes])
 
-  // Helper: apply community color to a node if enabled
-  const applyCommunityColor = useCallback((node: string, data: Record<string, unknown>) => {
-    if (showCommunities && communities?.[node] != null) {
-      return { ...data, color: communityColor(communities[node]) }
-    }
-    return data
-  }, [showCommunities, communities])
-
-  // Node + edge reducers: highlight, focus, community coloring, relationship filters, edge toggle
+  // Recenter camera when entering/exiting focus mode
   useEffect(() => {
-    const sigma = sigmaRef.current
-    if (!sigma || !graphInstance) return
+    if (!fgRef.current) return
+    // Wait for layout to settle before zooming to fit
+    const timer = setTimeout(() => {
+      fgRef.current?.zoomToFit(400, 40)
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [focusNodeId])
 
-    if (highlightNodeId) {
-      const connectedIds = new Set<string>()
-      connectedIds.add(highlightNodeId)
-      graphInstance.forEachEdge(highlightNodeId, (_edge, _attrs, src, dst) => {
-        connectedIds.add(src)
-        connectedIds.add(dst)
-      })
+  // Notify layout running state
+  useEffect(() => {
+    onLayoutRunning?.(true)
+  }, [graphData, onLayoutRunning])
 
-      sigma.setSetting('nodeReducer', (node, data) => {
-        if (node === highlightNodeId) {
-          const label = data.label ?? (data as Record<string, unknown>).formerLabel as string | undefined
-          return { ...data, label, color: '#ffffff', zIndex: 10, size: (data.size ?? 5) * 1.5 }
-        }
-        if (connectedIds.has(node)) {
-          const label = data.label ?? (data as Record<string, unknown>).formerLabel as string | undefined
-          return applyCommunityColor(node, { ...data, label, zIndex: 5 })
-        }
-        return { ...data, color: '#3f3f46', zIndex: 0, label: null }
-      })
+  const handleEngineStop = useCallback(() => {
+    onLayoutRunning?.(false)
+  }, [onLayoutRunning])
 
-      sigma.setSetting('edgeReducer', (edge, data) => {
-        const src = graphInstance.source(edge)
-        const dst = graphInstance.target(edge)
-        const edgeLabel = (data as Record<string, unknown>).label as string | undefined
-        if (activeRelationships && edgeLabel && !activeRelationships.has(edgeLabel)) {
-          return { ...data, hidden: true }
-        }
-        if (connectedIds.has(src) && connectedIds.has(dst)) {
-          return { ...data, size: Math.max((data.size ?? 1) * 1.5, 1.5), forceLabel: true }
-        }
-        return { ...data, color: '#27272a00', size: 0, hidden: true }
-      })
-    } else if (focusNodeId) {
-      sigma.setSetting('nodeReducer', (node, data) => {
-        if (node === focusNodeId) {
-          const label = data.label ?? (data as Record<string, unknown>).formerLabel as string | undefined
-          return { ...data, label, color: '#ffffff', zIndex: 10, size: (data.size ?? 5) * 1.8, borderColor: '#ffffff' }
-        }
-        const label = data.label ?? (data as Record<string, unknown>).formerLabel as string | undefined
-        return applyCommunityColor(node, { ...data, label, zIndex: 5 })
-      })
+  const handleNodeClick = useCallback((node: FGNode) => {
+    onNodeClick?.(node.id)
+  }, [onNodeClick])
 
-      sigma.setSetting('edgeReducer', (_edge, data) => {
-        const edgeLabel = (data as Record<string, unknown>).label as string | undefined
-        if (activeRelationships && edgeLabel && !activeRelationships.has(edgeLabel)) {
-          return { ...data, hidden: true }
-        }
-        return { ...data, forceLabel: true }
-      })
-    } else {
-      // Default: apply community coloring through reducer (no graph rebuild)
-      sigma.setSetting('nodeReducer', (node, data) => applyCommunityColor(node, data))
-      sigma.setSetting('edgeReducer', (_edge, data) => {
-        if (!showEdges) {
-          return { ...data, hidden: true }
-        }
-        const edgeLabel = (data as Record<string, unknown>).label as string | undefined
-        if (activeRelationships && edgeLabel && !activeRelationships.has(edgeLabel)) {
-          return { ...data, hidden: true }
-        }
-        return { ...data, label: null }
-      })
+  // Node canvas renderer
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by react-force-graph-2d callback signature
+  const nodeCanvasObject = useCallback((node: FGNode, ctx: CanvasRenderingContext2D, _globalScale: number) => {
+    const x = node.x ?? 0
+    const y = node.y ?? 0
+    const size = node.size
+
+    // Determine color
+    let color = node.color
+    if (showCommunities && communities?.[node.id] != null) {
+      color = communityColor(communities[node.id])
+    }
+    if (focusNodeId === node.id) {
+      color = '#ffffff'
     }
 
-    sigma.refresh()
-  }, [highlightNodeId, graphInstance, showEdges, activeRelationships, focusNodeId, applyCommunityColor])
+    // Dim non-highlighted nodes
+    let alpha = 1
+    if (highlightSet) {
+      if (node.id === highlightNodeId) {
+        color = '#ffffff'
+      } else if (!highlightSet.has(node.id)) {
+        alpha = 0.15
+      }
+    }
+
+    ctx.globalAlpha = alpha
+
+    // Draw node circle
+    ctx.beginPath()
+    ctx.arc(x, y, size, 0, 2 * Math.PI)
+    ctx.fillStyle = color
+    ctx.fill()
+
+    // No labels on canvas — tooltip on hover is sufficient
+
+    ctx.globalAlpha = 1
+  }, [highlightSet, highlightNodeId, showCommunities, communities, focusNodeId])
+
+  // Link visibility filter
+  const linkVisibility = useCallback((link: FGLink) => {
+    if (!showEdges) return false
+    const rel = link.relationship
+    if (activeRelationships && !activeRelationships.has(rel)) return false
+
+    // In highlight mode, only show edges connected to highlighted nodes
+    if (highlightSet) {
+      const src = linkNodeId(link.source as string | FGNode)
+      const tgt = linkNodeId(link.target as string | FGNode)
+      return highlightSet.has(src) && highlightSet.has(tgt)
+    }
+    return true
+  }, [showEdges, activeRelationships, highlightSet])
+
+  const linkWidth = useCallback((link: FGLink) => {
+    const isWeak = link.relationship === 'CALLS' || link.relationship === 'CO_CHANGED'
+    const isStructural = link.relationship === 'CONTAINS' || link.relationship === 'PART_OF'
+    if (isWeak || isStructural) return 0.3
+    return Math.max(0.5, link.weight * 1.5)
+  }, [])
+
+  const linkColor = useCallback((link: FGLink) => link.color, [])
+
+  // Hover tooltip
+  const nodeLabel = useCallback((node: FGNode) => {
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    return `<div style="background:rgba(24,24,27,0.95);padding:8px 12px;border-radius:6px;color:#f4f4f5;font-size:12px;max-width:250px">
+      <span style="background:${node.color}30;color:${node.color};padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600">${esc(node.kind)}</span>
+      <div style="margin-top:4px;font-weight:600;word-break:break-all">${esc(node.label)}</div>
+      <div style="margin-top:4px;color:#a1a1aa;font-size:10px">${node.degree} connections · ${(node.centrality * 100).toFixed(1)}% centrality</div>
+    </div>`
+  }, [])
+
+  // Container size
+  const [dimensions] = useDimensions(containerRef)
 
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full rounded-lg bg-zinc-950"
-    />
+    <div ref={containerRef} className="h-full w-full rounded-lg bg-zinc-950">
+      {dimensions.width > 0 && (
+        <ForceGraph2D
+          ref={fgRef}
+          graphData={graphData}
+          width={dimensions.width}
+          height={dimensions.height}
+          nodeCanvasObject={nodeCanvasObject}
+          nodeCanvasObjectMode={CANVAS_OBJECT_MODE}
+          nodeVal={(node: FGNode) => node.size}
+          onNodeClick={handleNodeClick}
+          nodeLabel={nodeLabel}
+          linkVisibility={linkVisibility}
+          linkWidth={linkWidth}
+          linkColor={linkColor}
+          onEngineStop={handleEngineStop}
+          linkDirectionalParticles={0}
+          cooldownTicks={200}
+          warmupTicks={50}
+          backgroundColor="rgba(0,0,0,0)"
+          enableNodeDrag={true}
+          enableZoomInteraction={true}
+          enablePanInteraction={true}
+        />
+      )}
+    </div>
   )
 }
+
+// Hook to track container dimensions
+function useDimensions(ref: React.RefObject<HTMLDivElement | null>) {
+  const [dims, setDims] = useState({ width: 0, height: 0 })
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+
+    const update = () => {
+      setDims({ width: el.clientWidth, height: el.clientHeight })
+    }
+    update()
+
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- ref is stable
+  }, [])
+
+  return [dims] as const
+}
+
