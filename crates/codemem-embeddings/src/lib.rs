@@ -383,7 +383,6 @@ impl EmbeddingService {
 
         Ok(all_embeddings)
     }
-
 }
 
 impl EmbeddingProvider for EmbeddingService {

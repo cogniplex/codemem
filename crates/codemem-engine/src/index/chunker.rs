@@ -85,22 +85,47 @@ enum SemanticCategory {
 fn classify_node(kind: &str) -> SemanticCategory {
     match kind {
         // Imports / use
-        k if k.contains("import") || k == "use_declaration" || k == "use_item"
-            || k == "extern_crate_declaration" || k == "include_directive"
-            || k == "using_declaration" || k == "package_declaration" => SemanticCategory::Import,
+        k if k.contains("import")
+            || k == "use_declaration"
+            || k == "use_item"
+            || k == "extern_crate_declaration"
+            || k == "include_directive"
+            || k == "using_declaration"
+            || k == "package_declaration" =>
+        {
+            SemanticCategory::Import
+        }
 
         // Comments
-        k if k.contains("comment") || k == "line_comment" || k == "block_comment"
-            || k == "doc_comment" => SemanticCategory::Comment,
+        k if k.contains("comment")
+            || k == "line_comment"
+            || k == "block_comment"
+            || k == "doc_comment" =>
+        {
+            SemanticCategory::Comment
+        }
 
         // Declarations — functions, classes, structs, etc.
-        k if k.contains("function") || k.contains("method") || k.contains("class")
-            || k.contains("struct") || k.contains("enum") || k.contains("interface")
-            || k.contains("trait") || k.contains("impl")
-            || k == "const_item" || k == "static_item" || k == "type_alias"
-            || k == "type_item" || k == "mod_item" || k == "module"
-            || k == "lexical_declaration" || k == "variable_declaration"
-            || k == "export_statement" => SemanticCategory::Declaration,
+        k if k.contains("function")
+            || k.contains("method")
+            || k.contains("class")
+            || k.contains("struct")
+            || k.contains("enum")
+            || k.contains("interface")
+            || k.contains("trait")
+            || k.contains("impl")
+            || k == "const_item"
+            || k == "static_item"
+            || k == "type_alias"
+            || k == "type_item"
+            || k == "mod_item"
+            || k == "module"
+            || k == "lexical_declaration"
+            || k == "variable_declaration"
+            || k == "export_statement" =>
+        {
+            SemanticCategory::Declaration
+        }
 
         _ => SemanticCategory::Other,
     }
@@ -281,11 +306,8 @@ where
 
 /// Emit a group of non-boundary sibling nodes. If they fit together, emit as one
 /// chunk; otherwise recurse each individually.
-fn emit_group<D: Doc>(
-    nodes: &[&Node<'_, D>],
-    config: &ChunkConfig,
-    out: &mut Vec<RawChunk>,
-) where
+fn emit_group<D: Doc>(nodes: &[&Node<'_, D>], config: &ChunkConfig, out: &mut Vec<RawChunk>)
+where
     D::Lang: ast_grep_core::Language,
 {
     if nodes.is_empty() {
@@ -298,7 +320,11 @@ fn emit_group<D: Doc>(
         // Emit as a single merged chunk
         let first = nodes.first().unwrap();
         let last = nodes.last().unwrap();
-        let text: String = nodes.iter().map(|n| n.text().to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = nodes
+            .iter()
+            .map(|n| n.text().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         let first_kind = first.kind();
         let kind = nodes
             .iter()

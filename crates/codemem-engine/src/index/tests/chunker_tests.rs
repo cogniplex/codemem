@@ -276,11 +276,20 @@ fn classify_node_categories() {
     assert_eq!(classify_node("import_statement"), SemanticCategory::Import);
     assert_eq!(classify_node("line_comment"), SemanticCategory::Comment);
     assert_eq!(classify_node("block_comment"), SemanticCategory::Comment);
-    assert_eq!(classify_node("function_item"), SemanticCategory::Declaration);
+    assert_eq!(
+        classify_node("function_item"),
+        SemanticCategory::Declaration
+    );
     assert_eq!(classify_node("impl_item"), SemanticCategory::Declaration);
-    assert_eq!(classify_node("class_declaration"), SemanticCategory::Declaration);
+    assert_eq!(
+        classify_node("class_declaration"),
+        SemanticCategory::Declaration
+    );
     assert_eq!(classify_node("struct_item"), SemanticCategory::Declaration);
-    assert_eq!(classify_node("expression_statement"), SemanticCategory::Other);
+    assert_eq!(
+        classify_node("expression_statement"),
+        SemanticCategory::Other
+    );
     assert_eq!(classify_node("if_expression"), SemanticCategory::Other);
 }
 
@@ -379,9 +388,7 @@ fn signature_injected_for_inner_chunks() {
     for i in 0..30 {
         body.push_str(&format!("    let var_{i} = {i} * 2 + 1;\n"));
     }
-    let source = format!(
-        "pub fn big_function(x: i32, y: i32) -> i32 {{\n{body}    x + y\n}}"
-    );
+    let source = format!("pub fn big_function(x: i32, y: i32) -> i32 {{\n{body}    x + y\n}}");
 
     let config = ChunkConfig {
         max_chunk_size: 150,
@@ -399,7 +406,10 @@ fn signature_injected_for_inner_chunks() {
         assert!(
             !inner_with_sig.is_empty(),
             "Inner chunks should have signature context injected. Chunks: {:?}",
-            chunks.iter().map(|c| &c.text[..c.text.len().min(60)]).collect::<Vec<_>>()
+            chunks
+                .iter()
+                .map(|c| &c.text[..c.text.len().min(60)])
+                .collect::<Vec<_>>()
         );
     }
 }
@@ -427,23 +437,50 @@ fn truncate_signature_multiline() {
 
 #[test]
 fn categories_mergeable_same() {
-    assert!(categories_mergeable(SemanticCategory::Import, SemanticCategory::Import));
-    assert!(categories_mergeable(SemanticCategory::Declaration, SemanticCategory::Declaration));
-    assert!(categories_mergeable(SemanticCategory::Other, SemanticCategory::Other));
+    assert!(categories_mergeable(
+        SemanticCategory::Import,
+        SemanticCategory::Import
+    ));
+    assert!(categories_mergeable(
+        SemanticCategory::Declaration,
+        SemanticCategory::Declaration
+    ));
+    assert!(categories_mergeable(
+        SemanticCategory::Other,
+        SemanticCategory::Other
+    ));
 }
 
 #[test]
 fn categories_mergeable_comment_with_anything() {
-    assert!(categories_mergeable(SemanticCategory::Comment, SemanticCategory::Import));
-    assert!(categories_mergeable(SemanticCategory::Comment, SemanticCategory::Declaration));
-    assert!(categories_mergeable(SemanticCategory::Declaration, SemanticCategory::Comment));
+    assert!(categories_mergeable(
+        SemanticCategory::Comment,
+        SemanticCategory::Import
+    ));
+    assert!(categories_mergeable(
+        SemanticCategory::Comment,
+        SemanticCategory::Declaration
+    ));
+    assert!(categories_mergeable(
+        SemanticCategory::Declaration,
+        SemanticCategory::Comment
+    ));
 }
 
 #[test]
 fn categories_not_mergeable_different() {
-    assert!(!categories_mergeable(SemanticCategory::Import, SemanticCategory::Declaration));
-    assert!(!categories_mergeable(SemanticCategory::Declaration, SemanticCategory::Import));
-    assert!(!categories_mergeable(SemanticCategory::Import, SemanticCategory::Other));
+    assert!(!categories_mergeable(
+        SemanticCategory::Import,
+        SemanticCategory::Declaration
+    ));
+    assert!(!categories_mergeable(
+        SemanticCategory::Declaration,
+        SemanticCategory::Import
+    ));
+    assert!(!categories_mergeable(
+        SemanticCategory::Import,
+        SemanticCategory::Other
+    ));
 }
 
 // ── Multiple language semantic splitting ────────────────────────────
@@ -534,7 +571,10 @@ def function_three(z):
 #[test]
 fn single_large_function_no_children_emits_chunk() {
     // A function with a single very large expression
-    let long_expr = (0..100).map(|i| format!("{i}")).collect::<Vec<_>>().join(" + ");
+    let long_expr = (0..100)
+        .map(|i| format!("{i}"))
+        .collect::<Vec<_>>()
+        .join(" + ");
     let source = format!("pub fn huge() -> i32 {{ {long_expr} }}");
 
     let config = ChunkConfig {
@@ -543,7 +583,10 @@ fn single_large_function_no_children_emits_chunk() {
         ..Default::default()
     };
     let chunks = parse_and_chunk(&source, "rs", &config);
-    assert!(!chunks.is_empty(), "Should produce at least one chunk even for oversized nodes");
+    assert!(
+        !chunks.is_empty(),
+        "Should produce at least one chunk even for oversized nodes"
+    );
 }
 
 #[test]

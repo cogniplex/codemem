@@ -70,9 +70,15 @@ pub async fn get_vectors(
                             m.content.clone()
                         }
                     })
-                    .or_else(|| node.map(|n| {
-                        if n.label.is_empty() { id.clone() } else { n.label.clone() }
-                    }))
+                    .or_else(|| {
+                        node.map(|n| {
+                            if n.label.is_empty() {
+                                id.clone()
+                            } else {
+                                n.label.clone()
+                            }
+                        })
+                    })
                     .unwrap_or_else(|| id.clone()),
             }
         })
