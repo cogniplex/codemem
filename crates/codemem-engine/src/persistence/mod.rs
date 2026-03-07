@@ -458,9 +458,14 @@ impl super::CodememEngine {
 
             for chunk in all_pairs.chunks(EMBED_CHUNK_SIZE) {
                 let texts: Vec<&str> = chunk.iter().map(|(_, t)| t.as_str()).collect();
+
+                let t0 = std::time::Instant::now();
                 match emb.embed_batch(&texts) {
                     Ok(embeddings) => {
+                        let embed_ms = t0.elapsed().as_millis();
+
                         // Batch-store embeddings to SQLite
+                        let t1 = std::time::Instant::now();
                         let pairs: Vec<(&str, &[f32])> = chunk
                             .iter()
                             .zip(embeddings.iter())
@@ -469,7 +474,10 @@ impl super::CodememEngine {
                         if let Err(e) = self.storage.store_embeddings_batch(&pairs) {
                             tracing::warn!("Failed to batch-store embeddings: {e}");
                         }
+                        let sqlite_ms = t1.elapsed().as_millis();
+
                         // Insert into in-memory vector index (no batch API)
+                        let t2 = std::time::Instant::now();
                         let mut vec = self.lock_vector()?;
                         for ((id, _), embedding) in chunk.iter().zip(embeddings.iter()) {
                             if let Err(e) = vec.insert(id, embedding) {
@@ -482,6 +490,12 @@ impl super::CodememEngine {
                             }
                             done += 1;
                         }
+                        let vector_ms = t2.elapsed().as_millis();
+
+                        tracing::debug!(
+                            "Embed batch {}: embed={embed_ms}ms sqlite={sqlite_ms}ms vector={vector_ms}ms",
+                            chunk.len()
+                        );
                     }
                     Err(e) => {
                         tracing::warn!(
