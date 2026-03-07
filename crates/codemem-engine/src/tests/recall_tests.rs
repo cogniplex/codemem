@@ -353,6 +353,105 @@ fn recall_scores_low_for_no_token_overlap() {
     }
 }
 
+// ── Entity expansion in default recall ──────────────────────────────
+
+#[test]
+fn recall_finds_entity_connected_memories() {
+    let engine = CodememEngine::for_testing();
+
+    // Create a memory that is semantically unrelated to "AuthService"
+    let m = make_memory("entity-m1", "database connection pool tuning parameters");
+    engine.persist_memory(&m).unwrap();
+
+    // Create a code entity node in the graph and link the memory to it
+    let now = chrono::Utc::now();
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        let code_node = codemem_core::GraphNode {
+            id: "sym:AuthService".to_string(),
+            kind: codemem_core::NodeKind::Class,
+            label: "AuthService".to_string(),
+            payload: std::collections::HashMap::new(),
+            centrality: 0.0,
+            memory_id: None,
+            namespace: None,
+        };
+        graph.add_node(code_node).unwrap();
+
+        let edge = Edge {
+            id: "sym:AuthService-RELATES_TO-entity-m1".to_string(),
+            src: "sym:AuthService".to_string(),
+            dst: "entity-m1".to_string(),
+            relationship: RelationshipType::RelatesTo,
+            weight: 0.5,
+            properties: HashMap::new(),
+            created_at: now,
+            valid_from: None,
+            valid_to: None,
+        };
+        graph.add_edge(edge).unwrap();
+    }
+
+    // Query mentions the entity name — should find the connected memory
+    // even though "AuthService" has zero token overlap with "database connection pool"
+    let results = engine
+        .recall("AuthService", 10, None, None, &[], None, None)
+        .unwrap();
+
+    let found = results.iter().any(|r| r.memory.id == "entity-m1");
+    assert!(
+        found,
+        "entity expansion should surface memory connected to AuthService node; got: {:?}",
+        results.iter().map(|r| &r.memory.id).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn resolve_entity_memories_skips_expired_edges() {
+    let engine = CodememEngine::for_testing();
+
+    let m = make_memory("entity-exp1", "expired edge memory content");
+    engine.persist_memory(&m).unwrap();
+
+    let now = chrono::Utc::now();
+    let past = now - chrono::Duration::hours(1);
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        let code_node = codemem_core::GraphNode {
+            id: "sym:ExpiredService".to_string(),
+            kind: codemem_core::NodeKind::Class,
+            label: "ExpiredService".to_string(),
+            payload: std::collections::HashMap::new(),
+            centrality: 0.0,
+            memory_id: None,
+            namespace: None,
+        };
+        graph.add_node(code_node).unwrap();
+
+        // Create an expired edge (valid_to in the past)
+        let edge = Edge {
+            id: "sym:ExpiredService-RELATES_TO-entity-exp1".to_string(),
+            src: "sym:ExpiredService".to_string(),
+            dst: "entity-exp1".to_string(),
+            relationship: RelationshipType::RelatesTo,
+            weight: 0.5,
+            properties: HashMap::new(),
+            created_at: now,
+            valid_from: None,
+            valid_to: Some(past),
+        };
+        graph.add_edge(edge).unwrap();
+    }
+
+    // Directly test resolve_entity_memories — expired edge should be skipped
+    let graph = engine.lock_graph().unwrap();
+    let entity_ids = engine.resolve_entity_memories("ExpiredService", &graph, now);
+    assert!(
+        !entity_ids.contains("entity-exp1"),
+        "resolve_entity_memories should not return memories connected via expired edges"
+    );
+}
+
 // ── Recall with expansion ───────────────────────────────────────────
 
 #[test]

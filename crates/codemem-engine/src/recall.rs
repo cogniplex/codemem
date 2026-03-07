@@ -80,6 +80,11 @@ impl CodememEngine {
         let bm25 = self.lock_bm25()?;
         let now = Utc::now();
 
+        // Entity expansion: find memories connected to code entities mentioned in the query.
+        // This ensures that structurally related memories are candidates even when they are
+        // semantically distant from the query text.
+        let entity_memory_ids = self.resolve_entity_memories(query, &graph, now);
+
         let mut results: Vec<SearchResult> = Vec::new();
         let weights = self.scoring_weights()?;
 
@@ -118,12 +123,19 @@ impl CodememEngine {
                 }
             }
         } else {
-            // Vector search path: batch-fetch all candidate memories
-            let candidate_ids: Vec<&str> =
+            // Vector search path: batch-fetch all candidate memories + entity-connected memories
+            let mut all_candidate_ids: HashSet<&str> =
                 vector_results.iter().map(|(id, _)| id.as_str()).collect();
-            let candidate_memories = self.storage.get_memories_batch(&candidate_ids)?;
 
-            // Build similarity lookup
+            // Merge entity-connected memory IDs into the candidate pool
+            for eid in &entity_memory_ids {
+                all_candidate_ids.insert(eid.as_str());
+            }
+
+            let candidate_id_vec: Vec<&str> = all_candidate_ids.into_iter().collect();
+            let candidate_memories = self.storage.get_memories_batch(&candidate_id_vec)?;
+
+            // Build similarity lookup (entity memories will get 0.0 similarity)
             let sim_map: HashMap<&str, f64> = vector_results
                 .iter()
                 .map(|(id, sim)| (id.as_str(), *sim as f64))
@@ -380,6 +392,57 @@ impl CodememEngine {
         scored_results.truncate(k);
 
         Ok(scored_results)
+    }
+
+    /// Resolve entity references from a query to memory IDs connected to those entities.
+    ///
+    /// Extracts code references (CamelCase identifiers, qualified paths, file paths,
+    /// backtick-wrapped code) from the query, matches them to graph nodes, and returns
+    /// the IDs of Memory nodes within one hop of each matched entity. This ensures
+    /// structurally related memories are recall candidates even when semantically distant.
+    pub(crate) fn resolve_entity_memories(
+        &self,
+        query: &str,
+        graph: &codemem_storage::graph::GraphEngine,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> HashSet<String> {
+        let entity_refs = crate::search::extract_code_references(query);
+        let mut memory_ids: HashSet<String> = HashSet::new();
+
+        for entity_ref in &entity_refs {
+            // Try common ID patterns: sym:Name, file:path, or direct ID match
+            let candidate_ids = [
+                format!("sym:{entity_ref}"),
+                format!("file:{entity_ref}"),
+                entity_ref.clone(),
+            ];
+
+            for candidate_id in &candidate_ids {
+                if graph.get_node_ref(candidate_id).is_none() {
+                    continue;
+                }
+                // Found a matching node — collect one-hop Memory neighbors
+                for edge in graph.get_edges_ref(candidate_id) {
+                    if !is_edge_active(edge, now) {
+                        continue;
+                    }
+                    let neighbor_id = if edge.src == *candidate_id {
+                        &edge.dst
+                    } else {
+                        &edge.src
+                    };
+                    if let Some(node) = graph.get_node_ref(neighbor_id) {
+                        if node.kind == NodeKind::Memory {
+                            let mem_id = node.memory_id.as_deref().unwrap_or(&node.id);
+                            memory_ids.insert(mem_id.to_string());
+                        }
+                    }
+                }
+                break; // Found the node, no need to try other ID patterns
+            }
+        }
+
+        memory_ids
     }
 
     /// Compute detailed stats for a single namespace: count, averages,
