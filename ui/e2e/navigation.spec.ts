@@ -65,7 +65,7 @@ test.describe('Navigation between views', () => {
 
     // Navigate to Timeline
     await sidebar.locator('text=Timeline').click()
-    await expect(page.locator('text=Sessions')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible({ timeout: 5000 })
 
     // Navigate to Agents
     await sidebar.locator('text=Agents').click()
