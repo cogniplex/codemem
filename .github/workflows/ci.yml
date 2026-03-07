@@ -84,16 +84,13 @@ jobs:
       - run: bun run tsc --noEmit
       - run: bun run eslint .
 
-  ui-test:
-    name: UI E2E Tests
+  ui-build:
+    name: Build UI + Codemem Binary
     runs-on: ubuntu-latest
-    needs: [test]
     steps:
       - uses: actions/checkout@v6
-
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-
       - uses: oven-sh/setup-bun@v2
 
       - name: Install UI dependencies & build
@@ -105,6 +102,34 @@ jobs:
 
       - name: Build codemem release binary (with embedded UI)
         run: cargo build --release -p codemem --features ui
+
+      - name: Upload release binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: codemem-binary
+          path: target/release/codemem
+          retention-days: 1
+
+  ui-test:
+    name: UI E2E Tests
+    runs-on: ubuntu-latest
+    needs: [ui-build]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: bun install
+
+      - name: Download codemem binary
+        uses: actions/download-artifact@v7
+        with:
+          name: codemem-binary
+          path: target/release/
+
+      - name: Make binary executable
+        run: chmod +x target/release/codemem
 
       - name: Install Playwright browsers
         working-directory: ui
