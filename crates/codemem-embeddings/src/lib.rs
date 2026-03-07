@@ -384,11 +384,6 @@ impl EmbeddingService {
         Ok(all_embeddings)
     }
 
-    /// Get cache statistics: (current_size, capacity).
-    /// Always returns (0, 0) — caching is handled by the `CachedProvider` wrapper.
-    pub fn cache_stats(&self) -> (usize, usize) {
-        (0, 0)
-    }
 }
 
 impl EmbeddingProvider for EmbeddingService {
@@ -406,10 +401,6 @@ impl EmbeddingProvider for EmbeddingService {
 
     fn name(&self) -> &str {
         "candle"
-    }
-
-    fn cache_stats(&self) -> (usize, usize) {
-        self.cache_stats()
     }
 }
 
