@@ -9,6 +9,14 @@ use std::sync::Arc;
 fn build_server() -> anyhow::Result<(crate::mcp::McpServer, codemem_storage::Storage)> {
     let db_path = super::codemem_db_path();
 
+    // Ensure ~/.codemem/ exists (CodememEngine::from_db_path does this,
+    // but build_server bypasses the engine for direct Storage access)
+    if let Some(parent) = db_path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
     let storage = codemem_storage::Storage::open(&db_path)?;
     let mut vector = codemem_storage::HnswIndex::with_defaults()?;
 
