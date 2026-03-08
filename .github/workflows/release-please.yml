@@ -7,13 +7,17 @@ on:
 
 permissions:
   contents: write
+  issues: write
   pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
+      releases_created: ${{ steps.release.outputs.releases_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
@@ -21,3 +25,227 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-arm64
+            cross: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu perl make
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build UI
+        working-directory: ui
+        run: bun install && bun run build
+
+      - name: Embed UI assets into codemem crate
+        run: rm -rf crates/codemem/ui-dist && cp -r ui/dist crates/codemem/ui-dist
+
+      - name: Build
+        run: cargo build --release -p codemem --features ui --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../codemem-${{ matrix.name }}.tar.gz codemem
+          cd ../../..
+
+      - name: Checksum
+        shell: bash
+        run: |
+          if command -v sha256sum &>/dev/null; then
+            sha256sum codemem-${{ matrix.name }}.tar.gz > codemem-${{ matrix.name }}.tar.gz.sha256
+          else
+            shasum -a 256 codemem-${{ matrix.name }}.tar.gz > codemem-${{ matrix.name }}.tar.gz.sha256
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: codemem-${{ matrix.name }}
+          path: |
+            codemem-${{ matrix.name }}.tar.gz
+            codemem-${{ matrix.name }}.tar.gz.sha256
+
+  upload-release-artifacts:
+    name: Upload Release Artifacts
+    needs: [release-please, build]
+    if: ${{ needs.release-please.outputs.releases_created }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+
+      - name: Upload Release Artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: |
+            codemem-*.tar.gz
+            codemem-*.tar.gz.sha256
+
+  publish:
+    name: Publish to crates.io
+    needs: [release-please, build]
+    if: ${{ needs.release-please.outputs.releases_created }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build UI and embed into codemem crate
+        run: |
+          cd ui && bun install && bun run build && cd ..
+          rm -rf crates/codemem/ui-dist
+          cp -r ui/dist crates/codemem/ui-dist
+
+      - name: Verify builds
+        run: cargo build --workspace
+
+      - name: Publish crates (dependency order)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -e
+
+          publish() {
+            local crate=$1
+            local extra_flags="${2:-}"
+            echo "Publishing $crate..."
+            cargo publish -p "$crate" --no-verify $extra_flags
+            echo "Waiting for crates.io to index $crate..."
+            sleep 30
+          }
+
+          # Layer 1: no internal deps
+          publish codemem-core
+
+          # Layer 2: depends on codemem-core only
+          publish codemem-storage
+          publish codemem-embeddings
+
+          # Layer 3: depends on layers 1-2
+          publish codemem-engine
+
+          # Layer 4: unified binary (depends on everything)
+          publish codemem --allow-dirty  # ui-dist/ is built in CI, not committed
+
+          echo "All crates published successfully!"
+
+  homebrew:
+    name: Update Homebrew Tap
+    needs: [release-please, upload-release-artifacts]
+    if: ${{ needs.release-please.outputs.releases_created }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+          path: artifacts
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v6
+        with:
+          repository: cogniplex/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          VERSION="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${VERSION#v}"
+          SHA_MACOS_ARM64=$(awk '{print $1}' artifacts/codemem-macos-arm64.tar.gz.sha256)
+          SHA_LINUX_ARM64=$(awk '{print $1}' artifacts/codemem-linux-arm64.tar.gz.sha256)
+          SHA_LINUX_AMD64=$(awk '{print $1}' artifacts/codemem-linux-amd64.tar.gz.sha256)
+
+          mkdir -p homebrew-tap/Formula
+
+          cat > homebrew-tap/Formula/codemem.rb << 'FORMULA'
+          class Codemem < Formula
+            desc "Standalone Rust memory engine for AI coding assistants"
+            homepage "https://github.com/cogniplex/codemem"
+            version "VERSION_PLACEHOLDER"
+            license "Apache-2.0"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/cogniplex/codemem/releases/download/vVERSION_PLACEHOLDER/codemem-macos-arm64.tar.gz"
+                sha256 "SHA_MACOS_ARM64_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/cogniplex/codemem/releases/download/vVERSION_PLACEHOLDER/codemem-linux-arm64.tar.gz"
+                sha256 "SHA_LINUX_ARM64_PLACEHOLDER"
+              end
+              on_intel do
+                url "https://github.com/cogniplex/codemem/releases/download/vVERSION_PLACEHOLDER/codemem-linux-amd64.tar.gz"
+                sha256 "SHA_LINUX_AMD64_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install "codemem"
+            end
+
+            test do
+              assert_match "codemem", shell_output("#{bin}/codemem --version")
+            end
+          end
+          FORMULA
+
+          # Replace placeholders with actual values
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" homebrew-tap/Formula/codemem.rb
+          sed -i "s/SHA_MACOS_ARM64_PLACEHOLDER/$SHA_MACOS_ARM64/" homebrew-tap/Formula/codemem.rb
+          sed -i "s/SHA_LINUX_ARM64_PLACEHOLDER/$SHA_LINUX_ARM64/" homebrew-tap/Formula/codemem.rb
+          sed -i "s/SHA_LINUX_AMD64_PLACEHOLDER/$SHA_LINUX_AMD64/" homebrew-tap/Formula/codemem.rb
+
+      - name: Push to tap
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/codemem.rb
+          git diff --cached --quiet || git commit -m "codemem v${{ needs.release-please.outputs.tag_name }}"
+          git push
