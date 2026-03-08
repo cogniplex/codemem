@@ -414,8 +414,6 @@ pub enum DistanceMetric {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GraphConfig {
-    pub max_expansion_hops: usize,
-    pub bridge_similarity_threshold: f64,
     /// Default edge weight for CONTAINS relationship (structural, low).
     pub contains_edge_weight: f64,
     /// Default edge weight for CALLS relationship (high signal).
@@ -427,8 +425,6 @@ pub struct GraphConfig {
 impl Default for GraphConfig {
     fn default() -> Self {
         Self {
-            max_expansion_hops: 2,
-            bridge_similarity_threshold: 0.8,
             contains_edge_weight: 0.1,
             calls_edge_weight: 1.0,
             imports_edge_weight: 0.5,

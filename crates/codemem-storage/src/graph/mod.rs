@@ -417,6 +417,7 @@ impl GraphEngine {
 
     /// Get the maximum degree (in + out) across all nodes in the graph.
     /// Returns 1.0 if the graph has fewer than 2 nodes to avoid division by zero.
+    #[cfg(test)]
     pub fn max_degree(&self) -> f64 {
         if self.nodes.len() <= 1 {
             return 1.0;

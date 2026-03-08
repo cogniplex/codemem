@@ -198,8 +198,6 @@ impl Default for EmbeddingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StorageConfig {
-    /// Path to the database file.
-    pub db_path: String,
     /// SQLite cache size in MB.
     pub cache_size_mb: u32,
     /// SQLite busy timeout in seconds.
@@ -209,12 +207,6 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            db_path: dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".codemem")
-                .join("codemem.db")
-                .to_string_lossy()
-                .into_owned(),
             cache_size_mb: 64,
             busy_timeout_secs: 5,
         }

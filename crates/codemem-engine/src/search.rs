@@ -145,6 +145,7 @@ impl CodememEngine {
     ///
     /// Returns an estimate in bytes. Actual usage may be higher due to HashMap overhead,
     /// string heap allocations, and payload contents.
+    #[cfg(test)]
     pub fn graph_memory_estimate(&self) -> usize {
         let (node_count, edge_count) = match self.lock_graph() {
             Ok(g) => (g.node_count(), g.edge_count()),

@@ -274,8 +274,6 @@ fn save_rejects_invalid_config() {
 #[test]
 fn graph_config_defaults() {
     let config = GraphConfig::default();
-    assert_eq!(config.max_expansion_hops, 2);
-    assert!((config.bridge_similarity_threshold - 0.8).abs() < f64::EPSILON);
     assert!((config.contains_edge_weight - 0.1).abs() < f64::EPSILON);
     assert!((config.calls_edge_weight - 1.0).abs() < f64::EPSILON);
     assert!((config.imports_edge_weight - 0.5).abs() < f64::EPSILON);
@@ -286,11 +284,6 @@ fn graph_config_roundtrips_through_toml() {
     let config = GraphConfig::default();
     let toml_str = toml::to_string_pretty(&config).unwrap();
     let parsed: GraphConfig = toml::from_str(&toml_str).unwrap();
-    assert_eq!(parsed.max_expansion_hops, config.max_expansion_hops);
-    assert!(
-        (parsed.bridge_similarity_threshold - config.bridge_similarity_threshold).abs()
-            < f64::EPSILON
-    );
     assert!((parsed.calls_edge_weight - config.calls_edge_weight).abs() < f64::EPSILON);
 }
 

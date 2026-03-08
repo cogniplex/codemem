@@ -3,6 +3,7 @@
 use codemem_core::{CodememError, GraphNode, MemoryType, NodeKind};
 use std::collections::HashMap;
 
+use super::diff::compute_diff;
 use super::{ExtractedMemory, HookPayload};
 
 /// Relativize an absolute file path against the hook's cwd.
@@ -180,20 +181,37 @@ pub(super) fn extract_edit(payload: &HookPayload) -> Result<Option<ExtractedMemo
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    // Compute a semantic diff summary from the old/new strings.
+    let diff_summary = compute_diff(file_path, old_string, new_string);
+
     let content = format!(
-        "Edit: {}\nChanged:\n  - {}\n  + {}",
+        "Edit: {}\nSemantic summary: {}\nChanged:\n  - {}\n  + {}",
         file_path,
+        diff_summary.semantic_summary,
         truncate(old_string, 500),
         truncate(new_string, 500)
     );
 
-    Ok(Some(build_file_extraction(
-        payload,
-        file_path,
-        content,
-        MemoryType::Decision,
-        "Edit",
-    )))
+    let mut extraction =
+        build_file_extraction(payload, file_path, content, MemoryType::Decision, "Edit");
+    extraction.metadata.insert(
+        "semantic_summary".to_string(),
+        serde_json::Value::String(diff_summary.semantic_summary),
+    );
+    extraction.metadata.insert(
+        "lines_added".to_string(),
+        serde_json::json!(diff_summary.lines_added),
+    );
+    extraction.metadata.insert(
+        "lines_removed".to_string(),
+        serde_json::json!(diff_summary.lines_removed),
+    );
+    extraction.metadata.insert(
+        "change_type".to_string(),
+        serde_json::Value::String(diff_summary.change_type.to_string()),
+    );
+
+    Ok(Some(extraction))
 }
 
 /// Extract memory from a Write tool use.

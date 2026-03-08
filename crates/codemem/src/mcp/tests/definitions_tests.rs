@@ -7,8 +7,8 @@ fn tool_definitions_returns_expected_count() {
     // The dispatch table in mod.rs has 32 tool entries (including the unknown fallback).
     // definitions.rs should define all of them.
     assert!(
-        defs.len() >= 30,
-        "Expected at least 30 tool definitions, got {}",
+        defs.len() >= 32,
+        "Expected at least 32 tool definitions, got {}",
         defs.len()
     );
 }
@@ -232,8 +232,8 @@ fn tools_list_rpc_returns_definitions() {
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
     assert!(
-        tools.len() >= 30,
-        "tools/list should return at least 30 tools, got {}",
+        tools.len() >= 32,
+        "tools/list should return at least 32 tools, got {}",
         tools.len()
     );
 }

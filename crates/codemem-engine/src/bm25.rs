@@ -370,6 +370,7 @@ impl Bm25Index {
     }
 
     /// Build a BM25 index from a slice of (id, content) pairs.
+    #[cfg(test)]
     pub fn build(documents: &[(String, String)]) -> Self {
         let mut index = Self::new();
         for (id, content) in documents {

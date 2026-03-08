@@ -3,7 +3,7 @@
 use codemem_engine::CodememEngine;
 
 /// All valid consolidation cycle types.
-pub(crate) const VALID_CYCLES: &[&str] = &["decay", "creative", "cluster", "forget"];
+pub(crate) const VALID_CYCLES: &[&str] = &["decay", "creative", "cluster", "forget", "summarize"];
 
 /// Returns `true` if the given cycle name is a known consolidation cycle.
 pub(crate) fn is_valid_cycle(cycle: &str) -> bool {
@@ -29,6 +29,7 @@ pub(crate) fn cmd_consolidate(cycle: &str) -> anyhow::Result<()> {
         "creative" => engine.consolidate_creative()?,
         "cluster" => engine.consolidate_cluster(None)?,
         "forget" => engine.consolidate_forget(None, None, None)?,
+        "summarize" => engine.consolidate_summarize(None)?,
         _ => unreachable!("is_valid_cycle check above"),
     };
 
