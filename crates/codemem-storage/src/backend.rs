@@ -763,11 +763,13 @@ impl StorageBackend for Storage {
     }
 
     fn commit_transaction(&self) -> Result<(), CodememError> {
-        self.in_transaction
-            .store(false, std::sync::atomic::Ordering::Release);
         let conn = self.conn()?;
         conn.execute_batch("COMMIT")
             .map_err(|e| CodememError::Storage(e.to_string()))?;
+        // Clear flag after COMMIT succeeds — if COMMIT fails, the flag
+        // stays set so callers know a transaction is still active.
+        self.in_transaction
+            .store(false, std::sync::atomic::Ordering::Release);
         Ok(())
     }
 

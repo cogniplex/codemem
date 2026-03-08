@@ -418,7 +418,8 @@ impl super::CodememEngine {
         let mut symbols_embedded = 0usize;
         let mut chunks_embedded = 0usize;
 
-        // Check if embeddings are available before collecting texts.
+        // Quick check: skip expensive text enrichment if no embedding provider.
+        // The per-batch loop also guards against provider disappearing mid-run.
         let has_embeddings = self.lock_embeddings()?.is_some();
         if has_embeddings {
             let sym_texts: Vec<(String, String)> = all_symbols
@@ -504,15 +505,11 @@ impl super::CodememEngine {
                         }
                         let vector_ms = t2.elapsed().as_millis();
 
-                        // Update per-type counters
-                        for _ in 0..batch_len {
-                            if done < sym_count {
-                                symbols_embedded += 1;
-                            } else {
-                                chunks_embedded += 1;
-                            }
-                            done += 1;
-                        }
+                        // Update per-type counters using arithmetic instead of loop
+                        let syms_in_batch = batch_len.min(sym_count.saturating_sub(done));
+                        symbols_embedded += syms_in_batch;
+                        chunks_embedded += batch_len - syms_in_batch;
+                        done += batch_len;
 
                         tracing::debug!(
                             "Embed batch {}: embed={embed_ms}ms sqlite={sqlite_ms}ms vector={vector_ms}ms",

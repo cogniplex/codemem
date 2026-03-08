@@ -15,11 +15,14 @@ impl Storage {
     /// method skips starting its own transaction and executes directly on the
     /// connection, so that all operations participate in the outer transaction.
     pub fn insert_memory(&self, memory: &MemoryNode) -> Result<(), CodememError> {
+        // Check inside conn lock to avoid TOCTOU race with begin_transaction.
+        // The conn() mutex serializes all access, so the flag check + INSERT
+        // are atomic with respect to other callers.
+        let mut conn = self.conn()?;
         if self.has_outer_transaction() {
+            drop(conn);
             return self.insert_memory_no_tx(memory);
         }
-
-        let mut conn = self.conn()?;
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -95,8 +98,8 @@ impl Storage {
         let metadata_json = serde_json::to_string(&memory.metadata)?;
 
         conn.execute(
-            "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 memory.id,
                 memory.content,
@@ -108,6 +111,7 @@ impl Storage {
                 tags_json,
                 metadata_json,
                 memory.namespace,
+                memory.session_id,
                 memory.created_at.timestamp(),
                 memory.updated_at.timestamp(),
                 memory.last_accessed_at.timestamp(),
