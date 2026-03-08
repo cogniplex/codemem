@@ -212,6 +212,19 @@ pub trait StorageBackend: Send + Sync {
         Ok(deleted)
     }
 
+    /// Delete multiple memories and all related data (graph nodes/edges, embeddings) atomically.
+    /// Returns the number of memories that were actually deleted.
+    /// Default falls back to calling `delete_memory_cascade` per ID for backwards compatibility.
+    fn delete_memories_batch_cascade(&self, ids: &[&str]) -> Result<usize, CodememError> {
+        let mut count = 0;
+        for id in ids {
+            if self.delete_memory_cascade(id)? {
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
     /// List all memory IDs, ordered by created_at descending.
     fn list_memory_ids(&self) -> Result<Vec<String>, CodememError>;
 
@@ -486,4 +499,33 @@ pub trait StorageBackend: Send + Sync {
 
     /// Get database statistics.
     fn stats(&self) -> Result<StorageStats, CodememError>;
+
+    // ── Transaction Control ────────────────────────────────────────
+
+    /// Begin an explicit transaction.
+    ///
+    /// While a transaction is active, individual storage methods (e.g.
+    /// `insert_memory`, `insert_graph_node`) participate in it instead of
+    /// starting their own. Call `commit_transaction` to persist or
+    /// `rollback_transaction` to discard.
+    ///
+    /// Default implementation is a no-op for backends that don't support
+    /// explicit transaction control.
+    fn begin_transaction(&self) -> Result<(), CodememError> {
+        Ok(())
+    }
+
+    /// Commit the active transaction started by `begin_transaction`.
+    ///
+    /// Default implementation is a no-op.
+    fn commit_transaction(&self) -> Result<(), CodememError> {
+        Ok(())
+    }
+
+    /// Roll back the active transaction started by `begin_transaction`.
+    ///
+    /// Default implementation is a no-op.
+    fn rollback_transaction(&self) -> Result<(), CodememError> {
+        Ok(())
+    }
 }

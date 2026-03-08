@@ -78,6 +78,11 @@ impl StorageBackend for Storage {
         Storage::delete_memory_cascade(self, id)
     }
 
+    /// Override with transactional batch cascade delete.
+    fn delete_memories_batch_cascade(&self, ids: &[&str]) -> Result<usize, CodememError> {
+        Storage::delete_memories_batch_cascade(self, ids)
+    }
+
     delegate_storage!(list_memory_ids(&self) -> Result<Vec<String>, CodememError>);
     delegate_storage!(list_memory_ids_for_namespace(&self, namespace: &str) -> Result<Vec<String>, CodememError>);
     delegate_storage!(find_memory_ids_by_tag(&self, tag: &str, namespace: Option<&str>, exclude_id: &str) -> Result<Vec<String>, CodememError>);
@@ -745,6 +750,35 @@ impl StorageBackend for Storage {
     // ── Stats (delegated) ─────────────────────────────────────────────
 
     delegate_storage!(stats(&self) -> Result<StorageStats, CodememError>);
+
+    // ── Transaction Control ──────────────────────────────────────────
+
+    fn begin_transaction(&self) -> Result<(), CodememError> {
+        let conn = self.conn()?;
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        self.in_transaction
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    fn commit_transaction(&self) -> Result<(), CodememError> {
+        self.in_transaction
+            .store(false, std::sync::atomic::Ordering::Release);
+        let conn = self.conn()?;
+        conn.execute_batch("COMMIT")
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    fn rollback_transaction(&self) -> Result<(), CodememError> {
+        self.in_transaction
+            .store(false, std::sync::atomic::Ordering::Release);
+        let conn = self.conn()?;
+        conn.execute_batch("ROLLBACK")
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

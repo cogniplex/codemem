@@ -651,8 +651,8 @@ impl Storage {
         limit: usize,
     ) -> Result<Vec<Session>, CodememError> {
         let conn = self.conn()?;
-        let sql_with_ns = "SELECT id, namespace, started_at, ended_at, memory_count, summary FROM sessions WHERE namespace = ?1 ORDER BY started_at DESC LIMIT ?2";
-        let sql_all = "SELECT id, namespace, started_at, ended_at, memory_count, summary FROM sessions ORDER BY started_at DESC LIMIT ?1";
+        let sql_with_ns = "SELECT s.id, s.namespace, s.started_at, s.ended_at, (SELECT COUNT(*) FROM memories m WHERE m.session_id = s.id) as memory_count, s.summary FROM sessions s WHERE s.namespace = ?1 ORDER BY s.started_at DESC LIMIT ?2";
+        let sql_all = "SELECT s.id, s.namespace, s.started_at, s.ended_at, (SELECT COUNT(*) FROM memories m WHERE m.session_id = s.id) as memory_count, s.summary FROM sessions s ORDER BY s.started_at DESC LIMIT ?1";
 
         let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Session> {
             let started_ts: i64 = row.get(2)?;

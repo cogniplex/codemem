@@ -42,11 +42,9 @@ impl CodememEngine {
         };
         let memory = memory.as_ref();
 
-        // 1. Store in SQLite
-        self.storage.insert_memory(memory)?;
-
         // H3: Step 1 — Acquire embeddings lock first, embed, save result, drop lock.
         // This prevents holding the embeddings lock while acquiring vector/graph locks.
+        // Embedding is computed before the transaction since it doesn't touch SQLite.
         let embedding_result = match self.lock_embeddings() {
             Ok(Some(emb)) => {
                 let enriched = self.enrich_memory_text(
@@ -67,7 +65,28 @@ impl CodememEngine {
             }
         };
 
-        // 2. Update BM25 index
+        // 2F: Wrap all SQLite mutations in a single transaction so that the
+        // database cannot be left in an inconsistent state if one step fails.
+        // The HNSW vector index is NOT in SQLite, so vector insertion happens
+        // after commit — if it fails, the memory is still persisted without
+        // its embedding, which is recoverable.
+        self.storage.begin_transaction()?;
+
+        let result = self.persist_memory_sqlite(memory, &embedding_result);
+
+        match result {
+            Ok(()) => {
+                self.storage.commit_transaction()?;
+            }
+            Err(e) => {
+                if let Err(rb_err) = self.storage.rollback_transaction() {
+                    tracing::error!("Failed to rollback transaction after persist error: {rb_err}");
+                }
+                return Err(e);
+            }
+        }
+
+        // 2. Update BM25 index (in-memory, not SQLite)
         match self.lock_bm25() {
             Ok(mut bm25) => {
                 bm25.add_document(&memory.id, &memory.content);
@@ -75,7 +94,7 @@ impl CodememEngine {
             Err(e) => tracing::warn!("BM25 lock failed during persist: {e}"),
         }
 
-        // 3. Add memory node to graph (separate lock scope)
+        // 3. Add memory node to in-memory graph (already persisted to SQLite above)
         match self.lock_graph() {
             Ok(mut graph) => {
                 let node = codemem_core::GraphNode {
@@ -87,9 +106,6 @@ impl CodememEngine {
                     memory_id: Some(memory.id.clone()),
                     namespace: memory.namespace.clone(),
                 };
-                if let Err(e) = self.storage.insert_graph_node(&node) {
-                    tracing::warn!("Failed to insert graph node for memory {}: {e}", memory.id);
-                }
                 if let Err(e) = graph.add_node(node) {
                     tracing::warn!(
                         "Failed to add graph node in-memory for memory {}: {e}",
@@ -103,15 +119,12 @@ impl CodememEngine {
         // 3b. Auto-link to memories with shared tags (session co-membership, topic overlap)
         self.auto_link_by_tags(memory);
 
-        // H3: Step 4 — Insert embedding into vector index (separate lock scope from embeddings).
+        // H3: Step 4 — Insert embedding into HNSW vector index (separate from SQLite).
         if let Some(vec) = &embedding_result {
             if let Ok(mut vi) = self.lock_vector() {
                 if let Err(e) = vi.insert(&memory.id, vec) {
                     tracing::warn!("Failed to insert into vector index for {}: {e}", memory.id);
                 }
-            }
-            if let Err(e) = self.storage.store_embedding(&memory.id, vec) {
-                tracing::warn!("Failed to store embedding for {}: {e}", memory.id);
             }
         }
 
@@ -121,6 +134,42 @@ impl CodememEngine {
             self.save_index(); // save_index() clears dirty flag
         } else {
             self.dirty.store(true, Ordering::Release);
+        }
+
+        Ok(())
+    }
+
+    /// Execute all SQLite mutations for a memory persist.
+    ///
+    /// Called within the transaction opened by `persist_memory_inner`.
+    /// Inserts the memory row, graph node, and embedding (if available).
+    fn persist_memory_sqlite(
+        &self,
+        memory: &MemoryNode,
+        embedding: &Option<Vec<f32>>,
+    ) -> Result<(), CodememError> {
+        // 1. Store memory in SQLite
+        self.storage.insert_memory(memory)?;
+
+        // 2. Insert graph node in SQLite
+        let node = codemem_core::GraphNode {
+            id: memory.id.clone(),
+            kind: codemem_core::NodeKind::Memory,
+            label: scoring::truncate_content(&memory.content, 80),
+            payload: std::collections::HashMap::new(),
+            centrality: 0.0,
+            memory_id: Some(memory.id.clone()),
+            namespace: memory.namespace.clone(),
+        };
+        if let Err(e) = self.storage.insert_graph_node(&node) {
+            tracing::warn!("Failed to insert graph node for memory {}: {e}", memory.id);
+        }
+
+        // 3. Store embedding in SQLite (vector blob, not HNSW index)
+        if let Some(vec) = embedding {
+            if let Err(e) = self.storage.store_embedding(&memory.id, vec) {
+                tracing::warn!("Failed to store embedding for {}: {e}", memory.id);
+            }
         }
 
         Ok(())

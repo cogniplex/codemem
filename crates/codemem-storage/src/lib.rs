@@ -6,6 +6,7 @@ use codemem_core::{CodememError, MemoryNode, MemoryType};
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 mod backend;
@@ -26,6 +27,10 @@ pub use vector::HnswIndex;
 /// required by the `StorageBackend` trait.
 pub struct Storage {
     conn: Mutex<Connection>,
+    /// Whether an explicit outer transaction is active (via `begin_transaction`).
+    /// When set, individual methods like `insert_memory` skip starting their own
+    /// transaction so that all operations participate in the outer one.
+    in_transaction: AtomicBool,
 }
 
 impl Storage {
@@ -87,6 +92,7 @@ impl Storage {
         migrations::run_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            in_transaction: AtomicBool::new(false),
         })
     }
 
@@ -109,6 +115,7 @@ impl Storage {
         Self::apply_pragmas(&conn, cache_size_mb, busy_timeout_secs)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            in_transaction: AtomicBool::new(false),
         })
     }
 
@@ -120,12 +127,18 @@ impl Storage {
         migrations::run_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            in_transaction: AtomicBool::new(false),
         })
     }
 
     /// Compute SHA-256 hash of content for deduplication.
     pub fn content_hash(content: &str) -> String {
         codemem_core::content_hash(content)
+    }
+
+    /// Check whether an outer transaction is currently active.
+    pub(crate) fn has_outer_transaction(&self) -> bool {
+        self.in_transaction.load(Ordering::Acquire)
     }
 }
 

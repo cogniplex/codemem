@@ -35,31 +35,23 @@ impl CodememEngine {
 
         let deleted = ids.len();
 
-        // H2: Batch deletes in groups of 100, releasing all locks between batches
+        // H2: Batch deletes in groups of 100, releasing all locks between batches.
+        // SQLite cascade (memory + graph nodes/edges + embeddings) is batched into
+        // a single transaction per chunk; in-memory indices are updated afterwards.
         for batch in ids.chunks(100) {
+            let batch_refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
+            if let Err(e) = self.storage.delete_memories_batch_cascade(&batch_refs) {
+                tracing::warn!(
+                    "Failed to batch-delete {} memories during forget consolidation: {e}",
+                    batch.len()
+                );
+            }
+
             // C1: Lock ordering: graph first, then vector, then bm25
             let mut graph = self.lock_graph()?;
             let mut vector = self.lock_vector()?;
             let mut bm25 = self.lock_bm25()?;
             for id in batch {
-                if let Err(e) = self.storage.delete_memory(id) {
-                    tracing::warn!("Failed to delete memory {id} during forget consolidation: {e}");
-                }
-                if let Err(e) = self.storage.delete_embedding(id) {
-                    tracing::warn!(
-                        "Failed to delete embedding {id} during forget consolidation: {e}"
-                    );
-                }
-                if let Err(e) = self.storage.delete_graph_edges_for_node(id) {
-                    tracing::warn!(
-                        "Failed to delete graph edges for {id} during forget consolidation: {e}"
-                    );
-                }
-                if let Err(e) = self.storage.delete_graph_node(id) {
-                    tracing::warn!(
-                        "Failed to delete graph node {id} during forget consolidation: {e}"
-                    );
-                }
                 if let Err(e) = graph.remove_node(id) {
                     tracing::warn!(
                         "Failed to remove {id} from graph during forget consolidation: {e}"
