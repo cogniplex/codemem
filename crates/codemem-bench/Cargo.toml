@@ -11,8 +11,8 @@ description = "Criterion benchmarks for Codemem"
 publish = false
 
 [dependencies]
-codemem-core = { workspace = true }
-codemem-storage = { workspace = true }
+codemem-core = { path = "../codemem-core", version = "0.9.0" }
+codemem-storage = { path = "../codemem-storage", version = "0.9.0" }
 criterion = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }

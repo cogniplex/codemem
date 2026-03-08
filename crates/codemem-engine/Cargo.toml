@@ -8,9 +8,9 @@ repository.workspace = true
 description = "Domain logic engine for Codemem: indexing, hooks, watching, scoring, recall, consolidation"
 
 [dependencies]
-codemem-core = { workspace = true }
-codemem-storage = { workspace = true }
-codemem-embeddings = { workspace = true }
+codemem-core = { path = "../codemem-core", version = "0.9.0" }
+codemem-storage = { path = "../codemem-storage", version = "0.9.0" }
+codemem-embeddings = { path = "../codemem-embeddings", version = "0.8.1" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
