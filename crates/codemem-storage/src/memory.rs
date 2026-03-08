@@ -17,11 +17,11 @@ impl Storage {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
-        // Check dedup inside the transaction
+        // Check dedup inside the transaction (namespace-scoped)
         let existing: Option<String> = tx
             .query_row(
-                "SELECT id FROM memories WHERE content_hash = ?1",
-                params![memory.content_hash],
+                "SELECT id FROM memories WHERE content_hash = ?1 AND namespace IS ?2",
+                params![memory.content_hash, memory.namespace],
                 |row| row.get(0),
             )
             .optional()

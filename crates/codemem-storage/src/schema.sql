@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
-CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(content_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_hash_ns ON memories(content_hash, COALESCE(namespace, ''));
 CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
 CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace);

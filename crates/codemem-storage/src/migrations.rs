@@ -43,6 +43,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "JSON expression indexes, hash prefix index, session activity composite index",
         sql: include_str!("migrations/007_expression_indexes.sql"),
     },
+    Migration {
+        version: 8,
+        description: "Namespace-scoped content_hash dedup",
+        sql: include_str!("migrations/008_namespace_scoped_dedup.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.
