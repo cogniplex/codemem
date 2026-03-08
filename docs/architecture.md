@@ -99,7 +99,7 @@ flowchart TD
 | Crate | Description |
 |-------|-------------|
 | codemem-core | Shared types (`types.rs`: `MemoryNode`, `Edge`, `Session`, `DetectedPattern`), traits (`traits.rs`: `VectorBackend`/`GraphBackend`/`StorageBackend`), errors (`error.rs`), config (`config.rs`: `CodememConfig`, `ChunkingConfig`, `EnrichmentConfig` TOML persistence). 7 `MemoryType`s, 5 `PatternType`s, 24 `RelationshipType`s, 13 `NodeKind`s, `ScoringWeights` |
-| codemem-storage | rusqlite (bundled) WAL mode + usearch HNSW vector index + petgraph graph engine. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning), `vector.rs` (HNSW 768-dim cosine, M=16, efConstruction=200), `graph/` (traversal with BFS/DFS/kind-aware filtering, algorithms: PageRank, Louvain, SCC, betweenness, topological, cached centrality, graph compaction, package nodes) |
+| codemem-storage | rusqlite (bundled) WAL mode + usearch HNSW vector index + petgraph graph engine. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl with multi-row INSERT batching, transaction wrapping via `begin/commit/rollback_transaction`), `migrations.rs` (schema versioning), `vector.rs` (HNSW 768-dim cosine, M=16, efConstruction=200), `graph/` (traversal with BFS/DFS/kind-aware filtering, algorithms: PageRank, Louvain, SCC, betweenness, topological, cached centrality, graph compaction, package nodes) |
 | codemem-embeddings | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization. Safe concurrency via `LockPoisoned` error handling |
 | codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing, reference resolution), `hooks/` (PostToolUse JSON parser, per-tool extractors for 9 tool types, diff-aware memory, trigger-based auto-insights), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `enrichment/` (14 enrichment types, one file per analysis + `run_enrichments()` pipeline), `consolidation/` (5 cycles: decay, creative, cluster, forget, summarize), `persistence/` (index persistence + compaction), `analysis.rs` (decision chains, session checkpoints, impact analysis), `search.rs` (semantic/text/hybrid code search), `recall.rs` (unified recall with temporal edge filtering), `bm25.rs` (Okapi BM25 scoring with serialization), `scoring.rs` (hybrid scoring helpers), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `metrics.rs` (operational metrics) |
 | codemem | Unified binary + library. Three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 32 MCP tools, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 19 commands, lifecycle hooks, config management, multi-format export) |
@@ -537,12 +537,13 @@ The schema is managed by versioned, idempotent migrations tracked in a `schema_v
 | `content_hash` | TEXT | SHA-256 for deduplication |
 | `tags` | TEXT | JSON array of tag strings |
 | `metadata` | TEXT | JSON object of arbitrary key-value pairs |
+| `session_id` | TEXT | FK to `sessions.id`, auto-populated from active session (nullable) |
 | `namespace` | TEXT | Project path for scoped queries (nullable) |
 | `created_at` | INTEGER | Unix timestamp |
 | `updated_at` | INTEGER | Unix timestamp |
 | `last_accessed_at` | INTEGER | Unix timestamp |
 
-Indexes: `memory_type`, `content_hash`, `importance`, `created_at`, `namespace`.
+Indexes: `memory_type`, `content_hash`, `importance`, `created_at`, `namespace`, `session_id`.
 
 ### `memory_embeddings` table
 
@@ -774,7 +775,7 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 
 ---
 
-## 12. MCP Tools (28 primary + legacy aliases)
+## 12. MCP Tools (32)
 
 ### Memory CRUD (7)
 | Tool | Description |
@@ -798,12 +799,14 @@ For production use, the contextual enrichment step (Section 6) runs before step 
 | `get_symbol_info` | Get symbol details, optionally with graph dependencies |
 | `get_symbol_graph` | Symbol dependency graph and impact analysis (replaces `get_dependencies`/`get_impact`) |
 
-### Graph Analysis (3)
+### Graph Analysis (5)
 | Tool | Description |
 |------|-------------|
-| `find_important_nodes` | PageRank to find most central nodes (replaces `get_pagerank`) |
-| `find_related_groups` | Louvain community detection (replaces `get_clusters`) |
+| `find_important_nodes` | PageRank to find most central nodes |
+| `find_related_groups` | Louvain community detection |
 | `get_cross_repo` | Cross-package dependency analysis (Cargo.toml, package.json, go.mod, pyproject.toml) |
+| `get_node_memories` | Get memories linked to a specific graph node |
+| `node_coverage` | Coverage analysis: which graph nodes have associated memories |
 
 ### Consolidation & Patterns (3)
 | Tool | Description |

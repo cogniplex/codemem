@@ -16,7 +16,7 @@ cargo build
 ## Test
 
 ```bash
-cargo test --workspace       # All 415 tests
+cargo test --workspace       # All tests
 cargo bench                  # Criterion benchmarks
 ```
 
@@ -31,27 +31,34 @@ cargo run -- serve           # Start MCP server (stdio)
 
 ## Project Structure
 
-Codemem is a Cargo workspace with 12 crates. See [docs/architecture.md](docs/architecture.md) for the full design.
+Codemem is a Cargo workspace with 6 crates. See [docs/architecture.md](docs/architecture.md) for the full design.
 
 | Crate | When to modify |
 |-------|---------------|
-| codemem-core | Adding/changing memory types, traits, scoring weights, shared types |
-| codemem-storage | Changing SQLite schema, queries, persistence logic, session management |
-| codemem-vector | Changing HNSW parameters, distance metrics, vector index behavior |
-| codemem-graph | Adding graph algorithms, relationship types, traversal logic, centrality caching |
+| codemem-core | Adding/changing memory types, traits, scoring weights, shared types, config |
+| codemem-storage | Changing SQLite schema, queries, persistence logic, graph algorithms, HNSW parameters, session management |
 | codemem-embeddings | Adding embedding providers (Candle/Ollama/OpenAI), cache behavior |
-| codemem-index | Adding language extractors, tree-sitter parsing, reference resolution |
-| codemem-mcp | Adding/modifying MCP tools, JSON-RPC handling, BM25 scoring, pattern detection |
-| codemem-hooks | Adding tool extractors, diff computation, changing ingest behavior |
-| codemem-cli | Adding CLI commands, changing command-line interface |
-| codemem-watch | File watcher behavior, ignore patterns, debounce settings |
+| codemem-engine | Domain logic: indexing, hooks, enrichment, consolidation, recall, search, patterns, compression |
+| codemem | Adding/modifying MCP tools, REST API routes, CLI commands, lifecycle hooks |
 | codemem-bench | Adding benchmarks, changing performance targets |
+
+## Web UI
+
+The React dashboard lives in `ui/`. Uses Bun as package manager.
+
+```bash
+cd ui && bun install            # Install dependencies
+cd ui && bun run dev            # Dev server (Vite)
+cd ui && bun run build          # Production build
+cd ui && bun run tsc --noEmit   # TypeScript check
+cd ui && bun run eslint .       # Lint check
+```
 
 ## Code Style
 
 - Run `cargo fmt` before committing
-- Run `cargo clippy` and address all warnings
-- Prefer `Result<T, E>` over panicking
+- Run `cargo clippy --workspace --all-targets -- -D warnings` and address all warnings (CI treats warnings as errors)
+- Prefer `Result<T, E>` over panicking — zero `.unwrap()` on locks in production code
 - Keep functions focused and under ~50 lines where practical
 
 ## Testing
@@ -59,6 +66,7 @@ Codemem is a Cargo workspace with 12 crates. See [docs/architecture.md](docs/arc
 - Unit tests live alongside code (`#[cfg(test)]` modules)
 - Integration tests in `crates/*/tests/`
 - Benchmarks in `crates/codemem-bench/` using Criterion
+- UI E2E tests via Playwright
 - New features should include tests
 
 ## Performance
@@ -83,7 +91,7 @@ test(graph): add Louvain community detection coverage
 
 1. Fork and create a feature branch from `main`
 2. Make changes with tests
-3. Run `cargo fmt && cargo clippy && cargo test --workspace`
+3. Run `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
 4. Open a PR with a clear description
 
 ## Architecture Decisions

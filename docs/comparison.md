@@ -1,6 +1,6 @@
 # Comparison: Memory Tools for AI Coding Assistants
 
-A comprehensive comparison of Codemem v0.8.0 against other memory and context tools in the ecosystem. Last updated March 2026.
+A comprehensive comparison of Codemem against other memory and context tools in the ecosystem. Last updated March 2026.
 
 ## At a Glance
 
@@ -14,7 +14,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 | **Offline** | Yes | Partial | Partial | No | No | Partial | Partial | No | No | Partial (Ollama) |
 | **Embedding** | Pluggable: Candle (local), Ollama, OpenAI-compatible (768-dim) | Chroma (via uvx) | Pluggable (24+ providers) | Built-in | Pluggable (OpenAI, etc.) | Configurable | Pluggable | OpenAI/Voyage/Ollama | Qdrant + Voyage AI | OpenAI, Gemini, Ollama |
 | **Code-aware** | Yes (ast-grep + CST chunking) | No | No | Partial (code connector) | No | Yes (Letta Code) | Partial (codify) | Yes (AST splitting) | No | No |
-| **MCP tools** | 30 | 3 | Yes (OpenMemory MCP) | Yes (plugin) | Yes (Graphiti MCP) | Yes | Yes (cognee-mcp) | 4 | 4 | Yes |
+| **MCP tools** | 32 | 3 | Yes (OpenMemory MCP) | Yes (plugin) | Yes (Graphiti MCP) | Yes | Yes (cognee-mcp) | 4 | 4 | Yes |
 | **Graph** | Built-in (petgraph, 25 algos) | No | Neo4j (optional) | No | Neo4j/FalkorDB/Kuzu | No | Neo4j/FalkorDB/Kuzu | No | FalkorDB | Temporal KG |
 | **Compression** | Pluggable LLM (optional) | AI-powered (always on) | No | No | No | No | No | No | No | No |
 | **Consolidation** | 5 cycles (decay/creative/cluster/summarize/forget) | No | Auto-extraction | Contradiction handling | Temporal updates | Self-editing memory | ECL pipeline | No | HippoRAG-inspired | Adaptive decay |
@@ -147,7 +147,7 @@ A comprehensive comparison of Codemem v0.8.0 against other memory and context to
 | **Contextual embeddings** | Metadata + graph neighbors enriched before embedding | Raw text embedding |
 | **Consolidation** | 5 biologically-inspired cycles (decay/creative/cluster/summarize/forget) | None |
 | **Self-editing** | Yes (refine/split/merge with provenance chains) | No |
-| **MCP tools** | 28 | 3 (search, timeline, get_observations) |
+| **MCP tools** | 32 | 3 (search, timeline, get_observations) |
 | **Session insights** | Auto-generated (trigger-based) + session_checkpoint tool | None (manual only) |
 | **Web viewer** | PCA visualization dashboard | React UI with SSE, infinite scroll, Endless Mode (beta) |
 | **Privacy** | Namespace scoping | `<private>` tag exclusion |

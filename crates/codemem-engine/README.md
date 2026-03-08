@@ -1,31 +1,41 @@
 # codemem-engine
 
-ast-grep based code indexing for 14 languages with incremental change detection.
+Domain logic engine for the Codemem memory system.
 
 ## Overview
 
-Parses source files to extract symbols (functions, structs, classes, methods, interfaces, constants) and their references (calls, imports, implements, inherits). Uses a unified `AstGrepEngine` driven by compile-time embedded YAML rules. Produces structured data that feeds into the knowledge graph.
+`CodememEngine` is the central struct that holds all backends (storage, embeddings, graph) and orchestrates all domain operations. It handles code indexing, memory persistence, recall, enrichment, consolidation, and session management.
+
+## Modules
+
+| Module | Purpose |
+|--------|---------|
+| `index/` | ast-grep code indexing for 14 languages, YAML-driven rules, manifest parsing, reference resolution |
+| `hooks/` | Lifecycle hook handlers for tool types (Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/ListDir), trigger-based auto-insights |
+| `watch/` | Real-time file watcher with <50ms debounce and .gitignore support |
+| `enrichment/` | 14 enrichment analyses (git history, security, performance, complexity, etc.) |
+| `consolidation/` | 5 neuroscience-inspired cycles: decay, creative, cluster, forget, summarize |
+| `persistence/` | Index persistence pipeline with batched graph/embedding inserts and compaction |
+| `analysis.rs` | Decision chains, session checkpoints, impact analysis |
+| `search.rs` | Semantic, text, and hybrid code search |
+| `recall.rs` | Unified recall with temporal edge filtering and hybrid scoring |
+| `memory_ops.rs` | Memory CRUD with transaction wrapping and session_id auto-population |
+| `bm25.rs` | Okapi BM25 scoring with code-aware tokenizer and serialization |
+| `scoring.rs` | 8-component hybrid scoring helpers |
+| `patterns.rs` | Cross-session pattern detection |
+| `compress.rs` | Optional LLM observation compression |
+| `metrics.rs` | Operational metrics (latency percentiles, call counters) |
 
 ## Supported Languages
 
-Rust (.rs), TypeScript/JavaScript (.ts/.tsx/.js/.jsx), Python (.py), Go (.go), C/C++ (.c/.h/.cpp/.hpp), Java (.java), Ruby (.rb), C# (.cs), Kotlin (.kt/.kts), Swift (.swift), PHP (.php), Scala (.scala/.sc), HCL/Terraform (.tf/.hcl)
-
-## Key Types
-
-- `Indexer` — Main pipeline: walks directories, parses files, detects changes
-- `CodeParser` — ast-grep parsing coordinator
-- `AstGrepEngine` — Unified extraction engine with YAML-driven rules for all languages
-- `ReferenceResolver` — Maps references to qualified names, produces graph edges
-- `Symbol` — Extracted code entity (name, kind, signature, visibility, file, line range, doc comment)
-- `Reference` — Cross-symbol reference (source, target, kind: Call/Import/Inherits/Implements/TypeUsage)
-- `ChangeDetector` — SHA-256 file hashing for incremental re-indexing
+Rust, TypeScript/JavaScript/JSX/TSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform
 
 ## Data Flow
 
 ```
-Directory → Walk → Parse (ast-grep) → Symbols + References
-                                            ↓
-                                  ReferenceResolver
-                                            ↓
-                                  ResolvedEdges (CALLS, IMPORTS, INHERITS, ...)
+Source Files → Index (ast-grep) → Persist (nodes, edges, embeddings) → Compact
+                                                                         ↓
+Hooks (tool observations) → Extract → Embed → Store ←── Enrich (14 analyses)
+                                                         ↓
+                                              Recall (hybrid scoring) → Results
 ```
