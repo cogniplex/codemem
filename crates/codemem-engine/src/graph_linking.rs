@@ -1,6 +1,6 @@
 use crate::CodememEngine;
 use codemem_core::{
-    CodememError, Edge, GraphBackend, NodeKind, NodeMemoryResult, RelationshipType,
+    CodememError, Edge, GraphBackend, MemoryNode, NodeKind, NodeMemoryResult, RelationshipType,
 };
 use std::collections::HashSet;
 
@@ -76,6 +76,82 @@ impl CodememEngine {
         }
 
         created
+    }
+
+    // ── Tag-based Auto-linking ──────────────────────────────────────────
+
+    /// Create edges between this memory and other memories that share tags.
+    /// - `session:*` tags → PRECEDED_BY edges (temporal ordering within a session)
+    /// - Other shared tags → SHARES_THEME edges (topical overlap)
+    ///
+    /// This runs during `persist_memory` so the graph builds connectivity at
+    /// ingestion time, rather than relying solely on creative consolidation.
+    pub fn auto_link_by_tags(&self, memory: &MemoryNode) {
+        if memory.tags.is_empty() {
+            return;
+        }
+
+        // Phase 1: Collect sibling IDs and build edges WITHOUT holding the graph lock.
+        let now = chrono::Utc::now();
+        let mut linked = HashSet::new();
+        let mut edges_to_add = Vec::new();
+
+        for tag in &memory.tags {
+            let is_session_tag = tag.starts_with("session:");
+
+            let sibling_ids = match self.storage.find_memory_ids_by_tag(
+                tag,
+                memory.namespace.as_deref(),
+                &memory.id,
+            ) {
+                Ok(ids) => ids,
+                Err(_) => continue,
+            };
+
+            for sibling_id in sibling_ids {
+                if !linked.insert(sibling_id.clone()) {
+                    continue;
+                }
+
+                let (relationship, edge_label) = if is_session_tag {
+                    (RelationshipType::PrecededBy, "PRECEDED_BY")
+                } else {
+                    (RelationshipType::SharesTheme, "SHARES_THEME")
+                };
+
+                let edge_id = format!("{}-{edge_label}-{sibling_id}", memory.id);
+                edges_to_add.push(Edge {
+                    id: edge_id,
+                    src: sibling_id,
+                    dst: memory.id.clone(),
+                    relationship,
+                    weight: if is_session_tag { 0.8 } else { 0.5 },
+                    properties: std::collections::HashMap::from([(
+                        "auto_linked".to_string(),
+                        serde_json::json!(true),
+                    )]),
+                    created_at: now,
+                    valid_from: Some(now),
+                    valid_to: None,
+                });
+            }
+        }
+
+        if edges_to_add.is_empty() {
+            return;
+        }
+
+        // Phase 2: Acquire graph lock only for mutations.
+        let mut graph = match self.lock_graph() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+
+        for edge in edges_to_add {
+            if self.storage.insert_graph_edge(&edge).is_ok() {
+                let _ = graph.add_edge(edge);
+            }
+        }
     }
 
     // ── Node Memory Queries ──────────────────────────────────────────────

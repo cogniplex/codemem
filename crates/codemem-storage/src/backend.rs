@@ -60,6 +60,7 @@ impl StorageBackend for Storage {
 
     delegate_storage!(list_memory_ids(&self) -> Result<Vec<String>, CodememError>);
     delegate_storage!(list_memory_ids_for_namespace(&self, namespace: &str) -> Result<Vec<String>, CodememError>);
+    delegate_storage!(find_memory_ids_by_tag(&self, tag: &str, namespace: Option<&str>, exclude_id: &str) -> Result<Vec<String>, CodememError>);
     delegate_storage!(list_namespaces(&self) -> Result<Vec<String>, CodememError>);
     delegate_storage!(memory_count(&self) -> Result<usize, CodememError>);
 

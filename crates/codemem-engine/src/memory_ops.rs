@@ -86,6 +86,9 @@ impl CodememEngine {
             Err(e) => tracing::warn!("Graph lock failed during persist: {e}"),
         }
 
+        // 3b. Auto-link to memories with shared tags (session co-membership, topic overlap)
+        self.auto_link_by_tags(memory);
+
         // H3: Step 4 — Insert embedding into vector index (separate lock scope from embeddings).
         if let Some(vec) = &embedding_result {
             if let Ok(mut vi) = self.lock_vector() {
@@ -395,6 +398,14 @@ impl CodememEngine {
         }
 
         self.save_index();
+        Ok(())
+    }
+
+    /// Update only the importance of a memory.
+    /// Routes through the engine to maintain the transport → engine → storage boundary.
+    pub fn update_importance(&self, id: &str, importance: f64) -> Result<(), CodememError> {
+        self.storage
+            .batch_update_importance(&[(id.to_string(), importance)])?;
         Ok(())
     }
 

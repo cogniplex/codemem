@@ -690,6 +690,63 @@ impl Storage {
                 .map_err(|e| CodememError::Storage(e.to_string()))
         }
     }
+
+    // ── Tag-based Queries ─────────────────────────────────────────
+
+    /// Find memory IDs whose tags JSON array contains the given tag value.
+    /// Optionally scoped to a namespace. Excludes the given `exclude_id`.
+    /// Returns at most 50 results ordered by creation time (most recent siblings first).
+    pub fn find_memory_ids_by_tag(
+        &self,
+        tag: &str,
+        namespace: Option<&str>,
+        exclude_id: &str,
+    ) -> Result<Vec<String>, CodememError> {
+        let conn = self.conn()?;
+
+        // Use json_each() for exact tag matching instead of LIKE (safe against %, _, " in tags).
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(ns) = namespace {
+                (
+                    "SELECT DISTINCT m.id FROM memories m, json_each(m.tags) t \
+                 WHERE t.value = ?1 AND m.namespace IS ?2 AND m.id != ?3 \
+                 ORDER BY m.created_at DESC LIMIT 50"
+                        .to_string(),
+                    vec![
+                        Box::new(tag.to_string()) as Box<dyn rusqlite::types::ToSql>,
+                        Box::new(ns.to_string()),
+                        Box::new(exclude_id.to_string()),
+                    ],
+                )
+            } else {
+                (
+                    "SELECT DISTINCT m.id FROM memories m, json_each(m.tags) t \
+                 WHERE t.value = ?1 AND m.namespace IS NULL AND m.id != ?2 \
+                 ORDER BY m.created_at DESC LIMIT 50"
+                        .to_string(),
+                    vec![
+                        Box::new(tag.to_string()) as Box<dyn rusqlite::types::ToSql>,
+                        Box::new(exclude_id.to_string()),
+                    ],
+                )
+            };
+
+        let refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let ids = stmt
+            .query_map(refs.as_slice(), |row| row.get(0))
+            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .collect::<Result<Vec<String>, _>>()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(ids)
+    }
+
     // ── Graph Cleanup ───────────────────────────────────────────────
 
     /// Delete all graph nodes, their edges, and their embeddings where the

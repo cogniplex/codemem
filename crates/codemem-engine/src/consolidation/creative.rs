@@ -91,11 +91,6 @@ impl CodememEngine {
                     None => continue,
                 };
 
-                // Cross-type only
-                if my_type == neighbor_type {
-                    continue;
-                }
-
                 // L19: Use combined key to avoid cloning both ID strings per check
                 let edge_key = format!("{id}\0{neighbor_id}");
                 if existing_edges.contains(&edge_key) {
@@ -103,7 +98,12 @@ impl CodememEngine {
                 }
 
                 let similarity = *sim as f64;
-                if similarity < 0.5 {
+
+                // Cross-type links at 0.35 threshold, same-type links at 0.5.
+                // Lower thresholds improve graph connectivity for conversational memories
+                // which tend to have moderate but meaningful cosine similarities.
+                let threshold = if my_type == neighbor_type { 0.5 } else { 0.35 };
+                if similarity < threshold {
                     continue;
                 }
 

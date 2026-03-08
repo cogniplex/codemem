@@ -154,8 +154,17 @@ fn consolidate_creative_creates_edges() {
 
     assert_eq!(parsed["cycle"], "creative");
     assert_eq!(parsed["algorithm"], "vector_knn");
-    // They have different types and similar embeddings, so should create a SHARES_THEME edge
-    assert!(parsed["new_connections"].as_u64().unwrap() >= 1);
+    // Edges may already exist from tag-based auto-linking during persist.
+    // Verify that the graph has at least one SHARES_THEME edge between the memories.
+    let edges = server.engine.storage().all_graph_edges().unwrap();
+    let has_theme_edge = edges.iter().any(|e| {
+        e.relationship == codemem_core::RelationshipType::SharesTheme
+            && ((e.src == id1 && e.dst == id2) || (e.src == id2 && e.dst == id1))
+    });
+    assert!(
+        has_theme_edge,
+        "Should have SHARES_THEME edge between the two memories"
+    );
 }
 
 #[test]

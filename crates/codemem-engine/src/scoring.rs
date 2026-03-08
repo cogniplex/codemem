@@ -7,28 +7,54 @@ use codemem_storage::graph::GraphEngine;
 
 /// Compute graph strength for a memory node by combining raw graph metrics.
 ///
-/// Uses PageRank, betweenness centrality, connectivity, and edge weights
-/// from the memory's code-graph neighbors to produce a 0.0-1.0 score.
-/// Weights: PageRank 40%, betweenness 30%, connectivity 20%, edge weight 10%.
+/// Blends two signal sources:
+/// - **Code neighbors** (`sym:`, `file:`, etc.): PageRank, betweenness, connectivity, edge weight
+/// - **Memory neighbors** (other memories linked via SHARES_THEME, PRECEDED_BY, etc.):
+///   connectivity count and average edge weight
+///
+/// A function with many linked memories ranks higher. A conversational memory
+/// connected to many session peers ranks higher than an isolated one.
 pub fn graph_strength_for_memory(graph: &GraphEngine, memory_id: &str) -> f64 {
     let metrics = match graph.raw_graph_metrics_for_memory(memory_id) {
         Some(m) => m,
         None => return 0.0,
     };
 
-    if metrics.code_neighbor_count == 0 {
-        return 0.0;
-    }
+    // Code-graph component (0.0-1.0): centrality of linked code nodes
+    let code_score = if metrics.code_neighbor_count > 0 {
+        let connectivity = (metrics.code_neighbor_count as f64 / 5.0).min(1.0);
+        let avg_edge_w = (metrics.total_edge_weight / metrics.code_neighbor_count as f64).min(1.0);
+        0.4 * metrics.max_pagerank
+            + 0.3 * metrics.max_betweenness
+            + 0.2 * connectivity
+            + 0.1 * avg_edge_w
+    } else {
+        0.0
+    };
 
-    let connectivity_bonus = (metrics.code_neighbor_count as f64 / 5.0).min(1.0);
-    let edge_weight_bonus =
-        (metrics.total_edge_weight / metrics.code_neighbor_count as f64).min(1.0);
+    // Memory-graph component (0.0-1.0): connectivity to other memories
+    let memory_score = if metrics.memory_neighbor_count > 0 {
+        let connectivity = (metrics.memory_neighbor_count as f64 / 10.0).min(1.0);
+        let avg_edge_w =
+            (metrics.memory_edge_weight / metrics.memory_neighbor_count as f64).min(1.0);
+        0.6 * connectivity + 0.4 * avg_edge_w
+    } else {
+        0.0
+    };
 
-    (0.4 * metrics.max_pagerank
-        + 0.3 * metrics.max_betweenness
-        + 0.2 * connectivity_bonus
-        + 0.1 * edge_weight_bonus)
-        .min(1.0)
+    // Blend: when both exist, code neighbors dominate (70/30).
+    // When only one exists, use it fully.
+    let score = match (
+        metrics.code_neighbor_count > 0,
+        metrics.memory_neighbor_count > 0,
+    ) {
+        (true, true) => 0.7 * code_score + 0.3 * memory_score,
+        (true, false) => code_score,
+        (false, true) => memory_score,
+        (false, false) => 0.0,
+    };
+
+    score.min(1.0)
 }
 
 /// Truncate a string to `max` bytes, appending "..." if truncated.

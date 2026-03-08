@@ -218,6 +218,15 @@ pub trait StorageBackend: Send + Sync {
     /// List memory IDs scoped to a specific namespace.
     fn list_memory_ids_for_namespace(&self, namespace: &str) -> Result<Vec<String>, CodememError>;
 
+    /// Find memory IDs whose tags contain the given tag value.
+    /// Optionally scoped to a namespace. Excludes `exclude_id`.
+    fn find_memory_ids_by_tag(
+        &self,
+        tag: &str,
+        namespace: Option<&str>,
+        exclude_id: &str,
+    ) -> Result<Vec<String>, CodememError>;
+
     /// List all distinct namespaces.
     fn list_namespaces(&self) -> Result<Vec<String>, CodememError>;
 

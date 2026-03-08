@@ -6,14 +6,12 @@
 mod algorithms;
 mod traversal;
 
-#[cfg(test)]
-use codemem_core::NodeKind;
-use codemem_core::{CodememError, Edge, GraphBackend, GraphNode};
+use codemem_core::{CodememError, Edge, GraphBackend, GraphNode, NodeKind};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::Direction;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-/// Raw graph metrics for a memory node, collected from its code-graph neighbors.
+/// Raw graph metrics for a memory node, collected from its neighbors.
 ///
 /// Returned by `GraphEngine::raw_graph_metrics_for_memory()` so that the
 /// scoring formula can live in the engine crate.
@@ -27,6 +25,10 @@ pub struct RawGraphMetrics {
     pub code_neighbor_count: usize,
     /// Sum of edge weights connecting this memory to code-graph neighbors.
     pub total_edge_weight: f64,
+    /// Number of memory-to-memory neighbors (UUID-based IDs).
+    pub memory_neighbor_count: usize,
+    /// Sum of edge weights connecting this memory to other memory nodes.
+    pub memory_edge_weight: f64,
 }
 
 /// In-memory graph engine backed by petgraph, synced to SQLite via codemem-storage.
@@ -330,13 +332,16 @@ impl GraphEngine {
         self.cached_betweenness.get(node_id).copied().unwrap_or(0.0)
     }
 
-    /// Collect raw graph metrics for a memory node by bridging to code-graph neighbors.
+    /// Collect raw graph metrics for a memory node from both code-graph and
+    /// memory-graph neighbors.
     ///
-    /// Memory nodes (UUIDs) and code nodes (`sym:`, `file:`) exist in disconnected
-    /// ID spaces. This method looks up a memory node's neighbors and collects
-    /// centrality data from any connected code-graph nodes.
+    /// Code neighbors (`sym:`, `file:`, `chunk:`, `pkg:`) contribute centrality
+    /// data (PageRank, betweenness). Memory neighbors (UUID-based) contribute
+    /// connectivity data (count + edge weights). A function with many linked
+    /// memories is more important; a memory with many linked memories has richer
+    /// context.
     ///
-    /// Returns `None` if the memory node is not in the graph or has no code neighbors.
+    /// Returns `None` if the memory node is not in the graph or has no neighbors.
     pub fn raw_graph_metrics_for_memory(&self, memory_id: &str) -> Option<RawGraphMetrics> {
         let idx = *self.id_to_index.get(memory_id)?;
 
@@ -344,18 +349,38 @@ impl GraphEngine {
         let mut max_betweenness = 0.0_f64;
         let mut code_neighbor_count = 0_usize;
         let mut total_edge_weight = 0.0_f64;
+        let mut memory_neighbor_count = 0_usize;
+        let mut memory_edge_weight = 0.0_f64;
 
         // Iterate both outgoing and incoming neighbors
         for direction in &[Direction::Outgoing, Direction::Incoming] {
             for neighbor_idx in self.graph.neighbors_directed(idx, *direction) {
                 if let Some(neighbor_id) = self.graph.node_weight(neighbor_idx) {
-                    // Only consider code-graph nodes (sym:, file:, chunk:, pkg:)
-                    if neighbor_id.starts_with("sym:")
-                        || neighbor_id.starts_with("file:")
-                        || neighbor_id.starts_with("chunk:")
-                        || neighbor_id.starts_with("pkg:")
-                    {
+                    let is_code_node = self
+                        .nodes
+                        .get(neighbor_id.as_str())
+                        .map(|n| n.kind != NodeKind::Memory)
+                        .unwrap_or(false);
+
+                    // Collect edge weight from our edge adjacency index
+                    let mut edge_w = 0.0_f64;
+                    if let Some(edge_ids) = self.edge_adj.get(memory_id) {
+                        for eid in edge_ids {
+                            if let Some(edge) = self.edges.get(eid) {
+                                if (edge.src == memory_id && edge.dst == *neighbor_id)
+                                    || (edge.dst == memory_id && edge.src == *neighbor_id)
+                                {
+                                    edge_w = edge.weight;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if is_code_node {
                         code_neighbor_count += 1;
+                        total_edge_weight += edge_w;
+
                         let pr = self
                             .cached_pagerank
                             .get(neighbor_id)
@@ -368,26 +393,15 @@ impl GraphEngine {
                             .unwrap_or(0.0);
                         max_pagerank = max_pagerank.max(pr);
                         max_betweenness = max_betweenness.max(bt);
-
-                        // Collect edge weight from our edge adjacency index
-                        if let Some(edge_ids) = self.edge_adj.get(memory_id) {
-                            for eid in edge_ids {
-                                if let Some(edge) = self.edges.get(eid) {
-                                    if (edge.src == memory_id && edge.dst == *neighbor_id)
-                                        || (edge.dst == memory_id && edge.src == *neighbor_id)
-                                    {
-                                        total_edge_weight += edge.weight;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+                    } else {
+                        memory_neighbor_count += 1;
+                        memory_edge_weight += edge_w;
                     }
                 }
             }
         }
 
-        if code_neighbor_count == 0 {
+        if code_neighbor_count == 0 && memory_neighbor_count == 0 {
             return None;
         }
 
@@ -396,6 +410,8 @@ impl GraphEngine {
             max_betweenness,
             code_neighbor_count,
             total_edge_weight,
+            memory_neighbor_count,
+            memory_edge_weight,
         })
     }
 
