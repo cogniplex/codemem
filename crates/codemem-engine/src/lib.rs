@@ -10,7 +10,9 @@
 //! - **compress** — Optional LLM-powered observation compression
 //! - **metrics** — Operational metrics collection
 
-use codemem_core::{CodememConfig, CodememError, ScoringWeights, StorageBackend, VectorBackend};
+use codemem_core::{
+    CodememConfig, CodememError, ScoringWeights, StorageBackend, VectorBackend, VectorConfig,
+};
 use codemem_storage::graph::GraphEngine;
 use codemem_storage::HnswIndex;
 use codemem_storage::Storage;
@@ -207,7 +209,11 @@ impl CodememEngine {
             Some(config.storage.cache_size_mb),
             Some(config.storage.busy_timeout_secs),
         )?;
-        let mut vector = HnswIndex::with_defaults()?;
+        let vector_config = VectorConfig {
+            dimensions: config.vector.dimensions,
+            ..VectorConfig::default()
+        };
+        let mut vector = HnswIndex::new(vector_config.clone())?;
 
         // Load existing vector index if it exists
         let index_path = db_path.with_extension("idx");
@@ -225,7 +231,7 @@ impl CodememEngine {
                 "Vector index ({vector_count}) out of sync with DB ({db_embed_count}), rebuilding..."
             );
             // Rebuild: create a fresh index and re-insert all embeddings from DB
-            let mut fresh_vector = HnswIndex::with_defaults()?;
+            let mut fresh_vector = HnswIndex::new(vector_config)?;
             if let Ok(embeddings) = storage.list_all_embeddings() {
                 for (id, embedding) in &embeddings {
                     if let Err(e) = fresh_vector.insert(id, embedding) {

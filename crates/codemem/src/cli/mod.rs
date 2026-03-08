@@ -374,10 +374,15 @@ pub fn run() -> anyhow::Result<()> {
 // ── Helpers (shared across modules) ────────────────────────────────────────
 
 /// Rebuild the HNSW vector index from all stored embeddings in the database.
-pub(crate) fn rebuild_vector_index(
+pub(crate) fn rebuild_vector_index_with_dims(
     storage: &codemem_storage::Storage,
+    dimensions: usize,
 ) -> anyhow::Result<codemem_storage::HnswIndex> {
-    let mut vector = codemem_storage::HnswIndex::with_defaults()?;
+    let vector_config = codemem_core::VectorConfig {
+        dimensions,
+        ..codemem_core::VectorConfig::default()
+    };
+    let mut vector = codemem_storage::HnswIndex::new(vector_config)?;
     let embeddings = storage.list_all_embeddings()?;
     for (id, floats) in &embeddings {
         if let Err(e) = vector.insert(id, floats) {

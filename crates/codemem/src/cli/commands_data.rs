@@ -17,14 +17,21 @@ fn build_server() -> anyhow::Result<(crate::mcp::McpServer, codemem_storage::Sto
         }
     }
 
+    let config = codemem_core::CodememConfig::load_or_default();
+    tracing::info!("Vector dimensions: {}", config.vector.dimensions);
+
     let storage = codemem_storage::Storage::open(&db_path)?;
-    let mut vector = codemem_storage::HnswIndex::with_defaults()?;
+    let vector_config = codemem_core::VectorConfig {
+        dimensions: config.vector.dimensions,
+        ..codemem_core::VectorConfig::default()
+    };
+    let mut vector = codemem_storage::HnswIndex::new(vector_config)?;
 
     let index_path = db_path.with_extension("idx");
     if index_path.exists() {
         if let Err(e) = vector.load(&index_path) {
             tracing::warn!("Stale or corrupt vector index, rebuilding: {e}");
-            vector = super::rebuild_vector_index(&storage)?;
+            vector = super::rebuild_vector_index_with_dims(&storage, config.vector.dimensions)?;
             let _ = vector.save(&index_path);
         }
     } else {
@@ -32,14 +39,12 @@ fn build_server() -> anyhow::Result<(crate::mcp::McpServer, codemem_storage::Sto
         let emb_count = storage.list_all_embeddings().map(|e| e.len()).unwrap_or(0);
         if emb_count > 0 {
             tracing::info!("No vector index file, rebuilding from {emb_count} stored embeddings");
-            vector = super::rebuild_vector_index(&storage)?;
+            vector = super::rebuild_vector_index_with_dims(&storage, config.vector.dimensions)?;
             let _ = vector.save(&index_path);
         }
     }
 
     let graph = codemem_storage::GraphEngine::from_storage(&storage)?;
-
-    let config = codemem_core::CodememConfig::load_or_default();
     let embeddings = match codemem_embeddings::from_env(Some(&config.embedding)) {
         Ok(provider) => Some(provider),
         Err(e) => {
