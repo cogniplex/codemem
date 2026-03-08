@@ -119,7 +119,6 @@ fn edge_weight_for_custom_config() {
         calls_edge_weight: 0.9,
         imports_edge_weight: 0.3,
         contains_edge_weight: 0.2,
-        ..Default::default()
     };
     assert_eq!(edge_weight_for(&RelationshipType::Calls, &config), 0.9);
     assert_eq!(edge_weight_for(&RelationshipType::Imports, &config), 0.3);

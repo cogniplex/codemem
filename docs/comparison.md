@@ -108,7 +108,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 
 **When to choose Cognee**: Processing diverse data sources (PDFs, docs, web), need LLM-powered knowledge extraction, building knowledge graphs at enterprise scale, need multilingual support.
 
-**When to choose Codemem**: Code-focused memory, offline operation, single-binary deployment, graph algorithms with cached centrality.
+**When to choose Codemem**: Code-focused memory with structural indexing (14 languages), offline operation, single-binary zero-dependency deployment, graph algorithms with cached centrality.
 
 ### Codemem vs claude-context
 
@@ -152,7 +152,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **Web viewer** | PCA visualization dashboard | React UI with SSE, infinite scroll, Endless Mode (beta) |
 | **Privacy** | Namespace scoping | `<private>` tag exclusion |
 
-**When to choose claude-mem**: Want zero-config AI compression, prefer a polished web viewer, already use Bun/Node.js, want the Claude Code plugin marketplace experience.
+**When to choose claude-mem**: Want zero-config AI compression with always-on Claude Agent SDK, already use Bun/Node.js, want the Claude Code plugin marketplace experience.
 
 **When to choose Codemem**: Need code-aware structural intelligence, graph-based reasoning, single binary with no runtime deps, offline-first operation, code-aware hybrid scoring, consolidation cycles, self-editing memory.
 
@@ -172,6 +172,10 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **Dependencies** | None | Python + Docker + FalkorDB + Qdrant |
 
 Codemem was directly inspired by AutoMem's research. The key difference is packaging: Codemem embeds the same graph-vector hybrid approach into a single Rust binary optimized for AI coding assistants.
+
+**When to choose AutoMem**: Research benchmark reproduction, already running FalkorDB + Qdrant, want the original HippoRAG implementation.
+
+**When to choose Codemem**: Code-specific memory, single binary with no Docker/DB dependencies, offline operation, 14-language structural indexing.
 
 ### Codemem vs OpenMemory MCP
 
@@ -212,13 +216,13 @@ Codemem was directly inspired by AutoMem's research. The key difference is packa
 | Persistent memory for AI coding with zero setup | **Codemem** |
 | Single binary, offline, no runtime deps | **Codemem** |
 | Code-aware structural indexing + CST chunking + graph reasoning | **Codemem** |
-| Benchmark-leading accuracy across multiple benchmarks | **Supermemory** |
+| Multi-modal memory (docs, images, video) + cloud-hosted API | **Supermemory** |
 | Zero-config session memory with AI compression | **claude-mem** |
 | General-purpose AI memory with cloud scale and multi-tenancy | **Mem0** |
 | Temporal knowledge graph with event timelines | **Zep/Graphiti** |
 | Autonomous self-editing agent memory + deployment platform | **Letta** |
 | LLM-powered knowledge extraction from diverse documents | **Cognee** |
-| Code search with AST splitting + managed vector DB | **claude-context** |
+| Code search only (no persistent memory) + managed Zilliz Cloud | **claude-context** |
 | Multi-sector memory with adaptive decay + SaaS connectors | **OpenMemory MCP** |
 | Memory OS with multi-modal + parameter-level memory | **MemOS** |
 

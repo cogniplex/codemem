@@ -161,6 +161,25 @@ pub(crate) struct MemoryRow {
 }
 
 impl MemoryRow {
+    pub(crate) fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            content: row.get(1)?,
+            memory_type: row.get(2)?,
+            importance: row.get(3)?,
+            confidence: row.get(4)?,
+            access_count: row.get(5)?,
+            content_hash: row.get(6)?,
+            tags: row.get(7)?,
+            metadata: row.get(8)?,
+            namespace: row.get(9)?,
+            session_id: row.get(10)?,
+            created_at: row.get(11)?,
+            updated_at: row.get(12)?,
+            last_accessed_at: row.get(13)?,
+        })
+    }
+
     pub(crate) fn into_memory_node(self) -> Result<MemoryNode, CodememError> {
         let memory_type: MemoryType = self.memory_type.parse()?;
         let tags: Vec<String> = serde_json::from_str(&self.tags).unwrap_or_else(|e| {

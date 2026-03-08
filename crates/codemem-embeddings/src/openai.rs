@@ -33,6 +33,7 @@ impl OpenAIProvider {
     }
 
     /// Create with default model (text-embedding-3-small, 768 dims).
+    #[cfg(test)]
     pub fn with_api_key(api_key: &str) -> Self {
         Self::new(api_key, DEFAULT_MODEL, 768, None)
     }

@@ -1,9 +1,7 @@
 use crate::index::{self, IndexAndResolveResult, Indexer};
 use crate::patterns;
 use crate::CodememEngine;
-use codemem_core::{
-    CodememError, DetectedPattern, GraphBackend, MemoryNode, NodeKind, VectorBackend,
-};
+use codemem_core::{CodememError, DetectedPattern, GraphBackend, MemoryNode, VectorBackend};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::Ordering;
@@ -245,39 +243,6 @@ impl CodememEngine {
 
         self.save_index();
         Ok(())
-    }
-
-    /// Compare files on disk vs file nodes in the graph and clean up stale entries.
-    /// Call this after indexing or on watcher delete events.
-    pub fn cleanup_deleted_files(&self, dir_path: &str) -> Result<usize, CodememError> {
-        let dir = Path::new(dir_path);
-        if !dir.is_dir() {
-            return Ok(0);
-        }
-
-        // Collect file: nodes from the graph
-        let graph = self.lock_graph()?;
-        let file_nodes: Vec<String> = graph
-            .get_all_nodes()
-            .into_iter()
-            .filter(|n| n.kind == NodeKind::File && n.label.starts_with(dir_path))
-            .map(|n| n.label.clone())
-            .collect();
-        drop(graph);
-
-        let mut cleaned = 0usize;
-        for file_path in &file_nodes {
-            if !Path::new(file_path).exists() {
-                self.cleanup_file_nodes(file_path)?;
-                cleaned += 1;
-            }
-        }
-
-        if cleaned > 0 {
-            self.lock_graph()?.recompute_centrality();
-        }
-
-        Ok(cleaned)
     }
 
     // ── A4: Combined Index + Enrich Pipeline ────────────────────────────

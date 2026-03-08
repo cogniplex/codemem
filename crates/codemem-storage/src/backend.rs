@@ -111,24 +111,7 @@ impl StorageBackend for Storage {
             .collect();
 
         let rows = stmt
-            .query_map(params.as_slice(), |row| {
-                Ok(MemoryRow {
-                    id: row.get(0)?,
-                    content: row.get(1)?,
-                    memory_type: row.get(2)?,
-                    importance: row.get(3)?,
-                    confidence: row.get(4)?,
-                    access_count: row.get(5)?,
-                    content_hash: row.get(6)?,
-                    tags: row.get(7)?,
-                    metadata: row.get(8)?,
-                    namespace: row.get(9)?,
-                    session_id: row.get(10)?,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
-                    last_accessed_at: row.get(13)?,
-                })
-            })
+            .query_map(params.as_slice(), MemoryRow::from_row)
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         let mut memories = Vec::new();
@@ -708,24 +691,7 @@ impl StorageBackend for Storage {
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         let rows = stmt
-            .query_map(refs.as_slice(), |row| {
-                Ok(MemoryRow {
-                    id: row.get(0)?,
-                    content: row.get(1)?,
-                    memory_type: row.get(2)?,
-                    importance: row.get(3)?,
-                    confidence: row.get(4)?,
-                    access_count: row.get(5)?,
-                    content_hash: row.get(6)?,
-                    tags: row.get(7)?,
-                    metadata: row.get(8)?,
-                    namespace: row.get(9)?,
-                    session_id: row.get(10)?,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
-                    last_accessed_at: row.get(13)?,
-                })
-            })
+            .query_map(refs.as_slice(), MemoryRow::from_row)
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         let mut result = Vec::new();

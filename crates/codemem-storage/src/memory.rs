@@ -142,24 +142,7 @@ impl Storage {
             .query_row(
                 "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
-                |row| {
-                    Ok(MemoryRow {
-                        id: row.get(0)?,
-                        content: row.get(1)?,
-                        memory_type: row.get(2)?,
-                        importance: row.get(3)?,
-                        confidence: row.get(4)?,
-                        access_count: row.get(5)?,
-                        content_hash: row.get(6)?,
-                        tags: row.get(7)?,
-                        metadata: row.get(8)?,
-                        namespace: row.get(9)?,
-                        session_id: row.get(10)?,
-                        created_at: row.get(11)?,
-                        updated_at: row.get(12)?,
-                        last_accessed_at: row.get(13)?,
-                    })
-                },
+                MemoryRow::from_row,
             )
             .optional()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -179,24 +162,7 @@ impl Storage {
             .query_row(
                 "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
-                |row| {
-                    Ok(MemoryRow {
-                        id: row.get(0)?,
-                        content: row.get(1)?,
-                        memory_type: row.get(2)?,
-                        importance: row.get(3)?,
-                        confidence: row.get(4)?,
-                        access_count: row.get(5)?,
-                        content_hash: row.get(6)?,
-                        tags: row.get(7)?,
-                        metadata: row.get(8)?,
-                        namespace: row.get(9)?,
-                        session_id: row.get(10)?,
-                        created_at: row.get(11)?,
-                        updated_at: row.get(12)?,
-                        last_accessed_at: row.get(13)?,
-                    })
-                },
+                MemoryRow::from_row,
             )
             .optional()
             .map_err(|e| CodememError::Storage(e.to_string()))?;

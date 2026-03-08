@@ -22,8 +22,10 @@ use std::sync::LazyLock;
 pub type SgNode<'r> = Node<'r, StrDoc<SupportLang>>;
 
 /// One-time deserialized language rules, shared across all AstGrepEngine instances.
-static LOADED_RULES: LazyLock<Vec<LanguageRules>> =
-    LazyLock::new(crate::index::rule_loader::load_all_rules);
+static LOADED_RULES: LazyLock<Vec<LanguageRules>> = LazyLock::new(|| {
+    crate::index::rule_loader::load_all_rules()
+        .expect("embedded YAML rule files must deserialize successfully")
+});
 
 /// The unified extraction engine.
 pub struct AstGrepEngine {

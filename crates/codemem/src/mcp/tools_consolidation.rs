@@ -131,6 +131,36 @@ impl McpServer {
                     }
                 }
 
+                // Run cluster
+                match self.engine.consolidate_cluster(None) {
+                    Ok(r) => {
+                        results["cluster"] = json!({"cycle": r.cycle, "affected": r.affected});
+                    }
+                    Err(e) => {
+                        results["cluster"] = json!({"error": format!("{e}")});
+                    }
+                }
+
+                // Run forget with safe defaults
+                match self.engine.consolidate_forget(None, None, None) {
+                    Ok(r) => {
+                        results["forget"] = json!({"cycle": r.cycle, "deleted": r.affected});
+                    }
+                    Err(e) => {
+                        results["forget"] = json!({"error": format!("{e}")});
+                    }
+                }
+
+                // Run summarize
+                match self.engine.consolidate_summarize(None) {
+                    Ok(r) => {
+                        results["summarize"] = json!({"cycle": r.cycle, "affected": r.affected});
+                    }
+                    Err(e) => {
+                        results["summarize"] = json!({"error": format!("{e}")});
+                    }
+                }
+
                 // Include status
                 let mut status_json = json!({});
                 for entry in &status {

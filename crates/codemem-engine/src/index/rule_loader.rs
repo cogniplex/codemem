@@ -1,6 +1,7 @@
 //! Compile-time YAML rule embedding and deserialization for per-language extraction rules.
 
 use ast_grep_language::SupportLang;
+use codemem_core::CodememError;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -278,26 +279,25 @@ static LANGUAGE_RULES: &[EmbeddedRules] = &[
 
 /// Load and deserialize all language rules.
 ///
-/// # Panics
-///
-/// Panics if any embedded YAML rule file fails to deserialize. This is intentional:
-/// these files are compiled into the binary, so a parse failure indicates a build-time
-/// error that must be fixed before shipping.
-pub fn load_all_rules() -> Vec<LanguageRules> {
+/// Returns an error if any embedded YAML rule file fails to deserialize.
+pub fn load_all_rules() -> Result<Vec<LanguageRules>, CodememError> {
     LANGUAGE_RULES
         .iter()
         .map(|embedded| {
-            let sym_file: SymbolRulesFile = serde_yaml::from_str(embedded.symbols_yaml)
-                .unwrap_or_else(|e| {
-                    panic!("Failed to parse symbols.yml for {}: {}", embedded.name, e)
-                });
+            let sym_file: SymbolRulesFile =
+                serde_yaml::from_str(embedded.symbols_yaml).map_err(|e| {
+                    CodememError::Config(format!(
+                        "Failed to parse symbols.yml for {}: {}",
+                        embedded.name, e
+                    ))
+                })?;
             let ref_file: ReferenceRulesFile = serde_yaml::from_str(embedded.references_yaml)
-                .unwrap_or_else(|e| {
-                    panic!(
+                .map_err(|e| {
+                    CodememError::Config(format!(
                         "Failed to parse references.yml for {}: {}",
                         embedded.name, e
-                    )
-                });
+                    ))
+                })?;
 
             let mut rules = LanguageRules {
                 name: embedded.name,
@@ -318,7 +318,7 @@ pub fn load_all_rules() -> Vec<LanguageRules> {
                 reference_unwrap_set: std::collections::HashSet::new(),
             };
             rules.build_indexes();
-            rules
+            Ok(rules)
         })
         .collect()
 }

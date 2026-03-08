@@ -3,8 +3,8 @@ use super::*;
 // ── VALID_CYCLES constant ─────────────────────────────────────────────────
 
 #[test]
-fn valid_cycles_contains_four_entries() {
-    assert_eq!(VALID_CYCLES.len(), 4);
+fn valid_cycles_contains_five_entries() {
+    assert_eq!(VALID_CYCLES.len(), 5);
 }
 
 #[test]
@@ -27,18 +27,22 @@ fn valid_cycles_contains_forget() {
     assert!(VALID_CYCLES.contains(&"forget"));
 }
 
+#[test]
+fn valid_cycles_contains_summarize() {
+    assert!(VALID_CYCLES.contains(&"summarize"));
+}
+
 // ── is_valid_cycle tests ──────────────────────────────────────────────────
 
 #[test]
 fn is_valid_cycle_accepts_known_cycles() {
-    for name in &["decay", "creative", "cluster", "forget"] {
+    for name in &["decay", "creative", "cluster", "forget", "summarize"] {
         assert!(is_valid_cycle(name), "{name} should be valid");
     }
 }
 
 #[test]
 fn is_valid_cycle_rejects_unknown() {
-    assert!(!is_valid_cycle("summarize"));
     assert!(!is_valid_cycle("rem"));
     assert!(!is_valid_cycle(""));
     assert!(!is_valid_cycle("DECAY"));

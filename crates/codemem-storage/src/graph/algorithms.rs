@@ -100,6 +100,7 @@ impl GraphEngine {
     /// Nodes not in seed_weights get zero teleport probability.
     ///
     /// Used for blast-radius analysis and HippoRAG-2-style retrieval.
+    #[cfg(test)]
     pub fn personalized_pagerank(
         &self,
         seed_weights: &HashMap<String, f64>,
@@ -439,6 +440,7 @@ impl GraphEngine {
     ///
     /// Returns groups of node IDs. Each group is a strongly connected component
     /// where every node can reach every other node via directed edges.
+    #[cfg(test)]
     pub fn strongly_connected_components(&self) -> Vec<Vec<String>> {
         let sccs = petgraph::algo::tarjan_scc(&self.graph);
 
