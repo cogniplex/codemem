@@ -79,6 +79,8 @@ Each symbol and file becomes a graph node with kind-specific attributes:
 - `pkg:src/` (kind: Package)
 - `chunk:src/main.rs:10-25` (kind: Chunk)
 
+Nodes are persisted via multi-row INSERT batching (respecting SQLite's 999-parameter limit).
+
 ### 2b. Graph Edges
 
 Resolved references become weighted edges. Edge weights are computed by `edge_weight_for()` based on relationship type:
@@ -88,13 +90,15 @@ Resolved references become weighted edges. Edge weights are computed by `edge_we
 - DEPENDS_ON: 0.5
 - etc.
 
+Edges are also batched via multi-row INSERT.
+
 ### 2c. Embeddings
 
 Symbols and chunks are embedded using the configured provider (Candle/Ollama/OpenAI). Text is contextually enriched before embedding:
 - Symbol: qualified name + kind + file path + doc comment excerpt
 - Chunk: file path + parent symbol + content
 
-Embeddings are batched (chunks of 64) and inserted into both the HNSW vector index and SQLite storage.
+Embeddings are batched (chunks of 64) and inserted into both the HNSW vector index (via batch insert) and SQLite storage (via multi-row INSERT). The embedding mutex is acquired per-batch rather than for the full pipeline to reduce lock contention.
 
 ### 2d. Compaction
 

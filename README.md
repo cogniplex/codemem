@@ -213,7 +213,7 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 git clone https://github.com/cogniplex/codemem.git
 cd codemem
 cargo build --release          # Optimized binary at target/release/codemem
-cargo test --workspace         # Run all 755 tests
+cargo test --workspace         # Run all tests
 cargo bench                    # Criterion benchmarks
 ```
 

@@ -63,12 +63,12 @@ The team lead has all 32 codemem tools + team orchestration. Specialized agents 
 - **Cross-session patterns**: Detects repeated searches, file hotspots, decision chains, tool preferences across sessions
 - **Diff-aware memory**: Computes semantic diff summaries (function additions/removals, import changes, type definitions)
 - **File watching**: Real-time notify-based watcher (<50ms debounce) with auto-indexing
-- **Session continuity**: Session tracking with start/end/list, auto-started by lifecycle hooks
+- **Session continuity**: Session tracking with start/end/list, auto-started by lifecycle hooks. `session_id` field on `MemoryNode` auto-populated from `CodememEngine::active_session_id`. `memory_count` computed via correlated subquery. MCP activity recording for all tools. Checkpoint persistence with rich metadata (session_id, memory_count, action counts, patterns, hot directories)
 - **Consolidation**: 5 cycles — Decay (power-law, daily), Creative/REM (vector KNN O(n log n), weekly), Cluster (semantic cosine + union-find, monthly), Summarize (LLM-powered, on-demand), Forget (optional)
 - **Self-editing memory**: refine_memory (EVOLVED_INTO provenance), split_memory (PART_OF edges), merge_memories (SUMMARIZES edges) — all with full store pipeline and temporal edge tracking
 - **Temporal edges**: Edges have `valid_from`/`valid_to` fields for tracking when relationships are active
 - **Pattern confidence**: Log-scaled confidence based on `ln(frequency)/ln(total_sessions)` instead of linear `count/N`
-- **Storage**: Single database at ~/.codemem/codemem.db + ~/.codemem/codemem.idx, namespace-scoped queries
+- **Storage**: Single database at ~/.codemem/codemem.db + ~/.codemem/codemem.idx, namespace-scoped queries. Multi-row INSERT batching (SQLite 999-param limit aware), transaction wrapping (`begin/commit/rollback_transaction` on StorageBackend with `AtomicBool` guard), batch cascade deletes for consolidation
 - **13 node kinds**: File, Package, Function, Method, Class, Interface, Type, Constant, Module, Memory, Endpoint, Test, Chunk
 - **Graph compaction**: Two-pass pruning after indexing — chunks scored by centrality + structural parent + memory link + content density, symbols scored by call connectivity + visibility + kind + memory link + code size. Cold-start-aware: when no memories exist, memory_link weight is redistributed to other factors. Configurable via `ChunkingConfig`
 - **14 enrichment types**: git history, security, performance, complexity (cyclomatic/cognitive), architecture inference, test mapping, API surface, doc coverage, change impact, code smells, hot+complex correlation, blame/ownership, advanced security scanning, quality stratification. All produce Insight memories tagged `static-analysis`
@@ -92,7 +92,7 @@ candle-core/nn/transformers (ML inference), usearch (HNSW), rusqlite (bundled SQ
 
 ```bash
 cargo build                    # Build all crates
-cargo test --workspace         # Run all tests (755 tests)
+cargo test --workspace         # Run all tests
 cargo bench                    # Run benchmarks
 cargo build --release          # Optimized release binary
 cargo install --path crates/codemem      # Install CLI binary
