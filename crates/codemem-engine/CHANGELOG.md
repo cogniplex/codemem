@@ -1,0 +1,47 @@
+# Changelog
+
+## [0.9.0](https://github.com/cogniplex/codemem/compare/v0.8.0...v0.9.0) (2026-03-08)
+
+
+### Features
+
+* **engine:** respect configured vector dimensions ([9a4d18d](https://github.com/cogniplex/codemem/commit/9a4d18decd256d3549d86cd289bda7c9453043b8))
+* **graph:** tag-based auto-linking and memory-neighbor scoring ([1403797](https://github.com/cogniplex/codemem/commit/1403797ebca46847e617e8d9a2faa9da31565e5a))
+* **recall:** entity expansion surfaces structurally connected memories ([fce2acb](https://github.com/cogniplex/codemem/commit/fce2acb7850c2fd4ab7de44d44ac1f5009cbf6ff))
+* semantic-aware chunking with boundary splitting and signature injection ([f261fef](https://github.com/cogniplex/codemem/commit/f261fefc04d1022773a95c98b48ffa22c2590fee))
+
+
+### Bug Fixes
+
+* auto-create ~/.codemem directory on engine startup ([71154fb](https://github.com/cogniplex/codemem/commit/71154fbe79c8aa308015ea9048898a52480d1b6d))
+* blame enrichment now stores ownership insights for all qualifying files ([93a6571](https://github.com/cogniplex/codemem/commit/93a6571008d116893eef4ce1f9627584ef8284f0))
+* **ci:** use explicit crate versions for release-please compatibility ([cc54698](https://github.com/cogniplex/codemem/commit/cc54698870e3a2d69904859ff032fbd1ccc224a2))
+* use full persist pipeline in store_pattern_memory, remove dead code ([a262533](https://github.com/cogniplex/codemem/commit/a2625331cb876c869cd2b921621c8d38b4c77f81))
+* use relative paths for graph node IDs ([2c9e6a2](https://github.com/cogniplex/codemem/commit/2c9e6a270a79670840547e229f6391ccdd83c4d8))
+
+
+### Performance
+
+* batch graph node/edge inserts and embedding storage in persistence pipeline ([3b518dd](https://github.com/cogniplex/codemem/commit/3b518dda2230af1c668b75d4cc9af083cc057d9c))
+
+
+### Refactoring
+
+* consolidate enrichment dispatch into run_enrichments() ([77b5921](https://github.com/cogniplex/codemem/commit/77b592168f3dacd54fec38f33a3c37437bbed69e))
+* encapsulate CodememEngine fields behind accessor methods ([5d64df7](https://github.com/cogniplex/codemem/commit/5d64df7335bf76aa4d919b673159f9cf6aae52f7))
+* remove dead code, consolidate utilities, wire config to backends ([f22efcc](https://github.com/cogniplex/codemem/commit/f22efcccd63005e08ce5b82e35f14b0a6cc7a984))
+* split enrichment.rs into module directory (15 files) ([c39f6e2](https://github.com/cogniplex/codemem/commit/c39f6e2a0be2779011900a16d1102b61b0a78388))
+* split large test files into focused modules ([faf8ff4](https://github.com/cogniplex/codemem/commit/faf8ff43ee23a93e4db9359961f0fd6593b69cbc))
+* split monolithic engine files into focused modules ([be79b09](https://github.com/cogniplex/codemem/commit/be79b097cf36fa443f7c6dd1961417187422e83a))
+
+
+### Tests
+
+* add 201 new tests across engine, API, CLI, and MCP layers ([b5e26a8](https://github.com/cogniplex/codemem/commit/b5e26a82f12d0135c10141f22e7aeb9b24882d78))
+* add comprehensive test coverage across all crates (~300 tests) ([e758f05](https://github.com/cogniplex/codemem/commit/e758f0585d31ada1b599b5db950e711c02552116))
+* add coverage for relative path normalization ([b6bff33](https://github.com/cogniplex/codemem/commit/b6bff3394ff6e68ef7117f69c765b147a62d4641))
+
+
+### Miscellaneous
+
+* add debug-level timing for embed/sqlite/vector persistence phases ([f46f82a](https://github.com/cogniplex/codemem/commit/f46f82a8bfc6766f7c6702577d92d0a49d6e91ea))

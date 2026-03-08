@@ -1,0 +1,46 @@
+# Changelog
+
+## [0.9.0](https://github.com/cogniplex/codemem/compare/v0.8.0...v0.9.0) (2026-03-08)
+
+
+### Features
+
+* **engine:** respect configured vector dimensions ([9a4d18d](https://github.com/cogniplex/codemem/commit/9a4d18decd256d3549d86cd289bda7c9453043b8))
+* **graph:** tag-based auto-linking and memory-neighbor scoring ([1403797](https://github.com/cogniplex/codemem/commit/1403797ebca46847e617e8d9a2faa9da31565e5a))
+* track per-session metadata in MCP HTTP transport ([95c5f06](https://github.com/cogniplex/codemem/commit/95c5f062ff1c1d90b2cc18494533928d48e95339))
+* **ui:** replace Sigma.js with react-force-graph-2d, overhaul PointCloud ([56ba13a](https://github.com/cogniplex/codemem/commit/56ba13afb044a9ef4a1cd27d4261e00695d3700a))
+* wire up all 14 enrichment types in enrich_codebase tool ([c389e3f](https://github.com/cogniplex/codemem/commit/c389e3f11d16b4e1bf5054be6768ed4157a1f4f4))
+
+
+### Bug Fixes
+
+* **api:** route memory CRUD through engine pipeline ([e21a4a7](https://github.com/cogniplex/codemem/commit/e21a4a7ea94071e6f8795f8da174bbd0aaadb8bc))
+* **ci:** use explicit crate versions for release-please compatibility ([cc54698](https://github.com/cogniplex/codemem/commit/cc54698870e3a2d69904859ff032fbd1ccc224a2))
+* create ~/.codemem directory in serve command before opening DB ([1353b75](https://github.com/cogniplex/codemem/commit/1353b75d00f235ca235888f0336660aefd6eb3a2))
+* implement MCP SSE server-push for GET /mcp endpoint ([85a8c3f](https://github.com/cogniplex/codemem/commit/85a8c3f9bd024ec1504d0502fd6fa53ddd4c33f0))
+* propagate config changes to running engine in API routes ([a1c2f86](https://github.com/cogniplex/codemem/commit/a1c2f8632699a3a95852422b5e35b61a05c1e4f4))
+* use full persist pipeline in store_pattern_memory, remove dead code ([a262533](https://github.com/cogniplex/codemem/commit/a2625331cb876c869cd2b921621c8d38b4c77f81))
+
+
+### Refactoring
+
+* consolidate enrichment dispatch into run_enrichments() ([77b5921](https://github.com/cogniplex/codemem/commit/77b592168f3dacd54fec38f33a3c37437bbed69e))
+* encapsulate CodememEngine fields behind accessor methods ([5d64df7](https://github.com/cogniplex/codemem/commit/5d64df7335bf76aa4d919b673159f9cf6aae52f7))
+* remove dead code, consolidate utilities, wire config to backends ([f22efcc](https://github.com/cogniplex/codemem/commit/f22efcccd63005e08ce5b82e35f14b0a6cc7a984))
+* remove legacy MCP tool aliases and update to canonical names ([f03809d](https://github.com/cogniplex/codemem/commit/f03809dc5b611469282ef6f72941d842d43e5e62))
+* rewrite code-mapper as multi-agent team ([fa09a04](https://github.com/cogniplex/codemem/commit/fa09a04ba2cdb84719d6a8d64627a1c9e04fe9f6))
+* split large test files into focused modules ([faf8ff4](https://github.com/cogniplex/codemem/commit/faf8ff43ee23a93e4db9359961f0fd6593b69cbc))
+* split monolithic engine files into focused modules ([be79b09](https://github.com/cogniplex/codemem/commit/be79b097cf36fa443f7c6dd1961417187422e83a))
+
+
+### Tests
+
+* add 201 new tests across engine, API, CLI, and MCP layers ([b5e26a8](https://github.com/cogniplex/codemem/commit/b5e26a82f12d0135c10141f22e7aeb9b24882d78))
+* add comprehensive test coverage across all crates (~300 tests) ([e758f05](https://github.com/cogniplex/codemem/commit/e758f0585d31ada1b599b5db950e711c02552116))
+* add embedding provider and CLI lifecycle test coverage ([1793bdf](https://github.com/cogniplex/codemem/commit/1793bdf218e21320d763881bab9e1c2eedac33f2))
+* **cli:** expand CLI command test coverage with extracted testable functions ([938ee04](https://github.com/cogniplex/codemem/commit/938ee04c3590a119ec37677c490b3720e3b1e9d1))
+
+
+### Miscellaneous
+
+* fix .gitignore to exclude ui-dist build artifacts ([a78ac22](https://github.com/cogniplex/codemem/commit/a78ac22f09a0e99375eefcca46ac61f70ec97a3c))
