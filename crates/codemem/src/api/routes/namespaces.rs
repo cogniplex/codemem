@@ -1,6 +1,6 @@
 //! Namespace routes.
 
-use crate::api::types::{NamespaceItem, NamespaceStatsResponse};
+use crate::api::types::{MessageResponse, NamespaceItem, NamespaceStatsResponse};
 use crate::api::AppState;
 use axum::{
     extract::{Path, State},
@@ -53,5 +53,20 @@ pub async fn get_namespace_stats(
         namespace: ns,
         memory_count,
         type_distribution,
+    }))
+}
+
+pub async fn delete_namespace(
+    State(state): State<Arc<AppState>>,
+    Path(ns): Path<String>,
+) -> Result<Json<MessageResponse>, StatusCode> {
+    let deleted = state
+        .server
+        .engine
+        .delete_namespace(&ns)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(MessageResponse {
+        message: format!("Deleted {deleted} memories from namespace '{ns}'"),
     }))
 }

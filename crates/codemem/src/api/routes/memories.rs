@@ -11,7 +11,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use codemem_core::{MemoryNode, MemoryType, SearchResult, VectorBackend};
+use codemem_core::{MemoryNode, MemoryType, SearchResult};
 use std::sync::Arc;
 
 pub async fn list_memories(
@@ -83,26 +83,14 @@ pub async fn store_memory(
         last_accessed_at: now,
     };
 
-    let storage = state.server.storage();
-    if let Err(e) = storage.insert_memory(&memory) {
+    // Use the engine's full persist pipeline: storage → BM25 → graph → embedding → vector
+    if let Err(e) = state.server.engine.persist_memory(&memory) {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(MessageResponse {
                 message: e.to_string(),
             }),
         ));
-    }
-
-    // Auto-embed if provider available
-    if let Some(emb_mutex) = state.server.embeddings() {
-        if let Ok(emb) = emb_mutex.lock() {
-            if let Ok(embedding) = emb.embed(&req.content) {
-                let _ = storage.store_embedding(&id, &embedding);
-                if let Ok(mut vec) = state.server.vector().lock() {
-                    let _ = vec.insert(&id, &embedding);
-                }
-            }
-        }
     }
 
     Ok((StatusCode::CREATED, Json(IdResponse { id })))
@@ -137,7 +125,12 @@ pub async fn update_memory(
     }
 
     if let Some(ref content) = req.content {
-        if let Err(e) = storage.update_memory(&id, content, req.importance) {
+        // Use engine's full update pipeline: storage → BM25 → graph → re-embed → vector
+        if let Err(e) = state
+            .server
+            .engine
+            .update_memory(&id, content, req.importance)
+        {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(MessageResponse {
@@ -145,18 +138,15 @@ pub async fn update_memory(
                 }),
             ));
         }
-
-        // Re-embed if content changed
-        if let Some(emb_mutex) = state.server.embeddings() {
-            if let Ok(emb) = emb_mutex.lock() {
-                if let Ok(embedding) = emb.embed(content) {
-                    let _ = storage.store_embedding(&id, &embedding);
-                    if let Ok(mut vec) = state.server.vector().lock() {
-                        let _ = vec.remove(&id);
-                        let _ = vec.insert(&id, &embedding);
-                    }
-                }
-            }
+    } else if let Some(importance) = req.importance {
+        // Only importance changed — route through engine to maintain domain boundary
+        if let Err(e) = state.server.engine.update_importance(&id, importance) {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(MessageResponse {
+                    message: e.to_string(),
+                }),
+            ));
         }
     }
 
@@ -169,17 +159,11 @@ pub async fn delete_memory(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<MessageResponse>, StatusCode> {
-    let storage = state.server.storage();
-    match storage.delete_memory(&id) {
-        Ok(true) => {
-            let _ = storage.delete_embedding(&id);
-            if let Ok(mut vec) = state.server.vector().lock() {
-                let _ = vec.remove(&id);
-            }
-            Ok(Json(MessageResponse {
-                message: "Deleted".to_string(),
-            }))
-        }
+    // Use engine's full delete pipeline: storage (cascade) → vector → graph → BM25
+    match state.server.engine.delete_memory(&id) {
+        Ok(true) => Ok(Json(MessageResponse {
+            message: "Deleted".to_string(),
+        })),
         Ok(false) => Err(StatusCode::NOT_FOUND),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }

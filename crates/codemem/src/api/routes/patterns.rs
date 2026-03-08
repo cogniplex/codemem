@@ -126,25 +126,26 @@ pub async fn run_consolidation(
     State(state): State<Arc<AppState>>,
     Path(cycle): Path<String>,
 ) -> Result<Json<MessageResponse>, (StatusCode, Json<MessageResponse>)> {
-    let tool_name = match cycle.as_str() {
-        "decay" => "consolidate_decay",
-        "creative" => "consolidate_creative",
-        "cluster" => "consolidate_cluster",
-        "forget" => "consolidate_forget",
-        "summarize" => "consolidate_summarize",
-        _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(MessageResponse {
-                    message: format!("Unknown cycle: {cycle}"),
-                }),
-            ))
-        }
-    };
+    let valid_cycles = [
+        "decay",
+        "creative",
+        "cluster",
+        "forget",
+        "summarize",
+        "auto",
+    ];
+    if !valid_cycles.contains(&cycle.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(MessageResponse {
+                message: format!("Unknown cycle: {cycle}"),
+            }),
+        ));
+    }
 
     let params = serde_json::json!({
-        "name": tool_name,
-        "arguments": {},
+        "name": "consolidate",
+        "arguments": {"mode": cycle},
     });
 
     let response = state.server.handle_request(

@@ -14,7 +14,7 @@ mod tests;
 
 use crate::mcp::McpServer;
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use codemem_engine::IndexProgress;
@@ -117,6 +117,10 @@ impl ApiServer {
             .route("/api/vectors", get(routes::vectors::get_vectors))
             // Namespaces
             .route("/api/namespaces", get(routes::namespaces::list_namespaces))
+            .route(
+                "/api/namespaces/{ns}",
+                delete(routes::namespaces::delete_namespace),
+            )
             .route(
                 "/api/namespaces/{ns}/stats",
                 get(routes::namespaces::get_namespace_stats),
