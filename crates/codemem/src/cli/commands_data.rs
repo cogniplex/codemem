@@ -201,8 +201,6 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
 
         // Dedup on raw content hash (before compression) for consistency
         let hash = codemem_engine::hooks::content_hash(&extracted.content);
-        let now = chrono::Utc::now();
-        let id = uuid::Uuid::new_v4().to_string();
 
         // Compress observation via LLM if configured
         let compressor = codemem_engine::compress::CompressProvider::from_env();
@@ -238,22 +236,13 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
             .ok()
             .map(|p| p.to_string_lossy().to_string());
 
-        let memory = codemem_core::MemoryNode {
-            id: id.clone(),
-            content: content.clone(),
-            memory_type: extracted.memory_type,
-            importance: 0.5,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: hash,
-            tags: extracted.tags,
-            metadata: extracted.metadata,
-            namespace: namespace.clone(),
-            session_id: extracted.session_id.clone(),
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = codemem_core::MemoryNode::new(content.clone(), extracted.memory_type);
+        let id = memory.id.clone();
+        memory.content_hash = hash;
+        memory.tags = extracted.tags;
+        memory.metadata = extracted.metadata;
+        memory.namespace = namespace.clone();
+        memory.session_id = extracted.session_id.clone();
 
         // Use engine.persist_memory() for the full pipeline (storage + BM25 + graph + embedding + vector)
         match engine.persist_memory(&memory) {
@@ -290,9 +279,6 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
                             search_pattern.as_deref(),
                         );
                         for insight in &auto_insights {
-                            let insight_hash =
-                                codemem_engine::hooks::content_hash(&insight.content);
-                            let insight_now = chrono::Utc::now();
                             let mut insight_metadata = std::collections::HashMap::new();
                             insight_metadata.insert(
                                 "session_id".to_string(),
@@ -306,22 +292,16 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
                                 "source".to_string(),
                                 serde_json::Value::String("auto_insight".to_string()),
                             );
-                            let insight_memory = codemem_core::MemoryNode {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                content: insight.content.clone(),
-                                memory_type: codemem_core::MemoryType::Insight,
-                                importance: insight.importance,
-                                confidence: 0.8,
-                                access_count: 0,
-                                content_hash: insight_hash,
-                                tags: insight.tags.clone(),
-                                metadata: insight_metadata,
-                                namespace: namespace.clone(),
-                                session_id: payload.session_id.clone(),
-                                created_at: insight_now,
-                                updated_at: insight_now,
-                                last_accessed_at: insight_now,
-                            };
+                            let mut insight_memory = codemem_core::MemoryNode::new(
+                                insight.content.clone(),
+                                codemem_core::MemoryType::Insight,
+                            );
+                            insight_memory.importance = insight.importance;
+                            insight_memory.confidence = 0.8;
+                            insight_memory.tags = insight.tags.clone();
+                            insight_memory.metadata = insight_metadata;
+                            insight_memory.namespace = namespace.clone();
+                            insight_memory.session_id = payload.session_id.clone();
                             match engine.persist_memory(&insight_memory) {
                                 Ok(()) => {
                                     tracing::info!("Auto-insight stored: {}", insight.dedup_tag);
@@ -553,7 +533,6 @@ fn flush_batch(
         return 0;
     }
 
-    let now = chrono::Utc::now();
     let id = uuid::Uuid::new_v4().to_string();
 
     // Count by event type (created/deleted already computed above for threshold check)
@@ -712,24 +691,12 @@ fn flush_batch(
     // Importance scales with batch size: more files = more significant change
     let importance = batch_importance(batch.len());
 
-    let hash = codemem_storage::Storage::content_hash(&content);
-
-    let memory = codemem_core::MemoryNode {
-        id: id.clone(),
-        content,
-        memory_type: codemem_core::MemoryType::Context,
-        importance,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: hash,
-        tags,
-        metadata,
-        namespace: Some(watch_dir.to_string_lossy().to_string()),
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::new(content, codemem_core::MemoryType::Context);
+    memory.id = id.clone();
+    memory.importance = importance;
+    memory.tags = tags;
+    memory.metadata = metadata;
+    memory.namespace = Some(watch_dir.to_string_lossy().to_string());
 
     match engine.persist_memory(&memory) {
         Ok(()) => {

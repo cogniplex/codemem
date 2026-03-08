@@ -1,30 +1,14 @@
-use codemem_core::{MemoryNode, MemoryType};
+use codemem_core::MemoryNode;
 use codemem_storage::Storage;
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::collections::HashMap;
 
 /// Create a test memory with a unique content hash derived from the index.
 fn make_memory(i: usize) -> MemoryNode {
-    let now = chrono::Utc::now();
-    let content = format!(
+    let mut m = MemoryNode::test_default(&format!(
         "Benchmark memory entry number {i}: testing storage CRUD performance with varied content"
-    );
-    MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: content.clone(),
-        memory_type: MemoryType::Context,
-        importance: 0.5,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: Storage::content_hash(&content),
-        tags: vec!["bench".to_string(), format!("group-{}", i % 10)],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    ));
+    m.tags = vec!["bench".to_string(), format!("group-{}", i % 10)];
+    m
 }
 
 /// Benchmark inserting memories into an in-memory SQLite database.

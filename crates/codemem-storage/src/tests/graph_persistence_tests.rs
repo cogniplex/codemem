@@ -3,24 +3,10 @@ use codemem_core::{GraphNode, MemoryNode, MemoryType, NodeKind};
 use std::collections::HashMap;
 
 fn test_memory() -> MemoryNode {
-    let now = chrono::Utc::now();
-    let content = "Test memory content";
-    MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.7,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: Storage::content_hash(content),
-        tags: vec!["test".to_string()],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::new("Test memory content", MemoryType::Context);
+    m.importance = 0.7;
+    m.tags = vec!["test".to_string()];
+    m
 }
 
 #[test]

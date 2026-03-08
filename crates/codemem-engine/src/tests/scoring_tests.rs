@@ -77,22 +77,13 @@ fn all_nine_scoring_components_nonzero() {
     bm25.add_document(memory_id, content);
 
     // Create MemoryNode with all fields set for non-zero scoring
-    let memory = MemoryNode {
-        id: memory_id.to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Decision,
-        importance: 0.8,
-        confidence: 0.9,
-        access_count: 1,
-        content_hash: "hash".to_string(),
-        tags: vec!["process".to_string(), "request".to_string()],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = MemoryNode::test_default(content);
+    memory.id = memory_id.to_string();
+    memory.memory_type = MemoryType::Decision;
+    memory.importance = 0.8;
+    memory.confidence = 0.9;
+    memory.access_count = 1;
+    memory.tags = vec!["process".to_string(), "request".to_string()];
 
     let query_tokens = vec!["process", "request"];
     let breakdown = compute_score(&memory, &query_tokens, 0.75, &graph, &bm25, now);

@@ -386,38 +386,25 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
     // Store prompt as a Context memory via the full persist pipeline
     // (BM25 + graph node + embedding + auto-linking)
     let content = format!("User prompt: {}", crate::truncate_str(prompt, 2000));
-    let content_hash = codemem_engine::hooks::content_hash(&content);
 
-    let now = chrono::Utc::now();
-    let memory = codemem_core::MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content,
-        memory_type: codemem_core::MemoryType::Context,
-        importance: 0.3,
-        confidence: 1.0,
-        tags: vec!["prompt".to_string()],
-        metadata: {
-            let mut m = std::collections::HashMap::new();
+    let mut memory = codemem_core::MemoryNode::new(content, codemem_core::MemoryType::Context);
+    memory.importance = 0.3;
+    memory.tags = vec!["prompt".to_string()];
+    memory.metadata = {
+        let mut m = std::collections::HashMap::new();
+        m.insert(
+            "source".to_string(),
+            serde_json::Value::String("UserPromptSubmit".to_string()),
+        );
+        if let Some(sid) = session_id {
             m.insert(
-                "source".to_string(),
-                serde_json::Value::String("UserPromptSubmit".to_string()),
+                "session_id".to_string(),
+                serde_json::Value::String(sid.to_string()),
             );
-            if let Some(sid) = session_id {
-                m.insert(
-                    "session_id".to_string(),
-                    serde_json::Value::String(sid.to_string()),
-                );
-            }
-            m
-        },
-        namespace: cwd.map(|s| s.to_string()),
-        session_id: None,
-        content_hash,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-        access_count: 0,
+        }
+        m
     };
+    memory.namespace = cwd.map(|s| s.to_string());
 
     // Use the engine's persist_memory pipeline for consistent indexing
     match codemem_engine::CodememEngine::from_db_path(&db_path) {
@@ -546,43 +533,33 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
     let mut persist_errors: Vec<String> = Vec::new();
 
     if has_substance && !session_memories.is_empty() {
-        let content_hash = codemem_engine::hooks::content_hash(&summary_text);
-        let now = chrono::Utc::now();
-        let summary_memory = codemem_core::MemoryNode {
-            id: uuid::Uuid::new_v4().to_string(),
-            content: format!("Session summary: {}", summary_text),
-            memory_type: codemem_core::MemoryType::Insight,
-            importance: 0.7,
-            confidence: 1.0,
-            tags: vec!["session-summary".to_string()],
-            metadata: {
-                let mut m = std::collections::HashMap::new();
-                m.insert(
-                    "session_id".to_string(),
-                    serde_json::Value::String(session_id.to_string()),
-                );
-                m.insert(
-                    "files_read".to_string(),
-                    serde_json::json!(files_read.len()),
-                );
-                m.insert(
-                    "files_edited".to_string(),
-                    serde_json::json!(files_edited.len()),
-                );
-                m.insert(
-                    "total_memories".to_string(),
-                    serde_json::json!(session_memories.len()),
-                );
-                m
-            },
-            namespace: namespace.map(|s| s.to_string()),
-            session_id: None,
-            content_hash,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-            access_count: 0,
+        let mut summary_memory = codemem_core::MemoryNode::new(
+            format!("Session summary: {}", summary_text),
+            codemem_core::MemoryType::Insight,
+        );
+        summary_memory.importance = 0.7;
+        summary_memory.tags = vec!["session-summary".to_string()];
+        summary_memory.metadata = {
+            let mut m = std::collections::HashMap::new();
+            m.insert(
+                "session_id".to_string(),
+                serde_json::Value::String(session_id.to_string()),
+            );
+            m.insert(
+                "files_read".to_string(),
+                serde_json::json!(files_read.len()),
+            );
+            m.insert(
+                "files_edited".to_string(),
+                serde_json::json!(files_edited.len()),
+            );
+            m.insert(
+                "total_memories".to_string(),
+                serde_json::json!(session_memories.len()),
+            );
+            m
         };
+        summary_memory.namespace = namespace.map(|s| s.to_string());
         // Use the engine's persist_memory pipeline for consistent indexing
         let result = match &engine {
             Some(eng) => eng.persist_memory(&summary_memory),
@@ -600,33 +577,21 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
             session_id,
             files_edited.join(", ")
         );
-        let change_hash = codemem_engine::hooks::content_hash(&change_content);
-        let now = chrono::Utc::now();
-        let change_memory = codemem_core::MemoryNode {
-            id: uuid::Uuid::new_v4().to_string(),
-            content: change_content,
-            memory_type: codemem_core::MemoryType::Context,
-            importance: 0.4,
-            confidence: 1.0,
-            tags: vec!["pending-analysis".to_string(), "file-changes".to_string()],
-            metadata: {
-                let mut m = std::collections::HashMap::new();
-                m.insert("session_id".into(), serde_json::json!(session_id));
-                m.insert("files".into(), serde_json::json!(files_edited));
-                m.insert(
-                    "timestamp".into(),
-                    serde_json::json!(chrono::Utc::now().to_rfc3339()),
-                );
-                m
-            },
-            namespace: namespace.map(|s| s.to_string()),
-            session_id: None,
-            content_hash: change_hash,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-            access_count: 0,
+        let mut change_memory =
+            codemem_core::MemoryNode::new(change_content, codemem_core::MemoryType::Context);
+        change_memory.importance = 0.4;
+        change_memory.tags = vec!["pending-analysis".to_string(), "file-changes".to_string()];
+        change_memory.metadata = {
+            let mut m = std::collections::HashMap::new();
+            m.insert("session_id".into(), serde_json::json!(session_id));
+            m.insert("files".into(), serde_json::json!(files_edited));
+            m.insert(
+                "timestamp".into(),
+                serde_json::json!(chrono::Utc::now().to_rfc3339()),
+            );
+            m
         };
+        change_memory.namespace = namespace.map(|s| s.to_string());
         // Use the engine's persist_memory pipeline for consistent indexing
         let result = match &engine {
             Some(eng) => eng.persist_memory(&change_memory),

@@ -1,11 +1,9 @@
 use super::*;
 use codemem_core::MemoryNode;
-use codemem_core::MemoryType;
 use codemem_storage::Storage;
 use std::collections::HashMap;
 
 fn make_memory(content: &str, tool: &str, extra_metadata: Vec<(&str, &str)>) -> MemoryNode {
-    let now = chrono::Utc::now();
     let mut metadata = HashMap::new();
     metadata.insert(
         "tool".to_string(),
@@ -14,22 +12,9 @@ fn make_memory(content: &str, tool: &str, extra_metadata: Vec<(&str, &str)>) -> 
     for (k, v) in extra_metadata {
         metadata.insert(k.to_string(), serde_json::Value::String(v.to_string()));
     }
-    MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.5,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: codemem_storage::Storage::content_hash(content),
-        tags: vec![],
-        metadata,
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::test_default(content);
+    m.metadata = metadata;
+    m
 }
 
 #[test]

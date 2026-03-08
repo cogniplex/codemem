@@ -749,23 +749,12 @@ fn persist_cleans_stale_chunks_on_reindex() {
 // ── Memory ops provenance: refine_memory ────────────────────────────
 
 fn make_test_memory(id: &str, content: &str) -> codemem_core::MemoryNode {
-    let now = chrono::Utc::now();
-    codemem_core::MemoryNode {
-        id: id.to_string(),
-        content: content.to_string(),
-        memory_type: codemem_core::MemoryType::Insight,
-        importance: 0.5,
-        confidence: 0.8,
-        access_count: 0,
-        content_hash: codemem_storage::Storage::content_hash(content),
-        tags: vec!["test".to_string()],
-        metadata: std::collections::HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = codemem_core::MemoryNode::test_default(content);
+    m.id = id.to_string();
+    m.memory_type = codemem_core::MemoryType::Insight;
+    m.confidence = 0.8;
+    m.tags = vec!["test".to_string()];
+    m
 }
 
 #[test]

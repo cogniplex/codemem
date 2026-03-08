@@ -1,8 +1,57 @@
 //! Memory CRUD operations on Storage.
 
-use crate::{MemoryRow, Storage};
+use crate::{MapStorageErr, MemoryRow, Storage};
 use codemem_core::{CodememError, MemoryNode, Repository};
 use rusqlite::{params, OptionalExtension};
+
+/// Shared dedup-check + INSERT logic used by both transactional and
+/// non-transactional insert paths.  Accepts `&rusqlite::Connection` because
+/// both `Connection` and `Transaction` deref to it.
+fn insert_memory_inner(
+    conn: &rusqlite::Connection,
+    memory: &MemoryNode,
+) -> Result<(), CodememError> {
+    // Check dedup (namespace-scoped)
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM memories WHERE content_hash = ?1 AND namespace IS ?2",
+            params![memory.content_hash, memory.namespace],
+            |row| row.get(0),
+        )
+        .optional()
+        .storage_err()?;
+
+    if existing.is_some() {
+        return Err(CodememError::Duplicate(memory.content_hash.clone()));
+    }
+
+    let tags_json = serde_json::to_string(&memory.tags)?;
+    let metadata_json = serde_json::to_string(&memory.metadata)?;
+
+    conn.execute(
+        "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        params![
+            memory.id,
+            memory.content,
+            memory.memory_type.to_string(),
+            memory.importance,
+            memory.confidence,
+            memory.access_count,
+            memory.content_hash,
+            tags_json,
+            metadata_json,
+            memory.namespace,
+            memory.session_id,
+            memory.created_at.timestamp(),
+            memory.updated_at.timestamp(),
+            memory.last_accessed_at.timestamp(),
+        ],
+    )
+    .storage_err()?;
+
+    Ok(())
+}
 
 impl Storage {
     /// Insert a new memory. Returns Err(Duplicate) if content hash already exists.
@@ -26,51 +75,13 @@ impl Storage {
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
-        // Check dedup inside the transaction (namespace-scoped)
-        let existing: Option<String> = tx
-            .query_row(
-                "SELECT id FROM memories WHERE content_hash = ?1 AND namespace IS ?2",
-                params![memory.content_hash, memory.namespace],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        // Dedup check + INSERT inside the transaction; on Duplicate error the
+        // transaction is rolled back automatically when `tx` is dropped.
+        insert_memory_inner(&tx, memory)?;
 
-        if existing.is_some() {
-            tx.rollback()
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
-            return Err(CodememError::Duplicate(memory.content_hash.clone()));
-        }
-
-        let tags_json = serde_json::to_string(&memory.tags)?;
-        let metadata_json = serde_json::to_string(&memory.metadata)?;
-
-        tx.execute(
-            "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            params![
-                memory.id,
-                memory.content,
-                memory.memory_type.to_string(),
-                memory.importance,
-                memory.confidence,
-                memory.access_count,
-                memory.content_hash,
-                tags_json,
-                metadata_json,
-                memory.namespace,
-                memory.session_id,
-                memory.created_at.timestamp(),
-                memory.updated_at.timestamp(),
-                memory.last_accessed_at.timestamp(),
-            ],
-        )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
-
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
 
         Ok(())
     }
@@ -79,47 +90,7 @@ impl Storage {
     /// Used when an outer transaction is already active.
     fn insert_memory_no_tx(&self, memory: &MemoryNode) -> Result<(), CodememError> {
         let conn = self.conn()?;
-
-        // Check dedup (namespace-scoped) — outer transaction provides atomicity
-        let existing: Option<String> = conn
-            .query_row(
-                "SELECT id FROM memories WHERE content_hash = ?1 AND namespace IS ?2",
-                params![memory.content_hash, memory.namespace],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
-
-        if existing.is_some() {
-            return Err(CodememError::Duplicate(memory.content_hash.clone()));
-        }
-
-        let tags_json = serde_json::to_string(&memory.tags)?;
-        let metadata_json = serde_json::to_string(&memory.metadata)?;
-
-        conn.execute(
-            "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            params![
-                memory.id,
-                memory.content,
-                memory.memory_type.to_string(),
-                memory.importance,
-                memory.confidence,
-                memory.access_count,
-                memory.content_hash,
-                tags_json,
-                metadata_json,
-                memory.namespace,
-                memory.session_id,
-                memory.created_at.timestamp(),
-                memory.updated_at.timestamp(),
-                memory.last_accessed_at.timestamp(),
-            ],
-        )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
-
-        Ok(())
+        insert_memory_inner(&conn, memory)
     }
 
     /// Get a memory by ID. Updates access_count and last_accessed_at.
@@ -132,7 +103,7 @@ impl Storage {
                 "UPDATE memories SET access_count = access_count + 1, last_accessed_at = ?1 WHERE id = ?2",
                 params![chrono::Utc::now().timestamp(), id],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         if updated == 0 {
             return Ok(None);
@@ -145,7 +116,7 @@ impl Storage {
                 MemoryRow::from_row,
             )
             .optional()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         match result {
             Some(row) => Ok(Some(row.into_memory_node()?)),
@@ -165,7 +136,7 @@ impl Storage {
                 MemoryRow::from_row,
             )
             .optional()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         match result {
             Some(row) => Ok(Some(row.into_memory_node()?)),
@@ -189,13 +160,13 @@ impl Storage {
                 "UPDATE memories SET content = ?1, content_hash = ?2, updated_at = ?3, importance = ?4 WHERE id = ?5",
                 params![content, hash, now, imp, id],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         } else {
             conn.execute(
                 "UPDATE memories SET content = ?1, content_hash = ?2, updated_at = ?3 WHERE id = ?4",
                 params![content, hash, now, id],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         };
 
         if rows_affected == 0 {
@@ -210,7 +181,7 @@ impl Storage {
         let conn = self.conn()?;
         let rows = conn
             .execute("DELETE FROM memories WHERE id = ?1", params![id])
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(rows > 0)
     }
 
@@ -222,7 +193,7 @@ impl Storage {
         // avoiding potential deadlock with DEFERRED transaction.
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         // Delete edges that reference graph nodes linked to this memory
         tx.execute(
@@ -230,26 +201,25 @@ impl Storage {
              OR dst IN (SELECT id FROM graph_nodes WHERE memory_id = ?1)",
             params![id],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
 
         // Delete graph nodes linked to this memory
         tx.execute("DELETE FROM graph_nodes WHERE memory_id = ?1", params![id])
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         // Delete embedding
         tx.execute(
             "DELETE FROM memory_embeddings WHERE memory_id = ?1",
             params![id],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
 
         // Delete the memory itself
         let rows = tx
             .execute("DELETE FROM memories WHERE id = ?1", params![id])
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
 
         Ok(rows > 0)
     }
@@ -264,7 +234,7 @@ impl Storage {
         let mut conn = self.conn()?;
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let placeholders: String = (1..=ids.len())
             .map(|i| format!("?{i}"))
@@ -283,29 +253,23 @@ impl Storage {
              OR dst IN (SELECT id FROM graph_nodes WHERE memory_id IN ({placeholders})) \
              OR src IN ({placeholders}) OR dst IN ({placeholders})"
         );
-        tx.execute(&edge_sql, params.as_slice())
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.execute(&edge_sql, params.as_slice()).storage_err()?;
 
         // Delete graph nodes linked to these memories (by memory_id column or by id)
         let node_sql = format!(
             "DELETE FROM graph_nodes WHERE memory_id IN ({placeholders}) OR id IN ({placeholders})"
         );
-        tx.execute(&node_sql, params.as_slice())
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.execute(&node_sql, params.as_slice()).storage_err()?;
 
         // Delete embeddings
         let emb_sql = format!("DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})");
-        tx.execute(&emb_sql, params.as_slice())
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.execute(&emb_sql, params.as_slice()).storage_err()?;
 
         // Delete the memories themselves
         let mem_sql = format!("DELETE FROM memories WHERE id IN ({placeholders})");
-        let deleted = tx
-            .execute(&mem_sql, params.as_slice())
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let deleted = tx.execute(&mem_sql, params.as_slice()).storage_err()?;
 
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
 
         Ok(deleted)
     }
@@ -331,18 +295,16 @@ impl Storage {
                 ("SELECT id FROM memories ORDER BY created_at DESC", vec![])
             };
 
-        let mut stmt = conn
-            .prepare(sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(sql).storage_err()?;
 
         let refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
 
         let ids = stmt
             .query_map(refs.as_slice(), |row| row.get(0))
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<String>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(ids)
     }
@@ -355,13 +317,13 @@ impl Storage {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id FROM memories WHERE namespace = ?1 ORDER BY created_at DESC")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let ids = stmt
             .query_map(params![namespace], |row| row.get(0))
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<String>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(ids)
     }
@@ -377,13 +339,13 @@ impl Storage {
                     SELECT namespace FROM graph_nodes WHERE namespace IS NOT NULL
                 ) ORDER BY namespace",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let namespaces = stmt
             .query_map([], |row| row.get(0))
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<String>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(namespaces)
     }
@@ -393,7 +355,7 @@ impl Storage {
         let conn = self.conn()?;
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(count as usize)
     }
 
@@ -406,7 +368,7 @@ impl Storage {
             .prepare(
                 "SELECT id, path, name, namespace, created_at, last_indexed_at, status FROM repositories ORDER BY created_at DESC",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let repos = stmt
             .query_map([], |row| {
@@ -423,9 +385,9 @@ impl Storage {
                         .unwrap_or_else(|| "idle".to_string()),
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let mut result = Vec::new();
         for (id, path, name, namespace, created_at, last_indexed_at, status) in repos {
@@ -458,7 +420,7 @@ impl Storage {
                 repo.status,
             ],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
         Ok(())
     }
 
@@ -467,7 +429,7 @@ impl Storage {
         let conn = self.conn()?;
         let rows = conn
             .execute("DELETE FROM repositories WHERE id = ?1", params![id])
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(rows > 0)
     }
 
@@ -491,7 +453,7 @@ impl Storage {
                 },
             )
             .optional()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         match result {
             Some((id, path, name, namespace, created_at, last_indexed_at, status)) => {
@@ -522,13 +484,13 @@ impl Storage {
                 "UPDATE repositories SET status = ?1, last_indexed_at = ?2 WHERE id = ?3",
                 params![status, ts, id],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         } else {
             conn.execute(
                 "UPDATE repositories SET status = ?1 WHERE id = ?2",
                 params![status, id],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         }
         Ok(())
     }

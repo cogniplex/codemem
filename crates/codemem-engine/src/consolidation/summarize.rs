@@ -90,26 +90,10 @@ impl CodememEngine {
             all_tags.sort();
             all_tags.dedup();
 
-            let now = chrono::Utc::now();
-            let new_id = uuid::Uuid::new_v4().to_string();
-            let hash = codemem_storage::Storage::content_hash(&summary);
-
-            let mem = MemoryNode {
-                id: new_id.clone(),
-                content: summary,
-                memory_type: MemoryType::Insight,
-                importance: 0.7,
-                confidence: 1.0,
-                access_count: 0,
-                content_hash: hash,
-                tags: all_tags,
-                metadata: HashMap::new(),
-                namespace: None,
-                session_id: None,
-                created_at: now,
-                updated_at: now,
-                last_accessed_at: now,
-            };
+            let mut mem = MemoryNode::new(summary, MemoryType::Insight);
+            let new_id = mem.id.clone();
+            mem.importance = 0.7;
+            mem.tags = all_tags;
 
             // M4: Use persist_memory_no_save to skip per-memory index save,
             // then call save_index() once after the entire loop.
@@ -118,6 +102,7 @@ impl CodememEngine {
                 continue;
             }
 
+            let now = chrono::Utc::now();
             if let Ok(mut graph) = self.lock_graph() {
                 for sid in &source_ids {
                     let edge = Edge {

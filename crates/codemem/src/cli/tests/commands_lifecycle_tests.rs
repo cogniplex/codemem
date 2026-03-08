@@ -171,7 +171,6 @@ fn context_with_sessions_and_memories() {
         .unwrap();
 
     // Create Decision and Insight memories that cmd_context looks for
-    let now = chrono::Utc::now();
     for (i, mtype) in [
         codemem_core::MemoryType::Decision,
         codemem_core::MemoryType::Insight,
@@ -181,22 +180,14 @@ fn context_with_sessions_and_memories() {
     .iter()
     .enumerate()
     {
-        let memory = codemem_core::MemoryNode {
-            id: format!("ctx-mem-{i}"),
-            content: format!("memory {i} of type {mtype}"),
-            memory_type: *mtype,
-            importance: 0.7,
-            confidence: 0.9,
-            access_count: 0,
-            content_hash: format!("hash-{i}"),
-            tags: vec!["test".to_string()],
-            metadata: std::collections::HashMap::new(),
-            namespace: Some("myproject".to_string()),
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory =
+            codemem_core::MemoryNode::test_default(&format!("memory {i} of type {mtype}"));
+        memory.id = format!("ctx-mem-{i}");
+        memory.memory_type = *mtype;
+        memory.importance = 0.7;
+        memory.confidence = 0.9;
+        memory.tags = vec!["test".to_string()];
+        memory.namespace = Some("myproject".to_string());
         storage.insert_memory(&memory).unwrap();
     }
 
@@ -232,30 +223,17 @@ fn context_with_sessions_and_memories() {
 fn context_pending_analysis_detection() {
     let storage = codemem_storage::Storage::open_in_memory().unwrap();
 
-    let now = chrono::Utc::now();
-    let memory = codemem_core::MemoryNode {
-        id: "pending-1".to_string(),
-        content: "Files modified in session abc: src/main.rs, src/lib.rs".to_string(),
-        memory_type: codemem_core::MemoryType::Context,
-        importance: 0.4,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: "hash-pending".to_string(),
-        tags: vec!["pending-analysis".to_string(), "file-changes".to_string()],
-        metadata: {
-            let mut m = std::collections::HashMap::new();
-            m.insert(
-                "files".to_string(),
-                serde_json::json!(["src/main.rs", "src/lib.rs"]),
-            );
-            m
-        },
-        namespace: Some("myproject".to_string()),
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::test_default(
+        "Files modified in session abc: src/main.rs, src/lib.rs",
+    );
+    memory.id = "pending-1".to_string();
+    memory.importance = 0.4;
+    memory.tags = vec!["pending-analysis".to_string(), "file-changes".to_string()];
+    memory.metadata.insert(
+        "files".to_string(),
+        serde_json::json!(["src/main.rs", "src/lib.rs"]),
+    );
+    memory.namespace = Some("myproject".to_string());
     storage.insert_memory(&memory).unwrap();
 
     // Verify the pending analysis extraction logic
@@ -284,28 +262,15 @@ fn context_pending_analysis_detection() {
 // ── categorize_memories ─────────────────────────────────────────────
 
 fn make_tool_memory(id: &str, tool: &str, file_path: &str) -> codemem_core::MemoryNode {
-    let now = chrono::Utc::now();
-    let mut metadata = std::collections::HashMap::new();
-    metadata.insert("tool".into(), serde_json::json!(tool));
+    let mut m = codemem_core::MemoryNode::test_default(&format!("{tool} {file_path}"));
+    m.id = id.into();
+    m.importance = 0.3;
+    m.metadata.insert("tool".into(), serde_json::json!(tool));
     if !file_path.is_empty() {
-        metadata.insert("file_path".into(), serde_json::json!(file_path));
+        m.metadata
+            .insert("file_path".into(), serde_json::json!(file_path));
     }
-    codemem_core::MemoryNode {
-        id: id.into(),
-        content: format!("{tool} {file_path}"),
-        memory_type: codemem_core::MemoryType::Context,
-        importance: 0.3,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: format!("h-{id}"),
-        tags: vec![],
-        metadata,
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    m
 }
 
 #[test]
@@ -347,48 +312,24 @@ fn categorize_memories_glob_tool() {
 
 #[test]
 fn categorize_memories_decisions() {
-    let now = chrono::Utc::now();
-    let memory = codemem_core::MemoryNode {
-        id: "d1".into(),
-        content: "Decided to use Postgres".into(),
-        memory_type: codemem_core::MemoryType::Decision,
-        importance: 0.8,
-        confidence: 0.9,
-        access_count: 0,
-        content_hash: "hd".into(),
-        tags: vec![],
-        metadata: std::collections::HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::test_default("Decided to use Postgres");
+    memory.id = "d1".into();
+    memory.memory_type = codemem_core::MemoryType::Decision;
+    memory.importance = 0.8;
+    memory.confidence = 0.9;
     let cat = categorize_memories(&[memory]);
     assert_eq!(cat.decisions, vec!["Decided to use Postgres"]);
 }
 
 #[test]
 fn categorize_memories_prompts() {
-    let now = chrono::Utc::now();
-    let mut metadata = std::collections::HashMap::new();
-    metadata.insert("source".into(), serde_json::json!("UserPromptSubmit"));
-    let memory = codemem_core::MemoryNode {
-        id: "p1".into(),
-        content: "User prompt: fix the auth bug".into(),
-        memory_type: codemem_core::MemoryType::Context,
-        importance: 0.3,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: "hp".into(),
-        tags: vec!["prompt".to_string()],
-        metadata,
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::test_default("User prompt: fix the auth bug");
+    memory.id = "p1".into();
+    memory.importance = 0.3;
+    memory.tags = vec!["prompt".to_string()];
+    memory
+        .metadata
+        .insert("source".into(), serde_json::json!("UserPromptSubmit"));
     let cat = categorize_memories(&[memory]);
     assert_eq!(cat.prompts, vec!["fix the auth bug"]);
 }
@@ -417,25 +358,16 @@ fn categorize_memories_empty_file_path_skipped() {
 fn categorize_memories_decision_and_prompt_overlap() {
     // A memory that is both Decision type AND has source=UserPromptSubmit
     // should appear in both decisions and prompts.
-    let now = chrono::Utc::now();
-    let mut metadata = std::collections::HashMap::new();
-    metadata.insert("source".into(), serde_json::json!("UserPromptSubmit"));
-    let memory = codemem_core::MemoryNode {
-        id: "overlap".into(),
-        content: "User prompt: decided to use Postgres for persistence".into(),
-        memory_type: codemem_core::MemoryType::Decision,
-        importance: 0.8,
-        confidence: 0.9,
-        access_count: 0,
-        content_hash: "ho".into(),
-        tags: vec![],
-        metadata,
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::test_default(
+        "User prompt: decided to use Postgres for persistence",
+    );
+    memory.id = "overlap".into();
+    memory.memory_type = codemem_core::MemoryType::Decision;
+    memory.importance = 0.8;
+    memory.confidence = 0.9;
+    memory
+        .metadata
+        .insert("source".into(), serde_json::json!("UserPromptSubmit"));
     let cat = categorize_memories(&[memory]);
     assert_eq!(cat.prompts.len(), 1, "should appear as a prompt");
     assert_eq!(cat.decisions.len(), 1, "should also appear as a decision");
@@ -445,26 +377,13 @@ fn categorize_memories_decision_and_prompt_overlap() {
 fn categorize_memories_duplicate_prompts_not_deduped() {
     // Unlike files_read/files_edited/searches, prompts and decisions are not
     // deduplicated. This documents the current behavior.
-    let now = chrono::Utc::now();
     let make_prompt = |id: &str| {
-        let mut metadata = std::collections::HashMap::new();
-        metadata.insert("source".into(), serde_json::json!("UserPromptSubmit"));
-        codemem_core::MemoryNode {
-            id: id.into(),
-            content: "User prompt: fix the bug".into(),
-            memory_type: codemem_core::MemoryType::Context,
-            importance: 0.3,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: format!("h-{id}"),
-            tags: vec![],
-            metadata,
-            namespace: None,
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        }
+        let mut m = codemem_core::MemoryNode::test_default("User prompt: fix the bug");
+        m.id = id.into();
+        m.importance = 0.3;
+        m.metadata
+            .insert("source".into(), serde_json::json!("UserPromptSubmit"));
+        m
     };
     let memories = vec![make_prompt("p1"), make_prompt("p2")];
     let cat = categorize_memories(&memories);
@@ -476,25 +395,12 @@ fn categorize_memories_duplicate_prompts_not_deduped() {
 fn categorize_memories_prompt_without_prefix() {
     // If content doesn't start with "User prompt: ", strip_prefix returns None
     // and unwrap_or falls back to the full content.
-    let now = chrono::Utc::now();
-    let mut metadata = std::collections::HashMap::new();
-    metadata.insert("source".into(), serde_json::json!("UserPromptSubmit"));
-    let memory = codemem_core::MemoryNode {
-        id: "np".into(),
-        content: "fix the auth module".into(),
-        memory_type: codemem_core::MemoryType::Context,
-        importance: 0.3,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: "hnp".into(),
-        tags: vec![],
-        metadata,
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::test_default("fix the auth module");
+    memory.id = "np".into();
+    memory.importance = 0.3;
+    memory
+        .metadata
+        .insert("source".into(), serde_json::json!("UserPromptSubmit"));
     let cat = categorize_memories(&[memory]);
     assert_eq!(cat.prompts.len(), 1);
     // Full content used since "User prompt: " prefix is absent
@@ -503,26 +409,13 @@ fn categorize_memories_prompt_without_prefix() {
 
 #[test]
 fn categorize_memories_truncates_long_prompt() {
-    let now = chrono::Utc::now();
     let long_prompt = "x".repeat(200);
-    let mut metadata = std::collections::HashMap::new();
-    metadata.insert("source".into(), serde_json::json!("UserPromptSubmit"));
-    let memory = codemem_core::MemoryNode {
-        id: "lp".into(),
-        content: format!("User prompt: {long_prompt}"),
-        memory_type: codemem_core::MemoryType::Context,
-        importance: 0.3,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: "hlp".into(),
-        tags: vec![],
-        metadata,
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::test_default(&format!("User prompt: {long_prompt}"));
+    memory.id = "lp".into();
+    memory.importance = 0.3;
+    memory
+        .metadata
+        .insert("source".into(), serde_json::json!("UserPromptSubmit"));
     let cat = categorize_memories(&[memory]);
     assert_eq!(cat.prompts.len(), 1);
     // truncate_str(text, 120) should truncate and append "..."
@@ -532,24 +425,12 @@ fn categorize_memories_truncates_long_prompt() {
 
 #[test]
 fn categorize_memories_truncates_long_decision() {
-    let now = chrono::Utc::now();
     let long_decision = "d".repeat(200);
-    let memory = codemem_core::MemoryNode {
-        id: "ld".into(),
-        content: long_decision,
-        memory_type: codemem_core::MemoryType::Decision,
-        importance: 0.8,
-        confidence: 0.9,
-        access_count: 0,
-        content_hash: "hld".into(),
-        tags: vec![],
-        metadata: std::collections::HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::test_default(&long_decision);
+    memory.id = "ld".into();
+    memory.memory_type = codemem_core::MemoryType::Decision;
+    memory.importance = 0.8;
+    memory.confidence = 0.9;
     let cat = categorize_memories(&[memory]);
     assert_eq!(cat.decisions.len(), 1);
     assert!(cat.decisions[0].len() <= 123);

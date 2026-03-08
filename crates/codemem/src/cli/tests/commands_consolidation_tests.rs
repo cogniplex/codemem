@@ -104,23 +104,10 @@ fn consolidate_forget_with_zero_threshold() {
 #[test]
 fn consolidate_forget_deletes_low_importance_memory() {
     let engine = codemem_engine::CodememEngine::for_testing();
-    let now = chrono::Utc::now();
-    let memory = codemem_core::MemoryNode {
-        id: "forget-me".to_string(),
-        content: "low importance throwaway".to_string(),
-        memory_type: codemem_core::MemoryType::Context,
-        importance: 0.05,
-        confidence: 0.5,
-        access_count: 0,
-        content_hash: "hash-forget".to_string(),
-        tags: vec![],
-        metadata: std::collections::HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::test_default("low importance throwaway");
+    memory.id = "forget-me".to_string();
+    memory.importance = 0.05;
+    memory.confidence = 0.5;
     engine.persist_memory(&memory).unwrap();
 
     // Default threshold is 0.1; importance=0.05 < 0.1, access_count=0 → should be deleted
@@ -131,23 +118,11 @@ fn consolidate_forget_deletes_low_importance_memory() {
 #[test]
 fn consolidate_forget_spares_high_importance_memory() {
     let engine = codemem_engine::CodememEngine::for_testing();
-    let now = chrono::Utc::now();
-    let memory = codemem_core::MemoryNode {
-        id: "keep-me".to_string(),
-        content: "important decision about architecture".to_string(),
-        memory_type: codemem_core::MemoryType::Decision,
-        importance: 0.9,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: "hash-keep".to_string(),
-        tags: vec![],
-        metadata: std::collections::HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory =
+        codemem_core::MemoryNode::test_default("important decision about architecture");
+    memory.id = "keep-me".to_string();
+    memory.memory_type = codemem_core::MemoryType::Decision;
+    memory.importance = 0.9;
     engine.persist_memory(&memory).unwrap();
 
     let result = engine.consolidate_forget(None, None, None).unwrap();

@@ -1,6 +1,5 @@
 use crate::CodememEngine;
 use codemem_core::{Edge, GraphBackend, MemoryNode, MemoryType, RelationshipType};
-use codemem_storage::Storage;
 use std::collections::HashMap;
 
 fn make_memory(id: &str, content: &str) -> MemoryNode {
@@ -16,23 +15,14 @@ fn make_memory_with_opts(
     importance: f64,
     confidence: f64,
 ) -> MemoryNode {
-    let now = chrono::Utc::now();
-    MemoryNode {
-        id: id.to_string(),
-        content: content.to_string(),
-        memory_type,
-        importance,
-        confidence,
-        access_count: 0,
-        content_hash: Storage::content_hash(content),
-        tags: tags.iter().map(|s| s.to_string()).collect(),
-        metadata: HashMap::new(),
-        namespace: namespace.map(String::from),
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::test_default(content);
+    m.id = id.to_string();
+    m.memory_type = memory_type;
+    m.importance = importance;
+    m.confidence = confidence;
+    m.tags = tags.iter().map(|s| s.to_string()).collect();
+    m.namespace = namespace.map(String::from);
+    m
 }
 
 // ── Basic recall ────────────────────────────────────────────────────

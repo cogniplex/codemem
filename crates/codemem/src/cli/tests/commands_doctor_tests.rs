@@ -49,23 +49,9 @@ fn doctor_storage_stats_on_empty_db() {
 fn doctor_storage_stats_with_data() {
     let storage = codemem_storage::Storage::open_in_memory().unwrap();
 
-    let now = chrono::Utc::now();
-    let memory = codemem_core::MemoryNode {
-        id: "doc-1".to_string(),
-        content: "test memory".to_string(),
-        memory_type: codemem_core::MemoryType::Context,
-        importance: 0.5,
-        confidence: 0.9,
-        access_count: 0,
-        content_hash: "hash".to_string(),
-        tags: vec![],
-        metadata: std::collections::HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = codemem_core::MemoryNode::test_default("test memory");
+    memory.id = "doc-1".to_string();
+    memory.confidence = 0.9;
     storage.insert_memory(&memory).unwrap();
 
     let stats = storage.stats().unwrap();

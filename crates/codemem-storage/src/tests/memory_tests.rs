@@ -5,24 +5,10 @@ use codemem_core::{
 use std::collections::HashMap;
 
 fn test_memory() -> MemoryNode {
-    let now = chrono::Utc::now();
-    let content = "Test memory content";
-    MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.7,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: Storage::content_hash(content),
-        tags: vec!["test".to_string()],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::new("Test memory content", MemoryType::Context);
+    m.importance = 0.7;
+    m.tags = vec!["test".to_string()];
+    m
 }
 
 #[test]
@@ -173,41 +159,12 @@ fn dedup_null_namespace_coalesce() {
 fn same_hash_different_namespaces_both_succeed() {
     let storage = Storage::open_in_memory().unwrap();
     let content = "identical content for ns test";
-    let now = chrono::Utc::now();
 
-    let m1 = MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.5,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: Storage::content_hash(content),
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: Some("project-a".to_string()),
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut m1 = MemoryNode::new(content, MemoryType::Context);
+    m1.namespace = Some("project-a".to_string());
 
-    let m2 = MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.5,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: Storage::content_hash(content),
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: Some("project-b".to_string()),
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut m2 = MemoryNode::new(content, MemoryType::Context);
+    m2.namespace = Some("project-b".to_string());
 
     storage.insert_memory(&m1).unwrap();
     storage.insert_memory(&m2).unwrap();

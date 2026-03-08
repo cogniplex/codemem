@@ -13,25 +13,11 @@ fn recall_with_exclude_tags_filters_out() {
     store_memory(&server, "rust ownership rules", "insight", &["rust"]);
 
     // Store one with static-analysis tag directly
-    let now = chrono::Utc::now();
-    let id = uuid::Uuid::new_v4().to_string();
-    let hash = Storage::content_hash("rust auto-generated analysis");
-    let memory = MemoryNode {
-        id: id.clone(),
-        content: "rust auto-generated analysis".to_string(),
-        memory_type: MemoryType::Insight,
-        importance: 0.5,
-        confidence: 0.5,
-        access_count: 0,
-        content_hash: hash,
-        tags: vec!["rust".to_string(), "static-analysis".to_string()],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = MemoryNode::test_default("rust auto-generated analysis");
+    memory.memory_type = MemoryType::Insight;
+    memory.confidence = 0.5;
+    memory.tags = vec!["rust".to_string(), "static-analysis".to_string()];
+    let id = memory.id.clone();
     server.engine.storage().insert_memory(&memory).unwrap();
     server
         .engine
@@ -71,29 +57,15 @@ fn recall_with_min_importance_filters() {
     let server = test_server();
 
     // Store two memories with different importance
-    let now = chrono::Utc::now();
     for (content, importance) in [
         ("rust high importance memory", 0.8),
         ("rust low importance memory", 0.2),
     ] {
-        let id = uuid::Uuid::new_v4().to_string();
-        let hash = Storage::content_hash(content);
-        let memory = MemoryNode {
-            id: id.clone(),
-            content: content.to_string(),
-            memory_type: MemoryType::Insight,
-            importance,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: hash,
-            tags: vec!["rust".to_string()],
-            metadata: HashMap::new(),
-            namespace: None,
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::test_default(content);
+        memory.memory_type = MemoryType::Insight;
+        memory.importance = importance;
+        memory.tags = vec!["rust".to_string()];
+        let id = memory.id.clone();
         server.engine.storage().insert_memory(&memory).unwrap();
         server
             .engine
@@ -285,26 +257,12 @@ fn recall_public_api_with_min_confidence() {
 
     // Store directly with controlled confidence, including graph nodes
     // so that the scoring threshold (> 0.01) is met.
-    let now = chrono::Utc::now();
     for (content, confidence) in [("confidence test high", 0.9), ("confidence test low", 0.1)] {
-        let id = uuid::Uuid::new_v4().to_string();
-        let hash = Storage::content_hash(content);
-        let memory = MemoryNode {
-            id: id.clone(),
-            content: content.to_string(),
-            memory_type: MemoryType::Insight,
-            importance: 0.5,
-            confidence,
-            access_count: 0,
-            content_hash: hash,
-            tags: vec!["conf".to_string()],
-            metadata: HashMap::new(),
-            namespace: None,
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::test_default(content);
+        memory.memory_type = MemoryType::Insight;
+        memory.confidence = confidence;
+        memory.tags = vec!["conf".to_string()];
+        let id = memory.id.clone();
         server.engine.storage().insert_memory(&memory).unwrap();
         server
             .engine

@@ -1,7 +1,5 @@
 use crate::CodememEngine;
 use codemem_core::{MemoryNode, MemoryType};
-use codemem_storage::Storage;
-use std::collections::HashMap;
 
 fn make_memory_with_opts(
     id: &str,
@@ -11,23 +9,14 @@ fn make_memory_with_opts(
     importance: f64,
     access_count: u32,
 ) -> MemoryNode {
-    let now = chrono::Utc::now();
-    MemoryNode {
-        id: id.to_string(),
-        content: content.to_string(),
-        memory_type,
-        importance,
-        confidence: 0.9,
-        access_count,
-        content_hash: Storage::content_hash(content),
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: namespace.map(String::from),
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::test_default(content);
+    m.id = id.to_string();
+    m.memory_type = memory_type;
+    m.importance = importance;
+    m.confidence = 0.9;
+    m.access_count = access_count;
+    m.namespace = namespace.map(String::from);
+    m
 }
 
 /// Create a memory with a timestamp in the past (days_ago days before now).
@@ -40,22 +29,16 @@ fn make_old_memory(
     days_ago: i64,
 ) -> MemoryNode {
     let past = chrono::Utc::now() - chrono::Duration::days(days_ago);
-    MemoryNode {
-        id: id.to_string(),
-        content: content.to_string(),
-        memory_type,
-        importance,
-        confidence: 0.9,
-        access_count,
-        content_hash: Storage::content_hash(content),
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: past,
-        updated_at: past,
-        last_accessed_at: past,
-    }
+    let mut m = MemoryNode::test_default(content);
+    m.id = id.to_string();
+    m.memory_type = memory_type;
+    m.importance = importance;
+    m.confidence = 0.9;
+    m.access_count = access_count;
+    m.created_at = past;
+    m.updated_at = past;
+    m.last_accessed_at = past;
+    m
 }
 
 /// Create a memory with specific tags.
@@ -66,23 +49,13 @@ fn make_tagged_memory(
     access_count: u32,
     tags: Vec<String>,
 ) -> MemoryNode {
-    let now = chrono::Utc::now();
-    MemoryNode {
-        id: id.to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance,
-        confidence: 0.9,
-        access_count,
-        content_hash: Storage::content_hash(content),
-        tags,
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::test_default(content);
+    m.id = id.to_string();
+    m.importance = importance;
+    m.confidence = 0.9;
+    m.access_count = access_count;
+    m.tags = tags;
+    m
 }
 
 // ── Decay consolidation ─────────────────────────────────────────────

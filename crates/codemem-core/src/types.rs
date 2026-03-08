@@ -273,6 +273,38 @@ pub struct MemoryNode {
     pub last_accessed_at: DateTime<Utc>,
 }
 
+impl MemoryNode {
+    /// Create a test/example memory with minimal fields.
+    /// Uses `MemoryType::Context` and default values for importance (0.5),
+    /// confidence (1.0), empty tags, and empty metadata.
+    pub fn test_default(content: &str) -> Self {
+        Self::new(content.to_string(), MemoryType::Context)
+    }
+
+    /// Create a new MemoryNode with sensible defaults.
+    /// Auto-generates id, content_hash, and timestamps.
+    pub fn new(content: impl Into<String>, memory_type: MemoryType) -> Self {
+        let content = content.into();
+        let now = chrono::Utc::now();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            content_hash: content_hash(&content),
+            content,
+            memory_type,
+            importance: 0.5,
+            confidence: 1.0,
+            access_count: 0,
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+            namespace: None,
+            session_id: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+        }
+    }
+}
+
 /// A graph edge connecting two nodes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edge {

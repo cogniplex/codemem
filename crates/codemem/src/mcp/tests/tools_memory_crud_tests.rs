@@ -145,30 +145,16 @@ fn recall_filters_by_namespace() {
     let server = test_server();
 
     // Store memories with different namespaces via direct storage
-    let now = chrono::Utc::now();
     for (content, ns) in [
         ("rust ownership in project-a", Some("/projects/a")),
         ("rust borrowing in project-b", Some("/projects/b")),
         ("rust global memory no namespace", None),
     ] {
-        let id = uuid::Uuid::new_v4().to_string();
-        let hash = Storage::content_hash(content);
-        let memory = MemoryNode {
-            id: id.clone(),
-            content: content.to_string(),
-            memory_type: MemoryType::Insight,
-            importance: 0.5,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: hash,
-            tags: vec!["rust".to_string()],
-            metadata: HashMap::new(),
-            namespace: ns.map(String::from),
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::test_default(content);
+        memory.memory_type = MemoryType::Insight;
+        memory.tags = vec!["rust".to_string()];
+        memory.namespace = ns.map(String::from);
+        let id = memory.id.clone();
         server.engine.storage().insert_memory(&memory).unwrap();
 
         // Add graph node so graph scoring works
