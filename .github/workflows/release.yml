@@ -94,13 +94,12 @@ jobs:
         with:
           merge-multiple: true
 
-      - name: Create GitHub Release
+      - name: Upload Release Artifacts
         uses: softprops/action-gh-release@v2
         with:
           files: |
             codemem-*.tar.gz
             codemem-*.tar.gz.sha256
-          generate_release_notes: true
 
   homebrew:
     name: Update Homebrew Tap
