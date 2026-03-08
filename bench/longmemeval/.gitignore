@@ -1,0 +1,5 @@
+.venv/
+data/
+__pycache__/
+.claude/
+.mcp.json
