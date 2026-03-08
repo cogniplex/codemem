@@ -1,7 +1,6 @@
 //! Export, import, and index commands.
 
 use codemem_core::VectorBackend;
-use std::io::Write;
 
 pub(crate) fn cmd_export(
     namespace: Option<&str>,
@@ -70,98 +69,10 @@ pub(crate) fn cmd_export(
     let count = records.len();
 
     match format {
-        "jsonl" => {
-            for obj in &records {
-                let line = serde_json::to_string(obj)?;
-                writeln!(writer, "{line}")?;
-            }
-        }
-        "json" => {
-            let pretty = serde_json::to_string_pretty(&records)?;
-            writeln!(writer, "{pretty}")?;
-        }
-        "csv" => {
-            // Header
-            writeln!(
-                writer,
-                "id,content,memory_type,importance,confidence,tags,namespace,created_at,updated_at"
-            )?;
-            for obj in &records {
-                writeln!(
-                    writer,
-                    "{},{},{},{},{},{},{},{},{}",
-                    csv_escape(obj["id"].as_str().unwrap_or("")),
-                    csv_escape(obj["content"].as_str().unwrap_or("")),
-                    csv_escape(obj["memory_type"].as_str().unwrap_or("")),
-                    obj["importance"].as_f64().unwrap_or(0.0),
-                    obj["confidence"].as_f64().unwrap_or(0.0),
-                    csv_escape(
-                        &obj["tags"]
-                            .as_array()
-                            .map(|a| a
-                                .iter()
-                                .filter_map(|v| v.as_str())
-                                .collect::<Vec<_>>()
-                                .join(";"))
-                            .unwrap_or_default()
-                    ),
-                    csv_escape(obj["namespace"].as_str().unwrap_or("")),
-                    csv_escape(obj["created_at"].as_str().unwrap_or("")),
-                    csv_escape(obj["updated_at"].as_str().unwrap_or("")),
-                )?;
-            }
-        }
-        "markdown" | "md" => {
-            writeln!(writer, "# Codemem Export")?;
-            writeln!(writer)?;
-            writeln!(writer, "**Total memories:** {count}")?;
-            if let Some(ns) = namespace {
-                writeln!(writer, "**Namespace:** {ns}")?;
-            }
-            if let Some(mt) = memory_type {
-                writeln!(writer, "**Type filter:** {mt}")?;
-            }
-            writeln!(writer)?;
-
-            // Group by memory type
-            let mut by_type: std::collections::BTreeMap<String, Vec<&serde_json::Value>> =
-                std::collections::BTreeMap::new();
-            for obj in &records {
-                let mt = obj["memory_type"].as_str().unwrap_or("unknown").to_string();
-                by_type.entry(mt).or_default().push(obj);
-            }
-
-            for (mt, memories) in &by_type {
-                writeln!(writer, "## {} ({} memories)", mt, memories.len())?;
-                writeln!(writer)?;
-                for obj in memories {
-                    let id = obj["id"].as_str().unwrap_or("?");
-                    let content = obj["content"].as_str().unwrap_or("");
-                    let importance = obj["importance"].as_f64().unwrap_or(0.0);
-                    let tags = obj["tags"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        })
-                        .unwrap_or_default();
-
-                    writeln!(writer, "### `{id}`")?;
-                    writeln!(writer)?;
-                    writeln!(writer, "- **Importance:** {importance:.2}")?;
-                    if !tags.is_empty() {
-                        writeln!(writer, "- **Tags:** {tags}")?;
-                    }
-                    writeln!(writer)?;
-                    writeln!(writer, "{content}")?;
-                    writeln!(writer)?;
-                    writeln!(writer, "---")?;
-                    writeln!(writer)?;
-                }
-            }
-        }
+        "jsonl" => write_jsonl(&mut writer, &records)?,
+        "json" => write_json(&mut writer, &records)?,
+        "csv" => write_csv(&mut writer, &records)?,
+        "markdown" | "md" => write_markdown(&mut writer, &records, namespace, memory_type)?,
         other => {
             anyhow::bail!("Unknown format: {other}. Supported formats: jsonl, json, csv, markdown");
         }
@@ -171,13 +82,124 @@ pub(crate) fn cmd_export(
     Ok(())
 }
 
-/// RFC 4180 CSV field escaping: double-quote fields containing commas, newlines, or quotes.
+/// RFC 4180 CSV field escaping: double-quote fields containing commas, CR/LF, or quotes.
 fn csv_escape(field: &str) -> String {
-    if field.contains(',') || field.contains('\n') || field.contains('"') {
+    if field.contains(',') || field.contains('\n') || field.contains('\r') || field.contains('"') {
         format!("\"{}\"", field.replace('"', "\"\""))
     } else {
         field.to_string()
     }
+}
+
+fn write_jsonl(
+    writer: &mut dyn std::io::Write,
+    records: &[serde_json::Value],
+) -> anyhow::Result<()> {
+    for obj in records {
+        let line = serde_json::to_string(obj)?;
+        writeln!(writer, "{line}")?;
+    }
+    Ok(())
+}
+
+fn write_json(
+    writer: &mut dyn std::io::Write,
+    records: &[serde_json::Value],
+) -> anyhow::Result<()> {
+    let pretty = serde_json::to_string_pretty(records)?;
+    writeln!(writer, "{pretty}")?;
+    Ok(())
+}
+
+fn write_csv(writer: &mut dyn std::io::Write, records: &[serde_json::Value]) -> anyhow::Result<()> {
+    writeln!(
+        writer,
+        "id,content,memory_type,importance,confidence,tags,namespace,created_at,updated_at"
+    )?;
+    for obj in records {
+        writeln!(
+            writer,
+            "{},{},{},{},{},{},{},{},{}",
+            csv_escape(obj["id"].as_str().unwrap_or("")),
+            csv_escape(obj["content"].as_str().unwrap_or("")),
+            csv_escape(obj["memory_type"].as_str().unwrap_or("")),
+            obj["importance"].as_f64().unwrap_or(0.0),
+            obj["confidence"].as_f64().unwrap_or(0.0),
+            csv_escape(
+                &obj["tags"]
+                    .as_array()
+                    .map(|a| a
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(";"))
+                    .unwrap_or_default()
+            ),
+            csv_escape(obj["namespace"].as_str().unwrap_or("")),
+            csv_escape(obj["created_at"].as_str().unwrap_or("")),
+            csv_escape(obj["updated_at"].as_str().unwrap_or("")),
+        )?;
+    }
+    Ok(())
+}
+
+fn write_markdown(
+    writer: &mut dyn std::io::Write,
+    records: &[serde_json::Value],
+    namespace: Option<&str>,
+    memory_type: Option<&str>,
+) -> anyhow::Result<()> {
+    let count = records.len();
+    writeln!(writer, "# Codemem Export")?;
+    writeln!(writer)?;
+    writeln!(writer, "**Total memories:** {count}")?;
+    if let Some(ns) = namespace {
+        writeln!(writer, "**Namespace:** {ns}")?;
+    }
+    if let Some(mt) = memory_type {
+        writeln!(writer, "**Type filter:** {mt}")?;
+    }
+    writeln!(writer)?;
+
+    // Group by memory type
+    let mut by_type: std::collections::BTreeMap<String, Vec<&serde_json::Value>> =
+        std::collections::BTreeMap::new();
+    for obj in records {
+        let mt = obj["memory_type"].as_str().unwrap_or("unknown").to_string();
+        by_type.entry(mt).or_default().push(obj);
+    }
+
+    for (mt, memories) in &by_type {
+        writeln!(writer, "## {} ({} memories)", mt, memories.len())?;
+        writeln!(writer)?;
+        for obj in memories {
+            let id = obj["id"].as_str().unwrap_or("?");
+            let content = obj["content"].as_str().unwrap_or("");
+            let importance = obj["importance"].as_f64().unwrap_or(0.0);
+            let tags = obj["tags"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+
+            writeln!(writer, "### `{id}`")?;
+            writeln!(writer)?;
+            writeln!(writer, "- **Importance:** {importance:.2}")?;
+            if !tags.is_empty() {
+                writeln!(writer, "- **Tags:** {tags}")?;
+            }
+            writeln!(writer)?;
+            writeln!(writer, "{content}")?;
+            writeln!(writer)?;
+            writeln!(writer, "---")?;
+            writeln!(writer)?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn cmd_import(

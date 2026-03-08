@@ -505,150 +505,29 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
     };
 
     let mut session_memories: Vec<codemem_core::MemoryNode> = Vec::new();
-    let mut files_read: Vec<String> = Vec::new();
-    let mut files_edited: Vec<String> = Vec::new();
-    let mut searches: Vec<String> = Vec::new();
-    let mut decisions: Vec<String> = Vec::new();
-    let mut prompts: Vec<String> = Vec::new();
 
     for id in &all_ids {
         if let Ok(Some(m)) = storage.get_memory_no_touch(id) {
-            // Filter to memories created during this session
-            if m.created_at < session_start {
-                continue;
+            if m.created_at >= session_start {
+                session_memories.push(m);
             }
-            // Categorize
-            let tool = m
-                .metadata
-                .get("tool")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let source = m
-                .metadata
-                .get("source")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let file_path = m
-                .metadata
-                .get("file_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            match tool {
-                "Read" => {
-                    if !file_path.is_empty() && !files_read.contains(&file_path.to_string()) {
-                        files_read.push(file_path.to_string());
-                    }
-                }
-                "Edit" | "Write" => {
-                    if !file_path.is_empty() && !files_edited.contains(&file_path.to_string()) {
-                        files_edited.push(file_path.to_string());
-                    }
-                }
-                "Grep" | "Glob" => {
-                    if let Some(pat) = m.metadata.get("pattern").and_then(|v| v.as_str()) {
-                        if !searches.contains(&pat.to_string()) {
-                            searches.push(pat.to_string());
-                        }
-                    }
-                }
-                _ => {}
-            }
-
-            if source == "UserPromptSubmit" {
-                // Extract the prompt text (strip "User prompt: " prefix)
-                let text = m
-                    .content
-                    .strip_prefix("User prompt: ")
-                    .unwrap_or(&m.content);
-                prompts.push(crate::truncate_str(text, 120).to_string());
-            }
-
-            if m.memory_type == codemem_core::MemoryType::Decision {
-                decisions.push(crate::truncate_str(&m.content, 120).to_string());
-            }
-
-            session_memories.push(m);
         }
     }
 
-    // Build summary
-    let mut summary_parts: Vec<String> = Vec::new();
-
-    if !prompts.is_empty() {
-        summary_parts.push(format!(
-            "Requests: {}",
-            prompts
-                .iter()
-                .take(3)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("; ")
-        ));
-    }
-
-    if !files_read.is_empty() {
-        summary_parts.push(format!(
-            "Investigated {} file(s): {}",
-            files_read.len(),
-            files_read
-                .iter()
-                .take(5)
-                .map(|p| short_path(p))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-
-    if !files_edited.is_empty() {
-        summary_parts.push(format!(
-            "Modified {} file(s): {}",
-            files_edited.len(),
-            files_edited
-                .iter()
-                .take(5)
-                .map(|p| short_path(p))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-
-    if !decisions.is_empty() {
-        summary_parts.push(format!(
-            "Decisions: {}",
-            decisions
-                .iter()
-                .take(3)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("; ")
-        ));
-    }
-
-    if !searches.is_empty() {
-        summary_parts.push(format!(
-            "Searched: {}",
-            searches
-                .iter()
-                .take(5)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-
-    let summary_text = if summary_parts.is_empty() {
-        format!("{} memories captured.", session_memories.len())
-    } else {
-        summary_parts.join(". ")
+    let cat = categorize_memories(&session_memories);
+    let summary_text = {
+        let s = build_session_summary(&cat);
+        if s.is_empty() {
+            format!("{} memories captured.", session_memories.len())
+        } else {
+            s
+        }
     };
+    let has_substance = has_substance(&cat);
 
-    // Only store session summary when there's real substance:
-    // - at least one file was edited, or
-    // - at least one decision was made, or
-    // - non-trivial investigation (5+ files read)
-    // Skip summaries that are just echoed prompts — those aren't insights.
-    let has_substance = !files_edited.is_empty() || !decisions.is_empty() || files_read.len() >= 5;
+    // Aliases for downstream metadata references
+    let files_read = &cat.files_read;
+    let files_edited = &cat.files_edited;
 
     // Build the engine once for both memory persists (if needed)
     let engine = if (has_substance && !session_memories.is_empty()) || !files_edited.is_empty() {
@@ -766,6 +645,164 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
     println!("{}", serde_json::to_string(&output)?);
 
     Ok(())
+}
+
+/// Categorized session activity extracted from memories.
+struct SessionCategories {
+    files_read: Vec<String>,
+    files_edited: Vec<String>,
+    searches: Vec<String>,
+    decisions: Vec<String>,
+    prompts: Vec<String>,
+}
+
+/// Categorize memories by tool type, source, and memory type.
+///
+/// Mirrors the logic in `cmd_summarize` but operates on an in-memory slice
+/// so it can be tested without storage.
+fn categorize_memories(memories: &[codemem_core::MemoryNode]) -> SessionCategories {
+    let mut files_read: Vec<String> = Vec::new();
+    let mut files_edited: Vec<String> = Vec::new();
+    let mut searches: Vec<String> = Vec::new();
+    let mut decisions: Vec<String> = Vec::new();
+    let mut prompts: Vec<String> = Vec::new();
+
+    for m in memories {
+        let tool = m
+            .metadata
+            .get("tool")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let source = m
+            .metadata
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let file_path = m
+            .metadata
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        match tool {
+            "Read" => {
+                if !file_path.is_empty() && !files_read.contains(&file_path.to_string()) {
+                    files_read.push(file_path.to_string());
+                }
+            }
+            "Edit" | "Write" => {
+                if !file_path.is_empty() && !files_edited.contains(&file_path.to_string()) {
+                    files_edited.push(file_path.to_string());
+                }
+            }
+            "Grep" | "Glob" => {
+                if let Some(pat) = m.metadata.get("pattern").and_then(|v| v.as_str()) {
+                    if !searches.contains(&pat.to_string()) {
+                        searches.push(pat.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        if source == "UserPromptSubmit" {
+            let text = m
+                .content
+                .strip_prefix("User prompt: ")
+                .unwrap_or(&m.content);
+            prompts.push(crate::truncate_str(text, 120).to_string());
+        }
+
+        if m.memory_type == codemem_core::MemoryType::Decision {
+            decisions.push(crate::truncate_str(&m.content, 120).to_string());
+        }
+    }
+
+    SessionCategories {
+        files_read,
+        files_edited,
+        searches,
+        decisions,
+        prompts,
+    }
+}
+
+/// Build a human-readable session summary from categorized activity.
+fn build_session_summary(cat: &SessionCategories) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if !cat.prompts.is_empty() {
+        parts.push(format!(
+            "Requests: {}",
+            cat.prompts
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
+
+    if !cat.files_read.is_empty() {
+        parts.push(format!(
+            "Investigated {} file(s): {}",
+            cat.files_read.len(),
+            cat.files_read
+                .iter()
+                .take(5)
+                .map(|p| short_path(p))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    if !cat.files_edited.is_empty() {
+        parts.push(format!(
+            "Modified {} file(s): {}",
+            cat.files_edited.len(),
+            cat.files_edited
+                .iter()
+                .take(5)
+                .map(|p| short_path(p))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    if !cat.decisions.is_empty() {
+        parts.push(format!(
+            "Decisions: {}",
+            cat.decisions
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ")
+        ));
+    }
+
+    if !cat.searches.is_empty() {
+        parts.push(format!(
+            "Searched: {}",
+            cat.searches
+                .iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        parts.join(". ")
+    }
+}
+
+/// Whether a session has enough substance to warrant storing a summary.
+fn has_substance(cat: &SessionCategories) -> bool {
+    !cat.files_edited.is_empty() || !cat.decisions.is_empty() || cat.files_read.len() >= 5
 }
 
 /// Shorten an absolute path to just filename or last 2 components.
