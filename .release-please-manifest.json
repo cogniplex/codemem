@@ -1,3 +1,7 @@
 {
-  ".": "0.8.0"
+  "crates/codemem-core": "0.8.0",
+  "crates/codemem-storage": "0.8.0",
+  "crates/codemem-embeddings": "0.8.0",
+  "crates/codemem-engine": "0.8.0",
+  "crates/codemem": "0.8.0"
 }

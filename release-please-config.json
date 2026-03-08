@@ -3,37 +3,38 @@
   "release-type": "rust",
   "include-component-in-tag": false,
   "packages": {
-    ".": {
-      "component": "codemem",
-      "extra-files": [
-        {
-          "type": "toml",
-          "path": "Cargo.toml",
-          "jsonpath": "$.workspace.dependencies.codemem-core.version"
-        },
-        {
-          "type": "toml",
-          "path": "Cargo.toml",
-          "jsonpath": "$.workspace.dependencies.codemem-storage.version"
-        },
-        {
-          "type": "toml",
-          "path": "Cargo.toml",
-          "jsonpath": "$.workspace.dependencies.codemem-embeddings.version"
-        },
-        {
-          "type": "toml",
-          "path": "Cargo.toml",
-          "jsonpath": "$.workspace.dependencies.codemem-engine.version"
-        },
-        {
-          "type": "toml",
-          "path": "Cargo.toml",
-          "jsonpath": "$.workspace.dependencies.codemem.version"
-        }
-      ]
+    "crates/codemem-core": {
+      "component": "codemem-core"
+    },
+    "crates/codemem-storage": {
+      "component": "codemem-storage"
+    },
+    "crates/codemem-embeddings": {
+      "component": "codemem-embeddings"
+    },
+    "crates/codemem-engine": {
+      "component": "codemem-engine"
+    },
+    "crates/codemem": {
+      "component": "codemem"
     }
   },
+  "plugins": [
+    {
+      "type": "cargo-workspace"
+    },
+    {
+      "type": "linked-versions",
+      "groupName": "codemem",
+      "components": [
+        "codemem-core",
+        "codemem-storage",
+        "codemem-embeddings",
+        "codemem-engine",
+        "codemem"
+      ]
+    }
+  ],
   "changelog-sections": [
     { "type": "feat", "section": "Features" },
     { "type": "fix", "section": "Bug Fixes" },
