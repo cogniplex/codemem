@@ -4,6 +4,7 @@ use crate::SplitPart;
 use codemem_core::{
     CodememError, Edge, GraphBackend, MemoryNode, MemoryType, RelationshipType, VectorBackend,
 };
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
 impl CodememEngine {
@@ -171,6 +172,54 @@ impl CodememEngine {
                 tracing::warn!("Failed to store embedding for {}: {e}", memory.id);
             }
         }
+
+        Ok(())
+    }
+
+    // ── Store with Links ──────────────────────────────────────────────────
+
+    /// Store a memory with optional explicit link IDs.
+    ///
+    /// Runs the full pipeline: persist → explicit RELATES_TO edges → auto-link
+    /// to code nodes → save index. This consolidates domain logic that was
+    /// previously spread across the MCP transport layer.
+    pub fn store_memory_with_links(
+        &self,
+        memory: &MemoryNode,
+        links: &[String],
+    ) -> Result<(), CodememError> {
+        self.persist_memory(memory)?;
+
+        // Create RELATES_TO edges for explicit links
+        if !links.is_empty() {
+            let now = chrono::Utc::now();
+            let mut graph = self.lock_graph()?;
+            for link_id in links {
+                let edge = Edge {
+                    id: format!("{}-RELATES_TO-{link_id}", memory.id),
+                    src: memory.id.clone(),
+                    dst: link_id.clone(),
+                    relationship: RelationshipType::RelatesTo,
+                    weight: 1.0,
+                    properties: HashMap::new(),
+                    created_at: now,
+                    valid_from: None,
+                    valid_to: None,
+                };
+                if let Err(e) = self.storage.insert_graph_edge(&edge) {
+                    tracing::warn!("Failed to persist link edge to {link_id}: {e}");
+                }
+                if let Err(e) = graph.add_edge(edge) {
+                    tracing::warn!("Failed to add link edge to {link_id}: {e}");
+                }
+            }
+        }
+
+        // Auto-link to code nodes mentioned in content
+        self.auto_link_to_code_nodes(&memory.id, &memory.content, links);
+
+        // Persist vector index to disk
+        self.save_index();
 
         Ok(())
     }

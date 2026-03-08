@@ -6,30 +6,10 @@
 mod algorithms;
 mod traversal;
 
-use codemem_core::{CodememError, Edge, GraphBackend, GraphNode, NodeKind};
+use codemem_core::{CodememError, Edge, GraphBackend, GraphNode, NodeKind, RawGraphMetrics};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::Direction;
 use std::collections::{HashMap, HashSet, VecDeque};
-
-/// Raw graph metrics for a memory node, collected from its neighbors.
-///
-/// Returned by `GraphEngine::raw_graph_metrics_for_memory()` so that the
-/// scoring formula can live in the engine crate.
-#[derive(Debug, Clone)]
-pub struct RawGraphMetrics {
-    /// Highest PageRank score among code-graph neighbors.
-    pub max_pagerank: f64,
-    /// Highest betweenness centrality among code-graph neighbors.
-    pub max_betweenness: f64,
-    /// Number of code-graph neighbors (sym:, file:, chunk:, pkg:).
-    pub code_neighbor_count: usize,
-    /// Sum of edge weights connecting this memory to code-graph neighbors.
-    pub total_edge_weight: f64,
-    /// Number of memory-to-memory neighbors (UUID-based IDs).
-    pub memory_neighbor_count: usize,
-    /// Sum of edge weights connecting this memory to other memory nodes.
-    pub memory_edge_weight: f64,
-}
 
 /// In-memory graph engine backed by petgraph, synced to SQLite via codemem-storage.
 ///

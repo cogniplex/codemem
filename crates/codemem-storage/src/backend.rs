@@ -2,8 +2,8 @@
 
 use crate::{MapStorageErr, MemoryRow, Storage};
 use codemem_core::{
-    CodememError, ConsolidationLogEntry, Edge, GraphNode, MemoryNode, NodeKind, Session,
-    StorageBackend, StorageStats,
+    CodememError, ConsolidationLogEntry, Edge, GraphNode, MemoryNode, NodeKind, Repository,
+    Session, StorageBackend, StorageStats,
 };
 use rusqlite::params;
 use std::collections::HashMap;
@@ -635,6 +635,15 @@ impl StorageBackend for Storage {
         Ok(rows)
     }
 
+    fn list_memories_by_tag(
+        &self,
+        tag: &str,
+        namespace: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<MemoryNode>, CodememError> {
+        self.list_memories_by_tag(tag, namespace, limit)
+    }
+
     fn list_memories_filtered(
         &self,
         namespace: Option<&str>,
@@ -714,6 +723,33 @@ impl StorageBackend for Storage {
         let conn = self.conn()?;
         conn.execute_batch("ROLLBACK").storage_err()?;
         Ok(())
+    }
+
+    // ── Repository Management ────────────────────────────────────────
+
+    fn list_repos(&self) -> Result<Vec<Repository>, CodememError> {
+        self.list_repos()
+    }
+
+    fn add_repo(&self, repo: &Repository) -> Result<(), CodememError> {
+        self.add_repo(repo)
+    }
+
+    fn get_repo(&self, id: &str) -> Result<Option<Repository>, CodememError> {
+        self.get_repo(id)
+    }
+
+    fn remove_repo(&self, id: &str) -> Result<bool, CodememError> {
+        self.remove_repo(id)
+    }
+
+    fn update_repo_status(
+        &self,
+        id: &str,
+        status: &str,
+        indexed_at: Option<&str>,
+    ) -> Result<(), CodememError> {
+        self.update_repo_status(id, status, indexed_at)
     }
 }
 

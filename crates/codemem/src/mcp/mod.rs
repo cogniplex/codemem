@@ -17,8 +17,8 @@
 
 use codemem_core::{CodememError, MemoryType, StorageBackend};
 use codemem_engine::CodememEngine;
-use codemem_storage::graph::GraphEngine;
-use codemem_storage::HnswIndex;
+use codemem_engine::GraphEngine;
+use codemem_engine::HnswIndex;
 use serde_json::{json, Value};
 use std::io::{self, BufRead};
 use std::path::Path;
@@ -64,7 +64,7 @@ impl McpServer {
         storage: Box<dyn StorageBackend>,
         vector: HnswIndex,
         graph: GraphEngine,
-        embeddings: Option<Box<dyn codemem_embeddings::EmbeddingProvider>>,
+        embeddings: Option<Box<dyn codemem_engine::EmbeddingProvider>>,
     ) -> Self {
         Self {
             name: "codemem".to_string(),
@@ -106,7 +106,7 @@ impl McpServer {
     pub(crate) fn lock_embeddings(
         &self,
     ) -> Result<
-        Option<std::sync::MutexGuard<'_, Box<dyn codemem_embeddings::EmbeddingProvider>>>,
+        Option<std::sync::MutexGuard<'_, Box<dyn codemem_engine::EmbeddingProvider>>>,
         CodememError,
     > {
         self.engine.lock_embeddings()
@@ -156,7 +156,7 @@ impl McpServer {
         self.engine.vector_mutex()
     }
 
-    pub fn embeddings(&self) -> Option<&Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
+    pub fn embeddings(&self) -> Option<&Mutex<Box<dyn codemem_engine::EmbeddingProvider>>> {
         self.engine.embeddings_mutex()
     }
 

@@ -6,7 +6,6 @@
 use super::args::parse_string_array;
 use super::types::ToolResult;
 use super::McpServer;
-use codemem_core::GraphBackend;
 use codemem_engine::IndexCache;
 use serde_json::{json, Value};
 
@@ -144,27 +143,23 @@ impl McpServer {
         summary["enrichment"] = enrichment.results;
 
         // Step 3: PageRank (top 10)
-        if let Ok(graph) = self.lock_graph() {
-            let scores = graph.pagerank(0.85, 100, 1e-6);
-            let mut sorted: Vec<(String, f64)> = scores.into_iter().collect();
-            sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            sorted.truncate(10);
-            let top_nodes: Vec<Value> = sorted
+        if let Ok(ranked) = self.engine.find_important_nodes(10, 0.85) {
+            let top_nodes: Vec<Value> = ranked
                 .iter()
-                .map(|(id, score)| {
-                    let node = graph.get_node(id).ok().flatten();
+                .map(|r| {
                     json!({
-                        "id": id,
-                        "pagerank": format!("{:.6}", score),
-                        "kind": node.as_ref().map(|n| n.kind.to_string()),
-                        "label": node.as_ref().map(|n| n.label.clone()),
+                        "id": r.id,
+                        "pagerank": format!("{:.6}", r.score),
+                        "kind": r.kind,
+                        "label": r.label,
                     })
                 })
                 .collect();
             summary["important_nodes"] = json!(top_nodes);
+        }
 
-            // Step 4: Clusters
-            let communities = graph.louvain_communities(1.0);
+        // Step 4: Clusters
+        if let Ok(communities) = self.engine.louvain_communities(1.0) {
             summary["cluster_count"] = json!(communities.len());
         }
 

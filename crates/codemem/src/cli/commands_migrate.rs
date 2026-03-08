@@ -14,7 +14,7 @@ pub(crate) fn cmd_migrate() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let storage = codemem_storage::Storage::open(&db_path)?;
+    let storage = codemem_engine::Storage::open(&db_path)?;
     let current = storage.schema_version()?;
 
     println!("Database: {}", db_path.display());

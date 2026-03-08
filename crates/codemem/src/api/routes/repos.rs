@@ -13,8 +13,7 @@ use std::sync::Arc;
 pub async fn list_repos(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<Repository>>, StatusCode> {
-    let storage = state.storage_direct();
-    match storage.list_repos() {
+    match state.server.engine.list_repos() {
         Ok(repos) => Ok(Json(repos)),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
@@ -46,8 +45,7 @@ pub async fn register_repo(
         status: "idle".to_string(),
     };
 
-    let storage = state.storage_direct();
-    match storage.add_repo(&repo) {
+    match state.server.engine.add_repo(&repo) {
         Ok(()) => Ok((StatusCode::CREATED, Json(IdResponse { id }))),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -62,8 +60,7 @@ pub async fn get_repo(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Repository>, StatusCode> {
-    let storage = state.storage_direct();
-    match storage.get_repo(&id) {
+    match state.server.engine.get_repo(&id) {
         Ok(Some(repo)) => Ok(Json(repo)),
         Ok(None) => Err(StatusCode::NOT_FOUND),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -74,8 +71,7 @@ pub async fn delete_repo(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<MessageResponse>, StatusCode> {
-    let storage = state.storage_direct();
-    match storage.remove_repo(&id) {
+    match state.server.engine.remove_repo(&id) {
         Ok(true) => Ok(Json(MessageResponse {
             message: "Deleted".to_string(),
         })),
@@ -88,8 +84,7 @@ pub async fn index_repo(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<MessageResponse>, (StatusCode, Json<MessageResponse>)> {
-    let storage = state.storage_direct();
-    let repo = match storage.get_repo(&id) {
+    let repo = match state.server.engine.get_repo(&id) {
         Ok(Some(r)) => r,
         Ok(None) => {
             return Err((
@@ -110,13 +105,16 @@ pub async fn index_repo(
     };
 
     // Update status to indexing
-    let _ = storage.update_repo_status(&id, "indexing", None);
+    let _ = state
+        .server
+        .engine
+        .update_repo_status(&id, "indexing", None);
 
     // Trigger indexing in background
     let path = repo.path.clone();
     let repo_id = id.clone();
     let indexing_tx = state.indexing_events.clone();
-    let storage_for_task = state.storage_direct_arc();
+    let server = Arc::clone(&state.server);
 
     tokio::spawn(async move {
         let mut indexer = codemem_engine::Indexer::new();
@@ -125,10 +123,12 @@ pub async fn index_repo(
         match indexer.index_directory_with_progress(root, Some(&indexing_tx)) {
             Ok(_result) => {
                 let now = chrono::Utc::now().to_rfc3339();
-                let _ = storage_for_task.update_repo_status(&repo_id, "idle", Some(&now));
+                let _ = server
+                    .engine
+                    .update_repo_status(&repo_id, "idle", Some(&now));
             }
             Err(_) => {
-                let _ = storage_for_task.update_repo_status(&repo_id, "error", None);
+                let _ = server.engine.update_repo_status(&repo_id, "error", None);
             }
         }
     });

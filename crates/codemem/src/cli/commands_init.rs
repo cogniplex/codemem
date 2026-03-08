@@ -108,7 +108,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
     std::fs::create_dir_all(global_dir.join("models"))?;
 
     let db_path = super::codemem_db_path();
-    let _storage = codemem_storage::Storage::open(&db_path)?;
+    let _storage = codemem_engine::Storage::open(&db_path)?;
     println!("[database] Initialized at {}", db_path.display());
     status_lines.push(format!("Database: {}", db_path.display()));
 
@@ -414,7 +414,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         println!("[model] Skipped (--skip-model)");
         status_lines.push("Model: skipped (--skip-model)".to_string());
     } else {
-        let model_dir = codemem_embeddings::EmbeddingService::default_model_dir();
+        let model_dir = codemem_engine::EmbeddingService::default_model_dir();
         if model_dir.join("model.safetensors").exists() {
             println!(
                 "[model] Embedding model already downloaded at {}",
@@ -423,7 +423,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
             status_lines.push("Model: already present".to_string());
         } else {
             println!("[model] Downloading embedding model (BAAI/bge-base-en-v1.5)...");
-            match codemem_embeddings::EmbeddingService::download_model(&model_dir) {
+            match codemem_engine::EmbeddingService::download_model(&model_dir) {
                 Ok(_) => {
                     println!("[model] Downloaded to {}", model_dir.display());
                     status_lines.push(format!("Model: downloaded to {}", model_dir.display()));
@@ -487,7 +487,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
 /// Batch-embed existing memories that don't yet have embeddings,
 /// and update the vector index. Called at the end of cmd_init().
 pub(crate) fn batch_embed_existing(db_path: &std::path::Path) {
-    let storage = match codemem_storage::Storage::open(db_path) {
+    let storage = match codemem_engine::Storage::open(db_path) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("Could not open storage for batch embedding: {e}");
@@ -496,7 +496,7 @@ pub(crate) fn batch_embed_existing(db_path: &std::path::Path) {
     };
 
     let config = codemem_core::CodememConfig::load_or_default();
-    let emb_service = match codemem_embeddings::from_env(Some(&config.embedding)) {
+    let emb_service = match codemem_engine::embeddings_from_env(Some(&config.embedding)) {
         Ok(s) => s,
         Err(_) => {
             // Embedding provider not available, skip batch embedding
@@ -522,7 +522,7 @@ pub(crate) fn batch_embed_existing(db_path: &std::path::Path) {
     println!("Embedding {} existing memories...", rows.len());
 
     let index_path = db_path.with_extension("idx");
-    let mut vector = match codemem_storage::HnswIndex::with_defaults() {
+    let mut vector = match codemem_engine::HnswIndex::with_defaults() {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!("Failed to create vector index: {e}");

@@ -2,7 +2,6 @@ use crate::api::ApiServer;
 use crate::mcp::McpServer;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use codemem_storage::Storage;
 use http_body_util::BodyExt;
 use std::sync::Arc;
 
@@ -10,8 +9,7 @@ use std::sync::Arc;
 fn test_api_server(tmp: &tempfile::TempDir) -> ApiServer {
     let db_path = tmp.path().join("test.db");
     let server = McpServer::from_db_path(&db_path).expect("create test server");
-    let storage = Storage::open(&db_path).expect("open storage");
-    ApiServer::new(Arc::new(server), storage)
+    ApiServer::new(Arc::new(server))
 }
 
 /// Helper: send a request to the router and return (status, body-as-string).

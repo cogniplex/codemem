@@ -18,7 +18,6 @@ mod queries;
 pub mod vector;
 
 pub use graph::GraphEngine;
-pub use graph::RawGraphMetrics;
 pub use vector::HnswIndex;
 
 /// Extension trait for converting `rusqlite::Error` results into `CodememError::Storage`.

@@ -13,7 +13,7 @@ pub(crate) fn cmd_doctor() -> anyhow::Result<()> {
     let db_path = super::codemem_db_path();
     if db_path.exists() {
         print_check("Database file exists", true, &db_path.display().to_string());
-        match codemem_storage::Storage::open(&db_path) {
+        match codemem_engine::Storage::open(&db_path) {
             Ok(storage) => {
                 print_check("Database opens successfully", true, "");
 
@@ -64,7 +64,7 @@ pub(crate) fn cmd_doctor() -> anyhow::Result<()> {
     // 2. Vector index
     let index_path = db_path.with_extension("idx");
     if index_path.exists() {
-        match codemem_storage::HnswIndex::with_defaults() {
+        match codemem_engine::HnswIndex::with_defaults() {
             Ok(mut vector) => match vector.load(&index_path) {
                 Ok(()) => {
                     let count = vector.len();
@@ -90,7 +90,7 @@ pub(crate) fn cmd_doctor() -> anyhow::Result<()> {
 
     // 3. Embedding model probe
     let embed_config = codemem_core::CodememConfig::load_or_default();
-    match codemem_embeddings::from_env(Some(&embed_config.embedding)) {
+    match codemem_engine::embeddings_from_env(Some(&embed_config.embedding)) {
         Ok(emb) => match emb.embed("hello world") {
             Ok(v) => print_check(
                 "Embedding provider",

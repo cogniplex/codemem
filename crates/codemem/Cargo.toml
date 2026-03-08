@@ -14,9 +14,9 @@ include = ["src/**", "Cargo.toml", "ui-dist/**"]
 [features]
 default = []
 ui = ["include_dir", "mime_guess"]
-metal = ["codemem-embeddings/metal"]
-cuda = ["codemem-embeddings/cuda"]
-accelerate = ["codemem-embeddings/accelerate"]
+metal = ["codemem-engine/metal"]
+cuda = ["codemem-engine/cuda"]
+accelerate = ["codemem-engine/accelerate"]
 
 [[bin]]
 name = "codemem"
@@ -25,8 +25,6 @@ path = "src/main.rs"
 [dependencies]
 # Internal crates
 codemem-core = { path = "../codemem-core", version = "0.10.0" }
-codemem-storage = { path = "../codemem-storage", version = "0.10.0" }
-codemem-embeddings = { path = "../codemem-embeddings", version = "0.9.0" }
 codemem-engine = { path = "../codemem-engine", version = "0.10.0" }
 
 # Serialization
@@ -80,4 +78,4 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-codemem-embeddings = { path = "../codemem-embeddings", version = "0.9.0", features = ["metal", "accelerate"] }
+codemem-engine = { path = "../codemem-engine", version = "0.10.0", features = ["metal", "accelerate"] }

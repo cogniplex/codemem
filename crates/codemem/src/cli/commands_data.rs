@@ -1,64 +1,13 @@
 //! Serve, ingest, and watch commands.
 
-use codemem_core::{GraphBackend, StorageBackend, VectorBackend};
+use codemem_core::GraphBackend;
 use std::sync::Arc;
 
-/// Build the shared server components (storage, vector, graph, embeddings).
-/// Returns (McpServer, storage_for_api) — the second is a separate
-/// Storage handle suitable for async task boundaries in the API.
-fn build_server() -> anyhow::Result<(crate::mcp::McpServer, codemem_storage::Storage)> {
+/// Build the shared server components via the engine's unified constructor.
+fn build_server() -> anyhow::Result<crate::mcp::McpServer> {
     let db_path = super::codemem_db_path();
-
-    // Ensure ~/.codemem/ exists (CodememEngine::from_db_path does this,
-    // but build_server bypasses the engine for direct Storage access)
-    if let Some(parent) = db_path.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-
-    let config = codemem_core::CodememConfig::load_or_default();
-    tracing::info!("Vector dimensions: {}", config.vector.dimensions);
-
-    let storage = codemem_storage::Storage::open(&db_path)?;
-    let vector_config = codemem_core::VectorConfig {
-        dimensions: config.vector.dimensions,
-        ..codemem_core::VectorConfig::default()
-    };
-    let mut vector = codemem_storage::HnswIndex::new(vector_config)?;
-
-    let index_path = db_path.with_extension("idx");
-    if index_path.exists() {
-        if let Err(e) = vector.load(&index_path) {
-            tracing::warn!("Stale or corrupt vector index, rebuilding: {e}");
-            vector = super::rebuild_vector_index_with_dims(&storage, config.vector.dimensions)?;
-            let _ = vector.save(&index_path);
-        }
-    } else {
-        // No .idx file — rebuild from stored embeddings if any exist
-        let emb_count = storage.list_all_embeddings().map(|e| e.len()).unwrap_or(0);
-        if emb_count > 0 {
-            tracing::info!("No vector index file, rebuilding from {emb_count} stored embeddings");
-            vector = super::rebuild_vector_index_with_dims(&storage, config.vector.dimensions)?;
-            let _ = vector.save(&index_path);
-        }
-    }
-
-    let graph = codemem_storage::GraphEngine::from_storage(&storage)?;
-    let embeddings = match codemem_embeddings::from_env(Some(&config.embedding)) {
-        Ok(provider) => Some(provider),
-        Err(e) => {
-            tracing::warn!("Embedding provider unavailable, continuing without embeddings: {e}");
-            None
-        }
-    };
-
-    let server = crate::mcp::McpServer::new(Box::new(storage), vector, graph, embeddings);
-
-    // Open a second storage connection for the API layer (async-safe)
-    let api_storage = codemem_storage::Storage::open(&db_path)?;
-
-    Ok((server, api_storage))
+    let server = crate::mcp::McpServer::from_db_path(&db_path)?;
+    Ok(server)
 }
 
 fn start_background_watcher() {
@@ -76,7 +25,7 @@ fn start_background_watcher() {
 }
 
 pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> {
-    let (server, api_storage) = build_server()?;
+    let server = build_server()?;
     start_background_watcher();
 
     match (api, http) {
@@ -91,7 +40,7 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
         // REST API + embedded frontend + stdio MCP
         (true, false) => {
             let server = Arc::new(server);
-            let api_server = crate::api::ApiServer::new(Arc::clone(&server), api_storage);
+            let api_server = crate::api::ApiServer::new(Arc::clone(&server));
 
             // Run stdio in a background thread, HTTP in the main tokio runtime
             let server_for_stdio = Arc::clone(&server);
@@ -113,7 +62,7 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
         // HTTP MCP + REST API + embedded frontend (no stdio)
         (true, true) => {
             let server = Arc::new(server);
-            let api_server = crate::api::ApiServer::new(Arc::clone(&server), api_storage);
+            let api_server = crate::api::ApiServer::new(Arc::clone(&server));
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
@@ -126,7 +75,7 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
         // HTTP MCP only (for remote MCP clients) — use the API server with MCP mounted
         (false, true) => {
             let server = Arc::new(server);
-            let api_server = crate::api::ApiServer::new(Arc::clone(&server), api_storage);
+            let api_server = crate::api::ApiServer::new(Arc::clone(&server));
 
             tracing::info!("Codemem MCP HTTP transport on http://localhost:{port}/mcp");
             let rt = tokio::runtime::Runtime::new()?;

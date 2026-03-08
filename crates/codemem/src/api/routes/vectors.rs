@@ -1,12 +1,12 @@
 //! Vector space visualization (PCA projection) routes.
 
-use crate::api::pca::power_iteration_top_k;
 use crate::api::types::{VectorPoint, VectorQuery};
 use crate::api::AppState;
 use axum::{
     extract::{Query, State},
     Json,
 };
+use codemem_engine::pca::power_iteration_top_k;
 use ndarray::{Array1, Array2};
 use std::collections::HashMap;
 use std::sync::Arc;
