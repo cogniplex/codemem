@@ -37,8 +37,8 @@ impl Storage {
         let metadata_json = serde_json::to_string(&memory.metadata)?;
 
         tx.execute(
-            "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 memory.id,
                 memory.content,
@@ -50,6 +50,7 @@ impl Storage {
                 tags_json,
                 metadata_json,
                 memory.namespace,
+                memory.session_id,
                 memory.created_at.timestamp(),
                 memory.updated_at.timestamp(),
                 memory.last_accessed_at.timestamp(),
@@ -81,7 +82,7 @@ impl Storage {
 
         let result = conn
             .query_row(
-                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
+                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(MemoryRow {
@@ -95,9 +96,10 @@ impl Storage {
                         tags: row.get(7)?,
                         metadata: row.get(8)?,
                         namespace: row.get(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get(11)?,
-                        last_accessed_at: row.get(12)?,
+                        session_id: row.get(10)?,
+                        created_at: row.get(11)?,
+                        updated_at: row.get(12)?,
+                        last_accessed_at: row.get(13)?,
                     })
                 },
             )
@@ -117,7 +119,7 @@ impl Storage {
 
         let result = conn
             .query_row(
-                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
+                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(MemoryRow {
@@ -131,9 +133,10 @@ impl Storage {
                         tags: row.get(7)?,
                         metadata: row.get(8)?,
                         namespace: row.get(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get(11)?,
-                        last_accessed_at: row.get(12)?,
+                        session_id: row.get(10)?,
+                        created_at: row.get(11)?,
+                        updated_at: row.get(12)?,
+                        last_accessed_at: row.get(13)?,
                     })
                 },
             )

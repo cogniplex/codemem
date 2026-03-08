@@ -78,6 +78,7 @@ pub async fn store_memory(
         tags: req.tags.unwrap_or_default(),
         metadata: Default::default(),
         namespace: req.namespace,
+        session_id: None,
         created_at: now,
         updated_at: now,
         last_accessed_at: now,

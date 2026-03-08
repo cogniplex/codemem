@@ -150,6 +150,8 @@ pub struct CodememEngine {
     /// Dirty flag for batch saves: set after `persist_memory_no_save()`,
     /// cleared by `save_index()`.
     dirty: AtomicBool,
+    /// Active session ID for auto-populating `session_id` on persisted memories.
+    active_session_id: RwLock<Option<String>>,
 }
 
 impl CodememEngine {
@@ -184,6 +186,7 @@ impl CodememEngine {
             config,
             metrics: Arc::new(InMemoryMetrics::new()),
             dirty: AtomicBool::new(false),
+            active_session_id: RwLock::new(None),
         }
     }
 
@@ -322,6 +325,7 @@ impl CodememEngine {
             config,
             metrics: Arc::new(InMemoryMetrics::new()),
             dirty: AtomicBool::new(false),
+            active_session_id: RwLock::new(None),
         }
     }
 
@@ -381,6 +385,24 @@ impl CodememEngine {
         self.scoring_weights
             .write()
             .map_err(|e| CodememError::LockPoisoned(format!("scoring_weights write: {e}")))
+    }
+
+    // ── Active Session ───────────────────────────────────────────────────
+
+    /// Set the active session ID for auto-populating `session_id` on persisted memories.
+    pub fn set_active_session(&self, id: Option<String>) {
+        match self.active_session_id.write() {
+            Ok(mut guard) => *guard = id,
+            Err(e) => *e.into_inner() = id,
+        }
+    }
+
+    /// Get the current active session ID.
+    pub fn active_session_id(&self) -> Option<String> {
+        match self.active_session_id.read() {
+            Ok(guard) => guard.clone(),
+            Err(e) => e.into_inner().clone(),
+        }
     }
 
     // ── Public Accessors ──────────────────────────────────────────────────

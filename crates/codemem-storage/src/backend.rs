@@ -8,6 +8,26 @@ use codemem_core::{
 use rusqlite::params;
 use std::collections::HashMap;
 
+/// Generate SQL placeholders for multi-row INSERT: "(?1,?2,...),(?3,?4,...)"
+fn multi_row_placeholders(cols: usize, rows: usize) -> String {
+    let mut s = String::new();
+    for r in 0..rows {
+        if r > 0 {
+            s.push(',');
+        }
+        s.push('(');
+        for c in 0..cols {
+            if c > 0 {
+                s.push(',');
+            }
+            s.push('?');
+            s.push_str(&(r * cols + c + 1).to_string());
+        }
+        s.push(')');
+    }
+    s
+}
+
 /// Macro to delegate pure-forwarding trait methods to `Storage` inherent methods.
 macro_rules! delegate_storage {
     // &self, no args
@@ -72,7 +92,7 @@ impl StorageBackend for Storage {
 
         let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
-            "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at FROM memories WHERE id IN ({})",
+            "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id IN ({})",
             placeholders.join(",")
         );
 
@@ -98,9 +118,10 @@ impl StorageBackend for Storage {
                     tags: row.get(7)?,
                     metadata: row.get(8)?,
                     namespace: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                    last_accessed_at: row.get(12)?,
+                    session_id: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
+                    last_accessed_at: row.get(13)?,
                 })
             })
             .map_err(|e| CodememError::Storage(e.to_string()))?;
@@ -282,35 +303,48 @@ impl StorageBackend for Storage {
     // ── Batch Operations ──────────────────────────────────────────────
 
     fn insert_memories_batch(&self, memories: &[MemoryNode]) -> Result<(), CodememError> {
+        if memories.is_empty() {
+            return Ok(());
+        }
         let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
-        for memory in memories {
-            let tags_json = serde_json::to_string(&memory.tags)?;
-            let metadata_json = serde_json::to_string(&memory.metadata)?;
+        const COLS: usize = 14;
+        const BATCH: usize = 999 / COLS; // 71
 
-            tx.execute(
-                "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                params![
-                    memory.id,
-                    memory.content,
-                    memory.memory_type.to_string(),
-                    memory.importance,
-                    memory.confidence,
-                    memory.access_count,
-                    memory.content_hash,
-                    tags_json,
-                    metadata_json,
-                    memory.namespace,
-                    memory.created_at.timestamp(),
-                    memory.updated_at.timestamp(),
-                    memory.last_accessed_at.timestamp(),
-                ],
-            )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        for chunk in memories.chunks(BATCH) {
+            let placeholders = multi_row_placeholders(COLS, chunk.len());
+            let sql = format!(
+                "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at) VALUES {placeholders}"
+            );
+
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                Vec::with_capacity(chunk.len() * COLS);
+            for memory in chunk {
+                let tags_json = serde_json::to_string(&memory.tags)?;
+                let metadata_json = serde_json::to_string(&memory.metadata)?;
+                param_values.push(Box::new(memory.id.clone()));
+                param_values.push(Box::new(memory.content.clone()));
+                param_values.push(Box::new(memory.memory_type.to_string()));
+                param_values.push(Box::new(memory.importance));
+                param_values.push(Box::new(memory.confidence));
+                param_values.push(Box::new(memory.access_count as i64));
+                param_values.push(Box::new(memory.content_hash.clone()));
+                param_values.push(Box::new(tags_json));
+                param_values.push(Box::new(metadata_json));
+                param_values.push(Box::new(memory.namespace.clone()));
+                param_values.push(Box::new(memory.session_id.clone()));
+                param_values.push(Box::new(memory.created_at.timestamp()));
+                param_values.push(Box::new(memory.updated_at.timestamp()));
+                param_values.push(Box::new(memory.last_accessed_at.timestamp()));
+            }
+
+            let refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|p| p.as_ref()).collect();
+            tx.execute(&sql, refs.as_slice())
+                .map_err(|e| CodememError::Storage(e.to_string()))?;
         }
 
         tx.commit()
@@ -319,18 +353,35 @@ impl StorageBackend for Storage {
     }
 
     fn store_embeddings_batch(&self, items: &[(&str, &[f32])]) -> Result<(), CodememError> {
+        if items.is_empty() {
+            return Ok(());
+        }
         let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
-        for (id, embedding) in items {
-            let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
-            tx.execute(
-                "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding) VALUES (?1, ?2)",
-                params![id, blob],
-            )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        const COLS: usize = 2;
+        const BATCH: usize = 999 / COLS; // 499
+
+        for chunk in items.chunks(BATCH) {
+            let placeholders = multi_row_placeholders(COLS, chunk.len());
+            let sql = format!(
+                "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding) VALUES {placeholders}"
+            );
+
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                Vec::with_capacity(chunk.len() * COLS);
+            for (id, embedding) in chunk {
+                let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+                param_values.push(Box::new(id.to_string()));
+                param_values.push(Box::new(blob));
+            }
+
+            let refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|p| p.as_ref()).collect();
+            tx.execute(&sql, refs.as_slice())
+                .map_err(|e| CodememError::Storage(e.to_string()))?;
         }
 
         tx.commit()
@@ -378,28 +429,41 @@ impl StorageBackend for Storage {
     }
 
     fn insert_graph_nodes_batch(&self, nodes: &[GraphNode]) -> Result<(), CodememError> {
+        if nodes.is_empty() {
+            return Ok(());
+        }
         let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
-        for node in nodes {
-            let payload_json =
-                serde_json::to_string(&node.payload).unwrap_or_else(|_| "{}".to_string());
-            tx.execute(
-                "INSERT OR REPLACE INTO graph_nodes (id, kind, label, payload, centrality, memory_id, namespace)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    node.id,
-                    node.kind.to_string(),
-                    node.label,
-                    payload_json,
-                    node.centrality,
-                    node.memory_id,
-                    node.namespace,
-                ],
-            )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        const COLS: usize = 7;
+        const BATCH: usize = 999 / COLS; // 142
+
+        for chunk in nodes.chunks(BATCH) {
+            let placeholders = multi_row_placeholders(COLS, chunk.len());
+            let sql = format!(
+                "INSERT OR REPLACE INTO graph_nodes (id, kind, label, payload, centrality, memory_id, namespace) VALUES {placeholders}"
+            );
+
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                Vec::with_capacity(chunk.len() * COLS);
+            for node in chunk {
+                let payload_json =
+                    serde_json::to_string(&node.payload).unwrap_or_else(|_| "{}".to_string());
+                param_values.push(Box::new(node.id.clone()));
+                param_values.push(Box::new(node.kind.to_string()));
+                param_values.push(Box::new(node.label.clone()));
+                param_values.push(Box::new(payload_json));
+                param_values.push(Box::new(node.centrality));
+                param_values.push(Box::new(node.memory_id.clone()));
+                param_values.push(Box::new(node.namespace.clone()));
+            }
+
+            let refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|p| p.as_ref()).collect();
+            tx.execute(&sql, refs.as_slice())
+                .map_err(|e| CodememError::Storage(e.to_string()))?;
         }
 
         tx.commit()
@@ -408,30 +472,43 @@ impl StorageBackend for Storage {
     }
 
     fn insert_graph_edges_batch(&self, edges: &[Edge]) -> Result<(), CodememError> {
+        if edges.is_empty() {
+            return Ok(());
+        }
         let conn = self.conn()?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
-        for edge in edges {
-            let props_json =
-                serde_json::to_string(&edge.properties).unwrap_or_else(|_| "{}".to_string());
-            tx.execute(
-                "INSERT OR REPLACE INTO graph_edges (id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
-                    edge.id,
-                    edge.src,
-                    edge.dst,
-                    edge.relationship.to_string(),
-                    edge.weight,
-                    props_json,
-                    edge.created_at.timestamp(),
-                    edge.valid_from.map(|dt| dt.timestamp()),
-                    edge.valid_to.map(|dt| dt.timestamp()),
-                ],
-            )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        const COLS: usize = 9;
+        const BATCH: usize = 999 / COLS; // 111
+
+        for chunk in edges.chunks(BATCH) {
+            let placeholders = multi_row_placeholders(COLS, chunk.len());
+            let sql = format!(
+                "INSERT OR REPLACE INTO graph_edges (id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to) VALUES {placeholders}"
+            );
+
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                Vec::with_capacity(chunk.len() * COLS);
+            for edge in chunk {
+                let props_json =
+                    serde_json::to_string(&edge.properties).unwrap_or_else(|_| "{}".to_string());
+                param_values.push(Box::new(edge.id.clone()));
+                param_values.push(Box::new(edge.src.clone()));
+                param_values.push(Box::new(edge.dst.clone()));
+                param_values.push(Box::new(edge.relationship.to_string()));
+                param_values.push(Box::new(edge.weight));
+                param_values.push(Box::new(props_json));
+                param_values.push(Box::new(edge.created_at.timestamp()));
+                param_values.push(Box::new(edge.valid_from.map(|dt| dt.timestamp())));
+                param_values.push(Box::new(edge.valid_to.map(|dt| dt.timestamp())));
+            }
+
+            let refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|p| p.as_ref()).collect();
+            tx.execute(&sql, refs.as_slice())
+                .map_err(|e| CodememError::Storage(e.to_string()))?;
         }
 
         tx.commit()
@@ -604,7 +681,7 @@ impl StorageBackend for Storage {
     ) -> Result<Vec<MemoryNode>, CodememError> {
         let conn = self.conn()?;
         let mut sql = "SELECT id, content, memory_type, importance, confidence, access_count, \
-                        content_hash, tags, metadata, namespace, created_at, updated_at, \
+                        content_hash, tags, metadata, namespace, session_id, created_at, updated_at, \
                         last_accessed_at FROM memories WHERE 1=1"
             .to_string();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -638,9 +715,10 @@ impl StorageBackend for Storage {
                     tags: row.get(7)?,
                     metadata: row.get(8)?,
                     namespace: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                    last_accessed_at: row.get(12)?,
+                    session_id: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
+                    last_accessed_at: row.get(13)?,
                 })
             })
             .map_err(|e| CodememError::Storage(e.to_string()))?;

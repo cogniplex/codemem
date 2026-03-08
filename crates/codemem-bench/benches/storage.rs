@@ -20,6 +20,7 @@ fn make_memory(i: usize) -> MemoryNode {
         tags: vec!["bench".to_string(), format!("group-{}", i % 10)],
         metadata: HashMap::new(),
         namespace: None,
+        session_id: None,
         created_at: now,
         updated_at: now,
         last_accessed_at: now,

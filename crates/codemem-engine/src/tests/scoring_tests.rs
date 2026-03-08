@@ -88,6 +88,7 @@ fn all_nine_scoring_components_nonzero() {
         tags: vec!["process".to_string(), "request".to_string()],
         metadata: HashMap::new(),
         namespace: None,
+        session_id: None,
         created_at: now,
         updated_at: now,
         last_accessed_at: now,

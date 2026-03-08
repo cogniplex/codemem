@@ -265,6 +265,9 @@ pub struct MemoryNode {
     pub tags: Vec<String>,
     pub metadata: HashMap<String, serde_json::Value>,
     pub namespace: Option<String>,
+    /// The session during which this memory was created (auto-populated by the engine).
+    #[serde(default)]
+    pub session_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_accessed_at: DateTime<Utc>,

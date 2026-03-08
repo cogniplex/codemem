@@ -294,6 +294,7 @@ pub(crate) fn cmd_import(
             tags,
             metadata,
             namespace,
+            session_id: None,
             created_at: now,
             updated_at: now,
             last_accessed_at: now,

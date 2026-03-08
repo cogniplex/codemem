@@ -762,6 +762,7 @@ fn make_test_memory(id: &str, content: &str) -> codemem_core::MemoryNode {
         tags: vec!["test".to_string()],
         metadata: std::collections::HashMap::new(),
         namespace: None,
+        session_id: None,
         created_at: now,
         updated_at: now,
         last_accessed_at: now,

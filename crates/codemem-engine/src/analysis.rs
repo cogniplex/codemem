@@ -356,6 +356,7 @@ impl CodememEngine {
                     ],
                     metadata,
                     namespace: namespace.map(|s| s.to_string()),
+                    session_id: None,
                     created_at: now,
                     updated_at: now,
                     last_accessed_at: now,

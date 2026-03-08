@@ -28,6 +28,7 @@ fn make_memory_with_opts(
         tags: tags.iter().map(|s| s.to_string()).collect(),
         metadata: HashMap::new(),
         namespace: namespace.map(String::from),
+        session_id: None,
         created_at: now,
         updated_at: now,
         last_accessed_at: now,

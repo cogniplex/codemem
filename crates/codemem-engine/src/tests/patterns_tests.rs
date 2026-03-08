@@ -25,6 +25,7 @@ fn make_memory(content: &str, tool: &str, extra_metadata: Vec<(&str, &str)>) -> 
         tags: vec![],
         metadata,
         namespace: None,
+        session_id: None,
         created_at: now,
         updated_at: now,
         last_accessed_at: now,

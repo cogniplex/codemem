@@ -378,7 +378,7 @@ impl Storage {
         {
             (
                 "SELECT m.id, m.content, m.memory_type, m.importance, m.confidence, m.access_count, \
-                 m.content_hash, m.tags, m.metadata, m.namespace, m.created_at, m.updated_at, m.last_accessed_at \
+                 m.content_hash, m.tags, m.metadata, m.namespace, m.session_id, m.created_at, m.updated_at, m.last_accessed_at \
                  FROM memories m, json_each(m.tags) AS jt \
                  WHERE jt.value = ?1 AND m.namespace = ?2 \
                  ORDER BY m.created_at DESC LIMIT ?3"
@@ -392,7 +392,7 @@ impl Storage {
         } else {
             (
                 "SELECT m.id, m.content, m.memory_type, m.importance, m.confidence, m.access_count, \
-                 m.content_hash, m.tags, m.metadata, m.namespace, m.created_at, m.updated_at, m.last_accessed_at \
+                 m.content_hash, m.tags, m.metadata, m.namespace, m.session_id, m.created_at, m.updated_at, m.last_accessed_at \
                  FROM memories m, json_each(m.tags) AS jt \
                  WHERE jt.value = ?1 \
                  ORDER BY m.created_at DESC LIMIT ?2"
@@ -413,9 +413,9 @@ impl Storage {
 
         let rows = stmt
             .query_map(params_refs.as_slice(), |row| {
-                let created_ts: i64 = row.get(10)?;
-                let updated_ts: i64 = row.get(11)?;
-                let accessed_ts: i64 = row.get(12)?;
+                let created_ts: i64 = row.get(11)?;
+                let updated_ts: i64 = row.get(12)?;
+                let accessed_ts: i64 = row.get(13)?;
                 let tags_json: String = row.get(7)?;
                 let metadata_json: String = row.get(8)?;
                 let memory_type_str: String = row.get(2)?;
@@ -433,6 +433,7 @@ impl Storage {
                     tags: serde_json::from_str(&tags_json).unwrap_or_default(),
                     metadata: serde_json::from_str(&metadata_json).unwrap_or_default(),
                     namespace: row.get(9)?,
+                    session_id: row.get(10)?,
                     created_at: chrono::DateTime::from_timestamp(created_ts, 0)
                         .unwrap_or_default()
                         .with_timezone(&chrono::Utc),

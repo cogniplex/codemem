@@ -105,6 +105,7 @@ impl CodememEngine {
                 tags: all_tags,
                 metadata: HashMap::new(),
                 namespace: None,
+                session_id: None,
                 created_at: now,
                 updated_at: now,
                 last_accessed_at: now,

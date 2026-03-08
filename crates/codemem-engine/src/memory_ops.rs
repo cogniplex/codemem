@@ -28,6 +28,20 @@ impl CodememEngine {
     /// 3. Graph lock
     /// 4. Vector lock
     fn persist_memory_inner(&self, memory: &MemoryNode, save: bool) -> Result<(), CodememError> {
+        // Auto-populate session_id from the engine's active session if not already set
+        let memory = if memory.session_id.is_none() {
+            if let Some(active_sid) = self.active_session_id() {
+                let mut m = memory.clone();
+                m.session_id = Some(active_sid);
+                std::borrow::Cow::Owned(m)
+            } else {
+                std::borrow::Cow::Borrowed(memory)
+            }
+        } else {
+            std::borrow::Cow::Borrowed(memory)
+        };
+        let memory = memory.as_ref();
+
         // 1. Store in SQLite
         self.storage.insert_memory(memory)?;
 
@@ -156,6 +170,7 @@ impl CodememEngine {
             tags: new_tags,
             metadata: old_memory.metadata.clone(),
             namespace: old_memory.namespace.clone(),
+            session_id: None,
             created_at: now,
             updated_at: now,
             last_accessed_at: now,
@@ -232,6 +247,7 @@ impl CodememEngine {
                 tags,
                 metadata: std::collections::HashMap::new(),
                 namespace: source_memory.namespace.clone(),
+                session_id: None,
                 created_at: now,
                 updated_at: now,
                 last_accessed_at: now,
@@ -319,6 +335,7 @@ impl CodememEngine {
             tags,
             metadata: std::collections::HashMap::new(),
             namespace: found.iter().find_map(|m| m.namespace.clone()),
+            session_id: None,
             created_at: now,
             updated_at: now,
             last_accessed_at: now,
