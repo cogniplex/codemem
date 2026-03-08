@@ -1,8 +1,8 @@
 {
-  "crates/codemem-core": "0.9.0",
-  "crates/codemem-storage": "0.9.0",
-  "crates/codemem-embeddings": "0.8.1",
-  "crates/codemem-engine": "0.9.0",
-  "crates/codemem": "0.9.0",
-  "crates/codemem-bench": "0.8.1"
+  "crates/codemem-core": "0.10.0",
+  "crates/codemem-storage": "0.10.0",
+  "crates/codemem-embeddings": "0.9.0",
+  "crates/codemem-engine": "0.10.0",
+  "crates/codemem": "0.10.0",
+  "crates/codemem-bench": "0.8.2"
 }
