@@ -99,26 +99,16 @@ impl CodememEngine {
         }
 
         // ── Phase 2: Core persist via persist_memory_no_save ─────────────
-        let hash = codemem_storage::Storage::content_hash(content);
-        let memory = MemoryNode {
-            id: id.clone(),
-            content: content.to_string(),
-            memory_type: MemoryType::Insight,
-            importance: importance.clamp(0.0, 1.0),
-            confidence: self.config.enrichment.insight_confidence,
-            access_count: 0,
-            content_hash: hash,
-            tags: all_tags,
-            metadata: HashMap::from([
-                ("track".into(), json!(track)),
-                ("generated_by".into(), json!("enrichment_pipeline")),
-            ]),
-            namespace: namespace.map(String::from),
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::new(content, MemoryType::Insight);
+        memory.id = id.clone();
+        memory.importance = importance.clamp(0.0, 1.0);
+        memory.confidence = self.config.enrichment.insight_confidence;
+        memory.tags = all_tags;
+        memory.metadata = HashMap::from([
+            ("track".into(), json!(track)),
+            ("generated_by".into(), json!("enrichment_pipeline")),
+        ]);
+        memory.namespace = namespace.map(String::from);
 
         if self.persist_memory_no_save(&memory).is_err() {
             return None; // duplicate or error -- skip silently
@@ -247,33 +237,22 @@ impl CodememEngine {
         namespace: Option<&str>,
         links: &[String],
     ) -> Option<String> {
-        let hash = codemem_storage::Storage::content_hash(content);
-        let now = chrono::Utc::now();
         let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now();
         let tags = vec![
             "static-analysis".to_string(),
             "track:code-smell".to_string(),
         ];
 
-        let memory = MemoryNode {
-            id: id.clone(),
-            content: content.to_string(),
-            memory_type: MemoryType::Pattern,
-            importance: 0.5,
-            confidence: self.config.enrichment.insight_confidence,
-            access_count: 0,
-            content_hash: hash,
-            tags,
-            metadata: HashMap::from([
-                ("track".into(), json!("code-smell")),
-                ("generated_by".into(), json!("enrichment_pipeline")),
-            ]),
-            namespace: namespace.map(String::from),
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::new(content, MemoryType::Pattern);
+        memory.id = id.clone();
+        memory.confidence = self.config.enrichment.insight_confidence;
+        memory.tags = tags;
+        memory.metadata = HashMap::from([
+            ("track".into(), json!("code-smell")),
+            ("generated_by".into(), json!("enrichment_pipeline")),
+        ]);
+        memory.namespace = namespace.map(String::from);
 
         if self.persist_memory_no_save(&memory).is_err() {
             return None;

@@ -21,6 +21,17 @@ pub use graph::GraphEngine;
 pub use graph::RawGraphMetrics;
 pub use vector::HnswIndex;
 
+/// Extension trait for converting `rusqlite::Error` results into `CodememError::Storage`.
+pub(crate) trait MapStorageErr<T> {
+    fn storage_err(self) -> Result<T, CodememError>;
+}
+
+impl<T> MapStorageErr<T> for Result<T, rusqlite::Error> {
+    fn storage_err(self) -> Result<T, CodememError> {
+        self.map_err(|e| CodememError::Storage(e.to_string()))
+    }
+}
+
 /// SQLite-backed storage for Codemem memories, embeddings, and graph data.
 ///
 /// Wraps `rusqlite::Connection` in a `Mutex` to satisfy `Send + Sync` bounds
@@ -52,27 +63,27 @@ impl Storage {
     ) -> Result<(), CodememError> {
         // WAL mode for concurrent reads
         conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         // Cache size (negative value = KiB in SQLite)
         let cache_kb = i64::from(cache_size_mb.unwrap_or(64)) * 1000;
         conn.pragma_update(None, "cache_size", -cache_kb)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         // Foreign keys ON
         conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         // NORMAL sync (good balance of safety vs speed)
         conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         // 256MB mmap for faster reads
         conn.pragma_update(None, "mmap_size", 268435456i64)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         // Temp tables in memory
         conn.pragma_update(None, "temp_store", "MEMORY")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         // Busy timeout
         let timeout = busy_timeout_secs.unwrap_or(5);
         conn.busy_timeout(std::time::Duration::from_secs(timeout))
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(())
     }
 
@@ -87,7 +98,7 @@ impl Storage {
         cache_size_mb: Option<u32>,
         busy_timeout_secs: Option<u64>,
     ) -> Result<Self, CodememError> {
-        let conn = Connection::open(path).map_err(|e| CodememError::Storage(e.to_string()))?;
+        let conn = Connection::open(path).storage_err()?;
         Self::apply_pragmas(&conn, cache_size_mb, busy_timeout_secs)?;
         migrations::run_migrations(&conn)?;
         Ok(Self {
@@ -111,7 +122,7 @@ impl Storage {
         cache_size_mb: Option<u32>,
         busy_timeout_secs: Option<u64>,
     ) -> Result<Self, CodememError> {
-        let conn = Connection::open(path).map_err(|e| CodememError::Storage(e.to_string()))?;
+        let conn = Connection::open(path).storage_err()?;
         Self::apply_pragmas(&conn, cache_size_mb, busy_timeout_secs)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -121,8 +132,7 @@ impl Storage {
 
     /// Open an in-memory database (for testing).
     pub fn open_in_memory() -> Result<Self, CodememError> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| CodememError::Storage(e.to_string()))?;
+        let conn = Connection::open_in_memory().storage_err()?;
         Self::apply_pragmas(&conn, None, None)?;
         migrations::run_migrations(&conn)?;
         Ok(Self {

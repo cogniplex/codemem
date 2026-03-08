@@ -240,33 +240,23 @@ fn detected_pattern_serialization() {
 // ── MemoryNode JSON round-trip ──────────────────────────────────────────────
 
 fn make_memory_node() -> MemoryNode {
-    let now = Utc::now();
-    let mut metadata = HashMap::new();
-    metadata.insert(
+    let mut m = MemoryNode::test_default("Use early returns for error handling");
+    m.id = "mem-abc-123".to_string();
+    m.memory_type = MemoryType::Decision;
+    m.importance = 0.8;
+    m.confidence = 0.95;
+    m.access_count = 3;
+    m.tags = vec!["rust".to_string(), "error-handling".to_string()];
+    m.metadata.insert(
         "source".to_string(),
         serde_json::Value::String("test".to_string()),
     );
-    metadata.insert(
+    m.metadata.insert(
         "count".to_string(),
         serde_json::Value::Number(serde_json::Number::from(42)),
     );
-
-    MemoryNode {
-        id: "mem-abc-123".to_string(),
-        content: "Use early returns for error handling".to_string(),
-        memory_type: MemoryType::Decision,
-        importance: 0.8,
-        confidence: 0.95,
-        access_count: 3,
-        content_hash: content_hash("Use early returns for error handling"),
-        tags: vec!["rust".to_string(), "error-handling".to_string()],
-        metadata,
-        namespace: Some("my-project".to_string()),
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    m.namespace = Some("my-project".to_string());
+    m
 }
 
 #[test]
@@ -292,23 +282,10 @@ fn memory_node_json_roundtrip() {
 
 #[test]
 fn memory_node_empty_content() {
-    let now = Utc::now();
-    let node = MemoryNode {
-        id: "mem-empty".to_string(),
-        content: String::new(),
-        memory_type: MemoryType::Context,
-        importance: 0.0,
-        confidence: 0.0,
-        access_count: 0,
-        content_hash: content_hash(""),
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut node = MemoryNode::test_default("");
+    node.id = "mem-empty".to_string();
+    node.importance = 0.0;
+    node.confidence = 0.0;
     let json = serde_json::to_string(&node).unwrap();
     let parsed: MemoryNode = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed.content, "");
@@ -319,25 +296,14 @@ fn memory_node_empty_content() {
 
 #[test]
 fn memory_node_unicode_content() {
-    let now = Utc::now();
     let unicode_content =
         "Unicode: \u{1F600} \u{1F680} \u{4E16}\u{754C} caf\u{E9} \u{00FC}ber \u{2603}\u{FE0F}";
-    let node = MemoryNode {
-        id: "mem-unicode".to_string(),
-        content: unicode_content.to_string(),
-        memory_type: MemoryType::Insight,
-        importance: 0.5,
-        confidence: 0.5,
-        access_count: 1,
-        content_hash: content_hash(unicode_content),
-        tags: vec!["\u{1F3F7}\u{FE0F}tag".to_string()],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut node = MemoryNode::test_default(unicode_content);
+    node.id = "mem-unicode".to_string();
+    node.memory_type = MemoryType::Insight;
+    node.confidence = 0.5;
+    node.access_count = 1;
+    node.tags = vec!["\u{1F3F7}\u{FE0F}tag".to_string()];
     let json = serde_json::to_string(&node).unwrap();
     let parsed: MemoryNode = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed.content, unicode_content);
@@ -346,23 +312,11 @@ fn memory_node_unicode_content() {
 
 #[test]
 fn memory_node_empty_tags() {
-    let now = Utc::now();
-    let node = MemoryNode {
-        id: "mem-no-tags".to_string(),
-        content: "no tags here".to_string(),
-        memory_type: MemoryType::Pattern,
-        importance: 0.3,
-        confidence: 0.7,
-        access_count: 0,
-        content_hash: content_hash("no tags here"),
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut node = MemoryNode::test_default("no tags here");
+    node.id = "mem-no-tags".to_string();
+    node.memory_type = MemoryType::Pattern;
+    node.importance = 0.3;
+    node.confidence = 0.7;
     let json = serde_json::to_string(&node).unwrap();
     let parsed: MemoryNode = serde_json::from_str(&json).unwrap();
     assert!(parsed.tags.is_empty());

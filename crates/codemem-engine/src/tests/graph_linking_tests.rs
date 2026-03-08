@@ -2,7 +2,6 @@ use crate::CodememEngine;
 use codemem_core::{
     Edge, GraphBackend, GraphNode, MemoryNode, MemoryType, NodeKind, RelationshipType,
 };
-use codemem_storage::Storage;
 use std::collections::HashMap;
 
 fn make_memory(id: &str, content: &str) -> MemoryNode {
@@ -18,23 +17,14 @@ fn make_memory_with_opts(
     importance: f64,
     confidence: f64,
 ) -> MemoryNode {
-    let now = chrono::Utc::now();
-    MemoryNode {
-        id: id.to_string(),
-        content: content.to_string(),
-        memory_type,
-        importance,
-        confidence,
-        access_count: 0,
-        content_hash: Storage::content_hash(content),
-        tags: tags.iter().map(|s| s.to_string()).collect(),
-        metadata: HashMap::new(),
-        namespace: namespace.map(String::from),
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::test_default(content);
+    m.id = id.to_string();
+    m.memory_type = memory_type;
+    m.importance = importance;
+    m.confidence = confidence;
+    m.tags = tags.iter().map(|s| s.to_string()).collect();
+    m.namespace = namespace.map(String::from);
+    m
 }
 
 /// Helper: add a graph node to both storage and in-memory graph.
@@ -357,23 +347,11 @@ fn auto_link_by_tags_duplicate_tags_linked_once() {
     engine.persist_memory(&m1).unwrap();
 
     // m2 has the same tag twice — the HashSet in auto_link_by_tags should dedup
-    let now = chrono::Utc::now();
-    let m2 = MemoryNode {
-        id: "tag-dup2".to_string(),
-        content: "second memory with dup tags".to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.7,
-        confidence: 0.9,
-        access_count: 0,
-        content_hash: Storage::content_hash("second memory with dup tags"),
-        tags: vec!["topic-x".to_string(), "topic-x".to_string()],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut m2 = MemoryNode::test_default("second memory with dup tags");
+    m2.id = "tag-dup2".to_string();
+    m2.importance = 0.7;
+    m2.confidence = 0.9;
+    m2.tags = vec!["topic-x".to_string(), "topic-x".to_string()];
     engine.persist_memory(&m2).unwrap();
 
     let graph = engine.lock_graph().unwrap();

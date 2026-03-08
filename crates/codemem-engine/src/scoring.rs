@@ -57,19 +57,8 @@ pub fn graph_strength_for_memory(graph: &GraphEngine, memory_id: &str) -> f64 {
     score.min(1.0)
 }
 
-/// Truncate a string to `max` bytes, appending "..." if truncated.
-/// Handles multi-byte UTF-8 safely by finding the nearest char boundary.
-pub fn truncate_content(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        let mut end = max;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &s[..end])
-    }
-}
+/// Re-export the canonical truncate from codemem-core.
+pub use codemem_core::truncate as truncate_content;
 
 /// Compute 9-component hybrid score for a memory against a query.
 /// The `graph` parameter is used to look up edge counts for graph strength scoring.

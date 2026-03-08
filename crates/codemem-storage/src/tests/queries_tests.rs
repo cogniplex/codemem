@@ -1,5 +1,5 @@
 use crate::Storage;
-use codemem_core::{MemoryNode, MemoryType};
+use codemem_core::MemoryNode;
 use std::collections::HashMap;
 
 fn test_memory_with_metadata(
@@ -7,28 +7,14 @@ fn test_memory_with_metadata(
     tool: &str,
     extra: HashMap<String, serde_json::Value>,
 ) -> MemoryNode {
-    let now = chrono::Utc::now();
     let mut metadata = extra;
     metadata.insert(
         "tool".to_string(),
         serde_json::Value::String(tool.to_string()),
     );
-    MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.5,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: Storage::content_hash(content),
-        tags: vec![],
-        metadata,
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::test_default(content);
+    m.metadata = metadata;
+    m
 }
 
 #[test]
@@ -256,23 +242,10 @@ fn start_session_ignores_duplicate() {
 // ── find_memory_ids_by_tag Tests ────────────────────────────────────
 
 fn tagged_memory(content: &str, tags: Vec<String>, namespace: Option<String>) -> MemoryNode {
-    let now = chrono::Utc::now();
-    MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.5,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: Storage::content_hash(content),
-        tags,
-        metadata: HashMap::new(),
-        namespace,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::test_default(content);
+    m.tags = tags;
+    m.namespace = namespace;
+    m
 }
 
 #[test]

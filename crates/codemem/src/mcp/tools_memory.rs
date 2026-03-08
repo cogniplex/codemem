@@ -6,7 +6,6 @@ use super::types::ToolResult;
 use super::McpServer;
 use codemem_core::{CodememError, Edge, GraphBackend, MemoryType, RelationshipType};
 use codemem_engine::SplitPart;
-use codemem_storage::Storage;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -25,26 +24,11 @@ impl McpServer {
         let tags = parse_string_array(args, "tags");
         let namespace = parse_opt_string(args, "namespace");
 
-        let now = chrono::Utc::now();
-        let id = uuid::Uuid::new_v4().to_string();
-        let hash = Storage::content_hash(content);
-
-        let memory = codemem_core::MemoryNode {
-            id: id.clone(),
-            content: content.to_string(),
-            memory_type,
-            importance,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: hash,
-            tags,
-            metadata: HashMap::new(),
-            namespace,
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = codemem_core::MemoryNode::new(content, memory_type);
+        let id = memory.id.clone();
+        memory.importance = importance;
+        memory.tags = tags;
+        memory.namespace = namespace;
 
         match self.engine.persist_memory(&memory) {
             Ok(()) => {}
@@ -60,6 +44,7 @@ impl McpServer {
                 Ok(g) => g,
                 Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
             };
+            let now = chrono::Utc::now();
             for link_val in links {
                 if let Some(link_id) = link_val.as_str() {
                     let edge = Edge {

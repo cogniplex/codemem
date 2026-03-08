@@ -1,6 +1,6 @@
 //! Stats, consolidation, pattern queries, and session management on Storage.
 
-use crate::Storage;
+use crate::{MapStorageErr, Storage};
 use codemem_core::{CodememError, ConsolidationLogEntry, Session, StorageStats};
 use rusqlite::params;
 
@@ -12,7 +12,7 @@ impl Storage {
         let conn = self.conn()?;
         let result: String = conn
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(result == "ok")
     }
 
@@ -25,7 +25,7 @@ impl Storage {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(version)
     }
 
@@ -52,7 +52,7 @@ impl Storage {
                     ))
                 },
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(StorageStats {
             memory_count: memory_count as usize,
@@ -76,7 +76,7 @@ impl Storage {
             "INSERT INTO consolidation_log (cycle_type, run_at, affected_count) VALUES (?1, ?2, ?3)",
             params![cycle_type, now, affected_count as i64],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
         Ok(())
     }
 
@@ -91,7 +91,7 @@ impl Storage {
                  )
                  ORDER BY cycle_type",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let entries = stmt
             .query_map([], |row| {
@@ -101,9 +101,9 @@ impl Storage {
                     affected_count: row.get::<_, i64>(2)? as usize,
                 })
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(entries)
     }
@@ -142,9 +142,7 @@ impl Storage {
              ORDER BY cnt DESC"
         };
 
-        let mut stmt = conn
-            .prepare(sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(sql).storage_err()?;
 
         let rows = if let Some(ns) = namespace {
             stmt.query_map(params![ns, min_count as i64], |row| {
@@ -154,9 +152,9 @@ impl Storage {
                     row.get::<_, String>(2)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         } else {
             stmt.query_map(params![min_count as i64], |row| {
                 Ok((
@@ -165,9 +163,9 @@ impl Storage {
                     row.get::<_, String>(2)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         };
 
         Ok(rows
@@ -207,9 +205,7 @@ impl Storage {
              ORDER BY cnt DESC"
         };
 
-        let mut stmt = conn
-            .prepare(sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(sql).storage_err()?;
 
         let rows = if let Some(ns) = namespace {
             stmt.query_map(params![ns, min_count as i64], |row| {
@@ -219,9 +215,9 @@ impl Storage {
                     row.get::<_, String>(2)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         } else {
             stmt.query_map(params![min_count as i64], |row| {
                 Ok((
@@ -230,9 +226,9 @@ impl Storage {
                     row.get::<_, String>(2)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         };
 
         Ok(rows
@@ -268,24 +264,22 @@ impl Storage {
              ORDER BY cnt DESC"
         };
 
-        let mut stmt = conn
-            .prepare(sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(sql).storage_err()?;
 
         let rows = if let Some(ns) = namespace {
             stmt.query_map(params![ns], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         } else {
             stmt.query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         };
 
         Ok(rows
@@ -324,9 +318,7 @@ impl Storage {
              ORDER BY cnt DESC"
         };
 
-        let mut stmt = conn
-            .prepare(sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(sql).storage_err()?;
 
         let rows = if let Some(ns) = namespace {
             stmt.query_map(params![ns, min_count as i64], |row| {
@@ -336,9 +328,9 @@ impl Storage {
                     row.get::<_, String>(2)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         } else {
             stmt.query_map(params![min_count as i64], |row| {
                 Ok((
@@ -347,9 +339,9 @@ impl Storage {
                     row.get::<_, String>(2)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         };
 
         Ok(rows
@@ -407,9 +399,7 @@ impl Storage {
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(|b| &**b).collect();
 
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(&sql).storage_err()?;
 
         let rows = stmt
             .query_map(params_refs.as_slice(), |row| {
@@ -445,9 +435,9 @@ impl Storage {
                         .with_timezone(&chrono::Utc),
                 })
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(rows)
     }
@@ -462,7 +452,7 @@ impl Storage {
             "INSERT OR IGNORE INTO sessions (id, namespace, started_at) VALUES (?1, ?2, ?3)",
             params![id, namespace, now],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
         Ok(())
     }
 
@@ -474,7 +464,7 @@ impl Storage {
             "UPDATE sessions SET ended_at = ?1, summary = ?2 WHERE id = ?3",
             params![now, summary, id],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
         Ok(())
     }
 
@@ -501,7 +491,7 @@ impl Storage {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![session_id, tool_name, file_path, directory, pattern, now],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
         Ok(())
     }
 
@@ -531,7 +521,7 @@ impl Storage {
                     ))
                 },
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(codemem_core::SessionActivitySummary {
             files_read: files_read as usize,
@@ -554,15 +544,15 @@ impl Storage {
                  WHERE session_id = ?1 AND directory IS NOT NULL
                  GROUP BY directory ORDER BY cnt DESC LIMIT ?2",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let rows = stmt
             .query_map(params![session_id, limit as i64], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(rows
             .into_iter()
@@ -586,7 +576,7 @@ impl Storage {
                 params![session_id, dedup_tag],
                 |row| row.get(0),
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(count > 0)
     }
 
@@ -604,7 +594,7 @@ impl Storage {
                 params![session_id, directory],
                 |row| row.get(0),
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(count as usize)
     }
 
@@ -622,7 +612,7 @@ impl Storage {
                 params![session_id, file_path],
                 |row| row.get(0),
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(count > 0)
     }
 
@@ -640,7 +630,7 @@ impl Storage {
                 params![session_id, pattern],
                 |row| row.get(0),
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(count as usize)
     }
 
@@ -672,23 +662,17 @@ impl Storage {
         };
 
         if let Some(ns) = namespace {
-            let mut stmt = conn
-                .prepare(sql_with_ns)
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
+            let mut stmt = conn.prepare(sql_with_ns).storage_err()?;
             let rows = stmt
                 .query_map(params![ns, limit as i64], map_row)
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| CodememError::Storage(e.to_string()))
+                .storage_err()?;
+            rows.collect::<Result<Vec<_>, _>>().storage_err()
         } else {
-            let mut stmt = conn
-                .prepare(sql_all)
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
+            let mut stmt = conn.prepare(sql_all).storage_err()?;
             let rows = stmt
                 .query_map(params![limit as i64], map_row)
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| CodememError::Storage(e.to_string()))
+                .storage_err()?;
+            rows.collect::<Result<Vec<_>, _>>().storage_err()
         }
     }
 
@@ -735,15 +719,13 @@ impl Storage {
         let refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
 
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(&sql).storage_err()?;
 
         let ids = stmt
             .query_map(refs.as_slice(), |row| row.get(0))
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<String>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(ids)
     }
@@ -757,23 +739,21 @@ impl Storage {
         let conn = self.conn()?;
         let like_pattern = format!("{prefix}%");
 
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let tx = conn.unchecked_transaction().storage_err()?;
 
         // Delete edges where src or dst matches prefix
         tx.execute(
             "DELETE FROM graph_edges WHERE src LIKE ?1 OR dst LIKE ?1",
             params![like_pattern],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
 
         // Delete embeddings for matching nodes
         tx.execute(
             "DELETE FROM memory_embeddings WHERE memory_id LIKE ?1",
             params![like_pattern],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
 
         // Delete the nodes themselves
         let rows = tx
@@ -781,10 +761,9 @@ impl Storage {
                 "DELETE FROM graph_nodes WHERE id LIKE ?1",
                 params![like_pattern],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
 
         Ok(rows)
     }

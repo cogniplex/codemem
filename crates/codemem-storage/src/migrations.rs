@@ -1,3 +1,4 @@
+use crate::MapStorageErr;
 use codemem_core::CodememError;
 use rusqlite::Connection;
 
@@ -60,7 +61,7 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CodememError> {
             applied_at INTEGER NOT NULL
         );",
     )
-    .map_err(|e| CodememError::Storage(e.to_string()))?;
+    .storage_err()?;
 
     // Get current version
     let current_version: u32 = conn
@@ -69,7 +70,7 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CodememError> {
             [],
             |row| row.get(0),
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
 
     // Run unapplied migrations, each wrapped in an EXCLUSIVE transaction
     // so migration SQL + version INSERT are atomic.
@@ -80,9 +81,7 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CodememError> {
                 migration.version,
                 migration.description
             );
-            let tx = conn
-                .unchecked_transaction()
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
+            let tx = conn.unchecked_transaction().storage_err()?;
 
             tx.execute_batch(migration.sql).map_err(|e| {
                 CodememError::Storage(format!(
@@ -98,10 +97,9 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<(), CodememError> {
                     chrono::Utc::now().timestamp()
                 ],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
-            tx.commit()
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
+            tx.commit().storage_err()?;
         }
     }
 

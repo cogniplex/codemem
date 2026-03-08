@@ -5,6 +5,10 @@ pub mod error;
 pub mod metrics;
 pub mod traits;
 pub mod types;
+pub mod utils;
+
+// ── utils ───────────────────────────────────────────────────────────────────
+pub use utils::truncate;
 
 // ── config ──────────────────────────────────────────────────────────────────
 pub use config::{ChunkingConfig, CodememConfig, EmbeddingConfig, EnrichmentConfig, StorageConfig};

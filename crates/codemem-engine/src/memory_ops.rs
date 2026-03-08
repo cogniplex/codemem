@@ -204,30 +204,18 @@ impl CodememEngine {
         let new_tags = tags.unwrap_or_else(|| old_memory.tags.clone());
         let new_importance = importance.unwrap_or(old_memory.importance);
 
-        let now = chrono::Utc::now();
-        let new_id = uuid::Uuid::new_v4().to_string();
-        let hash = codemem_storage::Storage::content_hash(new_content);
-
-        let memory = MemoryNode {
-            id: new_id.clone(),
-            content: new_content.to_string(),
-            memory_type: old_memory.memory_type,
-            importance: new_importance,
-            confidence: old_memory.confidence,
-            access_count: 0,
-            content_hash: hash,
-            tags: new_tags,
-            metadata: old_memory.metadata.clone(),
-            namespace: old_memory.namespace.clone(),
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::new(new_content, old_memory.memory_type);
+        let new_id = memory.id.clone();
+        memory.importance = new_importance;
+        memory.confidence = old_memory.confidence;
+        memory.tags = new_tags;
+        memory.metadata = old_memory.metadata.clone();
+        memory.namespace = old_memory.namespace.clone();
 
         self.persist_memory(&memory)?;
 
         // Create EVOLVED_INTO edge from old -> new
+        let now = chrono::Utc::now();
         let edge = Edge {
             id: format!("{old_id}-EVOLVED_INTO-{new_id}"),
             src: old_id.to_string(),
@@ -282,25 +270,12 @@ impl CodememEngine {
                 .unwrap_or_else(|| source_memory.tags.clone());
             let importance = part.importance.unwrap_or(source_memory.importance);
 
-            let child_id = uuid::Uuid::new_v4().to_string();
-            let hash = codemem_storage::Storage::content_hash(&part.content);
-
-            let memory = MemoryNode {
-                id: child_id.clone(),
-                content: part.content.clone(),
-                memory_type: source_memory.memory_type,
-                importance,
-                confidence: source_memory.confidence,
-                access_count: 0,
-                content_hash: hash,
-                tags,
-                metadata: std::collections::HashMap::new(),
-                namespace: source_memory.namespace.clone(),
-                session_id: None,
-                created_at: now,
-                updated_at: now,
-                last_accessed_at: now,
-            };
+            let mut memory = MemoryNode::new(part.content.clone(), source_memory.memory_type);
+            let child_id = memory.id.clone();
+            memory.importance = importance;
+            memory.confidence = source_memory.confidence;
+            memory.tags = tags;
+            memory.namespace = source_memory.namespace.clone();
 
             if let Err(e) = self.persist_memory_no_save(&memory) {
                 // Clean up already-created child memories
@@ -369,30 +344,17 @@ impl CodememEngine {
             )));
         }
 
-        let now = chrono::Utc::now();
-        let merged_id = uuid::Uuid::new_v4().to_string();
-        let hash = codemem_storage::Storage::content_hash(content);
-
-        let memory = MemoryNode {
-            id: merged_id.clone(),
-            content: content.to_string(),
-            memory_type,
-            importance,
-            confidence: found.iter().map(|m| m.confidence).sum::<f64>() / found.len() as f64,
-            access_count: 0,
-            content_hash: hash,
-            tags,
-            metadata: std::collections::HashMap::new(),
-            namespace: found.iter().find_map(|m| m.namespace.clone()),
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::new(content, memory_type);
+        let merged_id = memory.id.clone();
+        memory.importance = importance;
+        memory.confidence = found.iter().map(|m| m.confidence).sum::<f64>() / found.len() as f64;
+        memory.tags = tags;
+        memory.namespace = found.iter().find_map(|m| m.namespace.clone());
 
         self.persist_memory_no_save(&memory)?;
 
         // Create SUMMARIZES edges: merged -> each source
+        let now = chrono::Utc::now();
         for source_id in source_ids {
             let edge = Edge {
                 id: format!("{merged_id}-SUMMARIZES-{source_id}"),

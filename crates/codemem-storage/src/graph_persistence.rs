@@ -1,6 +1,6 @@
 //! Graph node/edge CRUD and embedding storage on Storage.
 
-use crate::Storage;
+use crate::{MapStorageErr, Storage};
 use codemem_core::{CodememError, Edge, GraphNode, NodeKind, RelationshipType};
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
@@ -91,7 +91,7 @@ impl Storage {
             "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding) VALUES (?1, ?2)",
             params![memory_id, blob],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
 
         Ok(())
     }
@@ -106,7 +106,7 @@ impl Storage {
                 |row| row.get(0),
             )
             .optional()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         match blob {
             Some(bytes) => {
@@ -140,7 +140,7 @@ impl Storage {
                 node.namespace,
             ],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
 
         Ok(())
     }
@@ -166,7 +166,7 @@ impl Storage {
             },
         )
         .optional()
-        .map_err(|e| CodememError::Storage(e.to_string()))?
+        .storage_err()?
         .map(|(id, kind_str, label, payload_str, centrality, memory_id, namespace)| {
             let kind: NodeKind = kind_str.parse().map_err(|e: CodememError| CodememError::Storage(e.to_string()))?;
             let payload: HashMap<String, serde_json::Value> =
@@ -189,7 +189,7 @@ impl Storage {
         let conn = self.conn()?;
         let rows = conn
             .execute("DELETE FROM graph_nodes WHERE id = ?1", params![id])
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(rows > 0)
     }
 
@@ -198,7 +198,7 @@ impl Storage {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id, kind, label, payload, centrality, memory_id, namespace FROM graph_nodes")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let rows = stmt
             .query_map([], |row| {
@@ -214,12 +214,12 @@ impl Storage {
                     row.get::<_, Option<String>>(6)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let mut nodes = Vec::new();
         for row_result in rows {
             let (id, kind_str, label, payload_str, centrality, memory_id, namespace) =
-                row_result.map_err(|e| CodememError::Storage(e.to_string()))?;
+                row_result.storage_err()?;
             let kind: NodeKind = match kind_str.parse() {
                 Ok(k) => k,
                 Err(_) => {
@@ -269,7 +269,7 @@ impl Storage {
                 edge.valid_to.map(|dt| dt.timestamp()),
             ],
         )
-        .map_err(|e| CodememError::Storage(e.to_string()))?;
+        .storage_err()?;
 
         Ok(())
     }
@@ -281,11 +281,11 @@ impl Storage {
             .prepare(
                 "SELECT id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to FROM graph_edges WHERE src = ?1 OR dst = ?1",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let edges = stmt
             .query_map(params![node_id], extract_edge_tuple)
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .filter_map(|r| match r {
                 Ok(v) => Some(v),
                 Err(e) => {
@@ -304,11 +304,11 @@ impl Storage {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id, src, dst, relationship, weight, properties, created_at, valid_from, valid_to FROM graph_edges")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let edges = stmt
             .query_map([], extract_edge_tuple)
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .filter_map(|r| match r {
                 Ok(v) => Some(v),
                 Err(e) => {
@@ -330,7 +330,7 @@ impl Storage {
                 "DELETE FROM graph_edges WHERE src = ?1 OR dst = ?1",
                 params![node_id],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(rows)
     }
 
@@ -345,11 +345,11 @@ impl Storage {
                  INNER JOIN graph_nodes gd ON e.dst = gd.id
                  WHERE gs.namespace = ?1 AND gd.namespace = ?1",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let edges = stmt
             .query_map(params![namespace], extract_edge_tuple)
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .filter_map(|r| match r {
                 Ok(v) => Some(v),
                 Err(e) => {

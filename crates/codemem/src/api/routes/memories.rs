@@ -58,31 +58,17 @@ pub async fn store_memory(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StoreMemoryRequest>,
 ) -> Result<(StatusCode, Json<IdResponse>), (StatusCode, Json<MessageResponse>)> {
-    let now = chrono::Utc::now();
-    let id = uuid::Uuid::new_v4().to_string();
     let memory_type = req
         .memory_type
         .as_deref()
         .and_then(|t| t.parse::<MemoryType>().ok())
         .unwrap_or(MemoryType::Context);
-    let hash = codemem_storage::Storage::content_hash(&req.content);
 
-    let memory = MemoryNode {
-        id: id.clone(),
-        content: req.content.clone(),
-        memory_type,
-        importance: req.importance.unwrap_or(0.5),
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: hash,
-        tags: req.tags.unwrap_or_default(),
-        metadata: Default::default(),
-        namespace: req.namespace,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = MemoryNode::new(req.content.clone(), memory_type);
+    let id = memory.id.clone();
+    memory.importance = req.importance.unwrap_or(0.5);
+    memory.tags = req.tags.unwrap_or_default();
+    memory.namespace = req.namespace;
 
     // Use the engine's full persist pipeline: storage → BM25 → graph → embedding → vector
     if let Err(e) = state.server.engine.persist_memory(&memory) {

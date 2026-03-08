@@ -331,8 +331,6 @@ impl CodememEngine {
                 .has_auto_insight(session_id, &dedup_tag)
                 .unwrap_or(true);
             if !already_exists && pattern.confidence > 0.3 {
-                let now = chrono::Utc::now();
-                let hash = codemem_storage::Storage::content_hash(&pattern.description);
                 let mut metadata = HashMap::new();
                 metadata.insert("session_id".to_string(), json!(session_id));
                 metadata.insert("auto_insight_tag".to_string(), json!(dedup_tag));
@@ -342,25 +340,18 @@ impl CodememEngine {
                     json!(pattern.pattern_type.to_string()),
                 );
 
-                let mem = codemem_core::MemoryNode {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    content: format!("Session pattern: {}", pattern.description),
-                    memory_type: MemoryType::Insight,
-                    importance: 0.6,
-                    confidence: pattern.confidence,
-                    access_count: 0,
-                    content_hash: hash,
-                    tags: vec![
-                        "session-checkpoint".to_string(),
-                        format!("pattern:{}", pattern.pattern_type),
-                    ],
-                    metadata,
-                    namespace: namespace.map(|s| s.to_string()),
-                    session_id: None,
-                    created_at: now,
-                    updated_at: now,
-                    last_accessed_at: now,
-                };
+                let mut mem = codemem_core::MemoryNode::new(
+                    format!("Session pattern: {}", pattern.description),
+                    MemoryType::Insight,
+                );
+                mem.importance = 0.6;
+                mem.confidence = pattern.confidence;
+                mem.tags = vec![
+                    "session-checkpoint".to_string(),
+                    format!("pattern:{}", pattern.pattern_type),
+                ];
+                mem.metadata = metadata;
+                mem.namespace = namespace.map(|s| s.to_string());
                 if self.storage.insert_memory(&mem).is_ok() {
                     stored_patterns += 1;
                 }
@@ -407,8 +398,6 @@ impl CodememEngine {
             memory_count,
             session_patterns.len(),
         );
-        let hash = codemem_storage::Storage::content_hash(&checkpoint_content);
-
         let mut checkpoint_metadata = HashMap::new();
         checkpoint_metadata.insert("checkpoint_type".to_string(), json!("manual"));
         checkpoint_metadata.insert("session_id".to_string(), json!(session_id));
@@ -426,25 +415,15 @@ impl CodememEngine {
             checkpoint_metadata.insert("hot_directories".to_string(), json!(dirs));
         }
 
-        let checkpoint_mem = codemem_core::MemoryNode {
-            id: uuid::Uuid::new_v4().to_string(),
-            content: checkpoint_content,
-            memory_type: MemoryType::Context,
-            importance: 0.5,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: hash,
-            tags: vec![
-                "session-checkpoint".to_string(),
-                format!("session:{session_id}"),
-            ],
-            metadata: checkpoint_metadata,
-            namespace: namespace.map(|s| s.to_string()),
-            session_id: Some(session_id.to_string()),
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut checkpoint_mem =
+            codemem_core::MemoryNode::new(checkpoint_content, MemoryType::Context);
+        checkpoint_mem.tags = vec![
+            "session-checkpoint".to_string(),
+            format!("session:{session_id}"),
+        ];
+        checkpoint_mem.metadata = checkpoint_metadata;
+        checkpoint_mem.namespace = namespace.map(|s| s.to_string());
+        checkpoint_mem.session_id = Some(session_id.to_string());
         // Best-effort persist; don't fail the checkpoint if this errors
         let _ = self.persist_memory(&checkpoint_mem);
 

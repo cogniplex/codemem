@@ -2,7 +2,6 @@ use crate::CodememEngine;
 use codemem_core::{
     Edge, GraphBackend, GraphNode, MemoryNode, MemoryType, NodeKind, RelationshipType,
 };
-use codemem_storage::Storage;
 use std::collections::HashMap;
 
 fn make_memory_typed(
@@ -11,23 +10,13 @@ fn make_memory_typed(
     memory_type: MemoryType,
     namespace: Option<&str>,
 ) -> MemoryNode {
-    let now = chrono::Utc::now();
-    MemoryNode {
-        id: id.to_string(),
-        content: content.to_string(),
-        memory_type,
-        importance: 0.7,
-        confidence: 0.9,
-        access_count: 0,
-        content_hash: Storage::content_hash(content),
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: namespace.map(String::from),
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    }
+    let mut m = MemoryNode::test_default(content);
+    m.id = id.to_string();
+    m.memory_type = memory_type;
+    m.importance = 0.7;
+    m.confidence = 0.9;
+    m.namespace = namespace.map(String::from);
+    m
 }
 
 // ── recall_with_impact ──────────────────────────────────────────────

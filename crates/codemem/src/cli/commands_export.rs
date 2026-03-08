@@ -279,26 +279,12 @@ pub(crate) fn cmd_import(
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
-        let now = chrono::Utc::now();
-        let id = uuid::Uuid::new_v4().to_string();
-        let hash = codemem_storage::Storage::content_hash(&content);
-
-        let memory = codemem_core::MemoryNode {
-            id,
-            content,
-            memory_type,
-            importance,
-            confidence,
-            access_count: 0,
-            content_hash: hash,
-            tags,
-            metadata,
-            namespace,
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = codemem_core::MemoryNode::new(content, memory_type);
+        memory.importance = importance;
+        memory.confidence = confidence;
+        memory.tags = tags;
+        memory.metadata = metadata;
+        memory.namespace = namespace;
 
         match engine.persist_memory(&memory) {
             Ok(()) => {

@@ -1,8 +1,6 @@
 use super::*;
 use crate::mcp::test_helpers::*;
 use codemem_core::{MemoryNode, MemoryType, VectorBackend};
-use codemem_storage::Storage;
-use std::collections::HashMap;
 
 /// Helper: call a tool and return the result Value.
 fn call_tool(server: &McpServer, tool_name: &str, arguments: Value) -> Value {
@@ -50,27 +48,13 @@ fn consolidate_decay_reduces_importance() {
     let server = test_server();
 
     // Store a memory with known importance
-    let now = chrono::Utc::now();
-    let sixty_days_ago = now - chrono::Duration::days(60);
-    let id = uuid::Uuid::new_v4().to_string();
-    let content = "old memory that should decay";
-    let hash = Storage::content_hash(content);
-    let memory = MemoryNode {
-        id: id.clone(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.8,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: hash,
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: sixty_days_ago,
-        updated_at: sixty_days_ago,
-        last_accessed_at: sixty_days_ago,
-    };
+    let sixty_days_ago = chrono::Utc::now() - chrono::Duration::days(60);
+    let mut memory = MemoryNode::test_default("old memory that should decay");
+    memory.importance = 0.8;
+    memory.created_at = sixty_days_ago;
+    memory.updated_at = sixty_days_ago;
+    memory.last_accessed_at = sixty_days_ago;
+    let id = memory.id.clone();
     server.engine.storage().insert_memory(&memory).unwrap();
 
     // Run decay with default threshold (30 days)
@@ -190,26 +174,8 @@ fn consolidate_forget_deletes_low_importance() {
     let server = test_server();
 
     // Store a memory with very low importance and zero access count
-    let now = chrono::Utc::now();
-    let id = uuid::Uuid::new_v4().to_string();
-    let content = "forgettable memory";
-    let hash = Storage::content_hash(content);
-    let memory = MemoryNode {
-        id: id.clone(),
-        content: content.to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.05,
-        confidence: 1.0,
-        access_count: 0,
-        content_hash: hash,
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = MemoryNode::test_default("forgettable memory");
+    memory.importance = 0.05;
     server.engine.storage().insert_memory(&memory).unwrap();
 
     // Verify it exists
@@ -235,23 +201,9 @@ fn consolidate_forget_keeps_accessed_memories() {
     let server = test_server();
 
     // Store a memory with low importance but nonzero access count directly
-    let now = chrono::Utc::now();
-    let memory = MemoryNode {
-        id: uuid::Uuid::new_v4().to_string(),
-        content: "low importance but accessed".to_string(),
-        memory_type: MemoryType::Context,
-        importance: 0.05,
-        confidence: 1.0,
-        access_count: 5,
-        content_hash: Storage::content_hash("low importance but accessed"),
-        tags: vec![],
-        metadata: HashMap::new(),
-        namespace: None,
-        session_id: None,
-        created_at: now,
-        updated_at: now,
-        last_accessed_at: now,
-    };
+    let mut memory = MemoryNode::test_default("low importance but accessed");
+    memory.importance = 0.05;
+    memory.access_count = 5;
     server.engine.storage().insert_memory(&memory).unwrap();
 
     // This memory has access_count = 5, so it should NOT be forgotten
@@ -289,26 +241,9 @@ fn consolidate_forget_custom_threshold() {
     let server = test_server();
 
     // Store two memories with different importance
-    let now = chrono::Utc::now();
     for (imp, content) in [(0.3, "medium importance"), (0.05, "very low importance")] {
-        let id = uuid::Uuid::new_v4().to_string();
-        let hash = Storage::content_hash(content);
-        let memory = MemoryNode {
-            id,
-            content: content.to_string(),
-            memory_type: MemoryType::Context,
-            importance: imp,
-            confidence: 1.0,
-            access_count: 0,
-            content_hash: hash,
-            tags: vec![],
-            metadata: HashMap::new(),
-            namespace: None,
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::test_default(content);
+        memory.importance = imp;
         server.engine.storage().insert_memory(&memory).unwrap();
     }
 
@@ -510,7 +445,6 @@ fn consolidate_forget_with_target_tags() {
     let server = test_server();
 
     // Store two low-importance memories: one with static-analysis tag, one without
-    let now = chrono::Utc::now();
     for (content, tags) in [
         (
             "enrichment noise about coupling",
@@ -518,24 +452,11 @@ fn consolidate_forget_with_target_tags() {
         ),
         ("important manual insight", vec!["manual".to_string()]),
     ] {
-        let id = uuid::Uuid::new_v4().to_string();
-        let hash = Storage::content_hash(content);
-        let memory = MemoryNode {
-            id,
-            content: content.to_string(),
-            memory_type: MemoryType::Insight,
-            importance: 0.3,
-            confidence: 0.5,
-            access_count: 0,
-            content_hash: hash,
-            tags,
-            metadata: HashMap::new(),
-            namespace: None,
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::test_default(content);
+        memory.memory_type = MemoryType::Insight;
+        memory.importance = 0.3;
+        memory.confidence = 0.5;
+        memory.tags = tags;
         server.engine.storage().insert_memory(&memory).unwrap();
     }
 
@@ -564,30 +485,17 @@ fn consolidate_forget_with_target_tags() {
 fn consolidate_forget_with_max_access_count() {
     let server = test_server();
 
-    let now = chrono::Utc::now();
     // Store two static-analysis memories: one never accessed, one accessed twice
     for (content, access_count) in [
         ("never accessed enrichment insight", 0u32),
         ("twice accessed enrichment insight", 2u32),
     ] {
-        let id = uuid::Uuid::new_v4().to_string();
-        let hash = Storage::content_hash(content);
-        let memory = MemoryNode {
-            id,
-            content: content.to_string(),
-            memory_type: MemoryType::Insight,
-            importance: 0.3,
-            confidence: 0.5,
-            access_count,
-            content_hash: hash,
-            tags: vec!["static-analysis".to_string()],
-            metadata: HashMap::new(),
-            namespace: None,
-            session_id: None,
-            created_at: now,
-            updated_at: now,
-            last_accessed_at: now,
-        };
+        let mut memory = MemoryNode::test_default(content);
+        memory.memory_type = MemoryType::Insight;
+        memory.importance = 0.3;
+        memory.confidence = 0.5;
+        memory.access_count = access_count;
+        memory.tags = vec!["static-analysis".to_string()];
         server.engine.storage().insert_memory(&memory).unwrap();
     }
 

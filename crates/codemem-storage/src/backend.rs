@@ -1,6 +1,6 @@
 //! `StorageBackend` trait implementation for Storage.
 
-use crate::{MemoryRow, Storage};
+use crate::{MapStorageErr, MemoryRow, Storage};
 use codemem_core::{
     CodememError, ConsolidationLogEntry, Edge, GraphNode, MemoryNode, NodeKind, Session,
     StorageBackend, StorageStats,
@@ -101,9 +101,7 @@ impl StorageBackend for Storage {
             placeholders.join(",")
         );
 
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(&sql).storage_err()?;
 
         let params: Vec<&dyn rusqlite::types::ToSql> = ids
             .iter()
@@ -112,11 +110,11 @@ impl StorageBackend for Storage {
 
         let rows = stmt
             .query_map(params.as_slice(), MemoryRow::from_row)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let mut memories = Vec::new();
         for row in rows {
-            let row = row.map_err(|e| CodememError::Storage(e.to_string()))?;
+            let row = row.storage_err()?;
             memories.push(row.into_memory_node()?);
         }
         Ok(memories)
@@ -134,7 +132,7 @@ impl StorageBackend for Storage {
                 "DELETE FROM memory_embeddings WHERE memory_id = ?1",
                 [memory_id],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(deleted > 0)
     }
 
@@ -142,17 +140,17 @@ impl StorageBackend for Storage {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT memory_id, embedding FROM memory_embeddings")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         let rows = stmt
             .query_map([], |row| {
                 let id: String = row.get(0)?;
                 let blob: Vec<u8> = row.get(1)?;
                 Ok((id, blob))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         let mut result = Vec::new();
         for row in rows {
-            let (id, blob) = row.map_err(|e| CodememError::Storage(e.to_string()))?;
+            let (id, blob) = row.storage_err()?;
             let floats: Vec<f32> = blob
                 .chunks_exact(4)
                 .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
@@ -212,7 +210,7 @@ impl StorageBackend for Storage {
                 "UPDATE memories SET importance = importance * ?1 WHERE last_accessed_at < ?2",
                 params![decay_factor, threshold_ts],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         Ok(rows)
     }
 
@@ -222,7 +220,7 @@ impl StorageBackend for Storage {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT id, memory_type, tags FROM memories ORDER BY created_at DESC")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let rows = stmt
             .query_map([], |row| {
@@ -232,9 +230,9 @@ impl StorageBackend for Storage {
                     row.get::<_, String>(2)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(rows
             .into_iter()
@@ -254,7 +252,7 @@ impl StorageBackend for Storage {
                  INNER JOIN memories b ON substr(a.content_hash, 1, 16) = substr(b.content_hash, 1, 16)
                  WHERE a.id < b.id",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let rows = stmt
             .query_map([], |row| {
@@ -264,9 +262,9 @@ impl StorageBackend for Storage {
                     row.get::<_, f64>(2)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(rows)
     }
@@ -277,13 +275,13 @@ impl StorageBackend for Storage {
             .prepare(
                 "SELECT id FROM memories WHERE importance < ?1 AND access_count = 0 ORDER BY importance ASC, last_accessed_at ASC",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let ids = stmt
             .query_map(params![importance_threshold], |row| row.get(0))
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<String>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(ids)
     }
@@ -295,9 +293,7 @@ impl StorageBackend for Storage {
             return Ok(());
         }
         let conn = self.conn()?;
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let tx = conn.unchecked_transaction().storage_err()?;
 
         const COLS: usize = 14;
         const BATCH: usize = 999 / COLS; // 71
@@ -331,12 +327,10 @@ impl StorageBackend for Storage {
 
             let refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(|p| p.as_ref()).collect();
-            tx.execute(&sql, refs.as_slice())
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
+            tx.execute(&sql, refs.as_slice()).storage_err()?;
         }
 
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
         Ok(())
     }
 
@@ -345,9 +339,7 @@ impl StorageBackend for Storage {
             return Ok(());
         }
         let conn = self.conn()?;
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let tx = conn.unchecked_transaction().storage_err()?;
 
         const COLS: usize = 2;
         const BATCH: usize = 999 / COLS; // 499
@@ -368,12 +360,10 @@ impl StorageBackend for Storage {
 
             let refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(|p| p.as_ref()).collect();
-            tx.execute(&sql, refs.as_slice())
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
+            tx.execute(&sql, refs.as_slice()).storage_err()?;
         }
 
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
         Ok(())
     }
 
@@ -381,38 +371,34 @@ impl StorageBackend for Storage {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare("SELECT file_path, content_hash FROM file_hashes")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let rows = stmt
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(rows.into_iter().collect())
     }
 
     fn save_file_hashes(&self, hashes: &HashMap<String, String>) -> Result<(), CodememError> {
         let conn = self.conn()?;
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let tx = conn.unchecked_transaction().storage_err()?;
 
-        tx.execute("DELETE FROM file_hashes", [])
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.execute("DELETE FROM file_hashes", []).storage_err()?;
 
         for (path, hash) in hashes {
             tx.execute(
                 "INSERT INTO file_hashes (file_path, content_hash) VALUES (?1, ?2)",
                 params![path, hash],
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
         }
 
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
         Ok(())
     }
 
@@ -421,9 +407,7 @@ impl StorageBackend for Storage {
             return Ok(());
         }
         let conn = self.conn()?;
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let tx = conn.unchecked_transaction().storage_err()?;
 
         const COLS: usize = 7;
         const BATCH: usize = 999 / COLS; // 142
@@ -450,12 +434,10 @@ impl StorageBackend for Storage {
 
             let refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(|p| p.as_ref()).collect();
-            tx.execute(&sql, refs.as_slice())
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
+            tx.execute(&sql, refs.as_slice()).storage_err()?;
         }
 
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
         Ok(())
     }
 
@@ -464,9 +446,7 @@ impl StorageBackend for Storage {
             return Ok(());
         }
         let conn = self.conn()?;
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let tx = conn.unchecked_transaction().storage_err()?;
 
         const COLS: usize = 9;
         const BATCH: usize = 999 / COLS; // 111
@@ -495,12 +475,10 @@ impl StorageBackend for Storage {
 
             let refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(|p| p.as_ref()).collect();
-            tx.execute(&sql, refs.as_slice())
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
+            tx.execute(&sql, refs.as_slice()).storage_err()?;
         }
 
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
         Ok(())
     }
 
@@ -513,7 +491,7 @@ impl StorageBackend for Storage {
             .prepare(
                 "SELECT id, importance, access_count, last_accessed_at FROM memories WHERE last_accessed_at < ?1",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let rows = stmt
             .query_map(params![threshold_ts], |row| {
@@ -524,9 +502,9 @@ impl StorageBackend for Storage {
                     row.get::<_, i64>(3)?,
                 ))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(rows)
     }
@@ -536,9 +514,7 @@ impl StorageBackend for Storage {
             return Ok(0);
         }
         let conn = self.conn()?;
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let tx = conn.unchecked_transaction().storage_err()?;
 
         let mut count = 0usize;
         for (id, importance) in updates {
@@ -547,12 +523,11 @@ impl StorageBackend for Storage {
                     "UPDATE memories SET importance = ?1 WHERE id = ?2",
                     params![importance, id],
                 )
-                .map_err(|e| CodememError::Storage(e.to_string()))?;
+                .storage_err()?;
             count += rows;
         }
 
-        tx.commit()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        tx.commit().storage_err()?;
         Ok(count)
     }
 
@@ -564,10 +539,10 @@ impl StorageBackend for Storage {
                 params![ns],
                 |row| row.get(0),
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
         } else {
             conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
-                .map_err(|e| CodememError::Storage(e.to_string()))?
+                .storage_err()?
         };
         Ok(count as usize)
     }
@@ -582,15 +557,15 @@ impl StorageBackend for Storage {
                  LEFT JOIN memory_embeddings me ON m.id = me.memory_id
                  WHERE me.memory_id IS NULL",
             )
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let rows = stmt
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(rows)
     }
@@ -637,9 +612,7 @@ impl StorageBackend for Storage {
 
         let refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(&sql).storage_err()?;
 
         let rows = stmt
             .query_map(refs.as_slice(), |row| {
@@ -655,9 +628,9 @@ impl StorageBackend for Storage {
                     namespace: row.get(6)?,
                 })
             })
-            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .storage_err()?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         Ok(rows)
     }
@@ -686,17 +659,15 @@ impl StorageBackend for Storage {
 
         let refs: Vec<&dyn rusqlite::types::ToSql> =
             param_values.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let mut stmt = conn.prepare(&sql).storage_err()?;
 
         let rows = stmt
             .query_map(refs.as_slice(), MemoryRow::from_row)
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+            .storage_err()?;
 
         let mut result = Vec::new();
         for row in rows {
-            let mr = row.map_err(|e| CodememError::Storage(e.to_string()))?;
+            let mr = row.storage_err()?;
             result.push(mr.into_memory_node()?);
         }
 
@@ -721,8 +692,7 @@ impl StorageBackend for Storage {
 
     fn begin_transaction(&self) -> Result<(), CodememError> {
         let conn = self.conn()?;
-        conn.execute_batch("BEGIN IMMEDIATE")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        conn.execute_batch("BEGIN IMMEDIATE").storage_err()?;
         self.in_transaction
             .store(true, std::sync::atomic::Ordering::Release);
         Ok(())
@@ -730,8 +700,7 @@ impl StorageBackend for Storage {
 
     fn commit_transaction(&self) -> Result<(), CodememError> {
         let conn = self.conn()?;
-        conn.execute_batch("COMMIT")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        conn.execute_batch("COMMIT").storage_err()?;
         // Clear flag after COMMIT succeeds — if COMMIT fails, the flag
         // stays set so callers know a transaction is still active.
         self.in_transaction
@@ -743,8 +712,7 @@ impl StorageBackend for Storage {
         self.in_transaction
             .store(false, std::sync::atomic::Ordering::Release);
         let conn = self.conn()?;
-        conn.execute_batch("ROLLBACK")
-            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        conn.execute_batch("ROLLBACK").storage_err()?;
         Ok(())
     }
 }
