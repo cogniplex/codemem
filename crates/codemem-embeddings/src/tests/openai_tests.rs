@@ -291,3 +291,267 @@ fn openai_default_base_url_constant() {
 fn openai_default_model_constant() {
     assert_eq!(DEFAULT_MODEL, "text-embedding-3-small");
 }
+
+// ── Dimension mismatch detection ──────────────────────────────────────
+
+#[test]
+fn openai_embed_wrong_dimensions_no_validation() {
+    // The OpenAI provider does NOT validate that the returned embedding
+    // dimension matches self.dimensions. This test documents that behavior:
+    // requesting 768 dims but receiving 512 dims succeeds silently.
+    use crate::EmbeddingProvider;
+    let mut server = mockito::Server::new();
+
+    // Return a 3-dim embedding when provider expects 768
+    let mock = server
+        .mock("POST", "/embeddings")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"data": [{"embedding": [0.1, 0.2, 0.3]}]}"#)
+        .create();
+
+    let server_url = server.url();
+    let provider = OpenAIProvider::new("test-key", "custom-model", 768, Some(&server_url));
+    let result = provider.embed("test");
+    mock.assert();
+
+    // FINDING: No dimension validation — provider silently returns wrong-size vector.
+    // The caller would need to check embedding.len() == provider.dimensions().
+    let embedding = result.unwrap();
+    assert_eq!(
+        embedding.len(),
+        3,
+        "Provider returns whatever the server sends, even if dimensions mismatch"
+    );
+    assert_ne!(
+        embedding.len(),
+        provider.dimensions(),
+        "Returned dimensions do not match configured dimensions — no validation exists"
+    );
+}
+
+#[test]
+fn openai_embed_batch_wrong_dimensions_no_validation() {
+    use crate::EmbeddingProvider;
+    let mut server = mockito::Server::new();
+
+    // Return 2-dim embeddings when provider expects 768
+    let mock = server
+        .mock("POST", "/embeddings")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"data": [
+                {"index": 0, "embedding": [0.1, 0.2]},
+                {"index": 1, "embedding": [0.3, 0.4]}
+            ]}"#,
+        )
+        .create();
+
+    let server_url = server.url();
+    let provider = OpenAIProvider::new("test-key", "custom-model", 768, Some(&server_url));
+    let result = provider.embed_batch(&["hello", "world"]);
+    mock.assert();
+
+    // FINDING: No dimension validation on batch either
+    let embeddings = result.unwrap();
+    assert_eq!(embeddings.len(), 2);
+    assert_eq!(embeddings[0].len(), 2, "Wrong dimensions accepted silently");
+}
+
+// ── Network failure scenarios ──────────────────────────────────────────
+
+#[test]
+fn openai_embed_429_too_many_requests() {
+    use crate::EmbeddingProvider;
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("POST", "/embeddings")
+        .with_status(429)
+        .with_body("Rate limit exceeded")
+        .create();
+
+    let server_url = server.url();
+    let provider = OpenAIProvider::new("test-key", "model", 768, Some(&server_url));
+    let result = provider.embed("test");
+    mock.assert();
+
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(err.contains("429"), "Should report 429 status code: {err}");
+}
+
+#[test]
+fn openai_embed_503_service_unavailable() {
+    use crate::EmbeddingProvider;
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("POST", "/embeddings")
+        .with_status(503)
+        .with_body("Service Unavailable")
+        .create();
+
+    let server_url = server.url();
+    let provider = OpenAIProvider::new("test-key", "model", 768, Some(&server_url));
+    let result = provider.embed("test");
+    mock.assert();
+
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(err.contains("503"), "Should report 503 status code: {err}");
+}
+
+#[test]
+fn openai_embed_empty_body_200() {
+    use crate::EmbeddingProvider;
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("POST", "/embeddings")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body("")
+        .create();
+
+    let server_url = server.url();
+    let provider = OpenAIProvider::new("test-key", "model", 768, Some(&server_url));
+    let result = provider.embed("test");
+    mock.assert();
+
+    assert!(
+        result.is_err(),
+        "Empty body with 200 should be detected as error"
+    );
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("parse error") || err.contains("Missing embedding"),
+        "Should report parse error or missing data: {err}"
+    );
+}
+
+#[test]
+fn openai_embed_connection_refused() {
+    use crate::EmbeddingProvider;
+
+    // Use a port that nothing is listening on
+    let provider = OpenAIProvider::new("test-key", "model", 768, Some("http://127.0.0.1:1"));
+    let result = provider.embed("test");
+
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("request failed") || err.contains("error"),
+        "Should report connection error: {err}"
+    );
+}
+
+#[test]
+fn openai_embed_batch_connection_refused() {
+    use crate::EmbeddingProvider;
+
+    let provider = OpenAIProvider::new("test-key", "model", 768, Some("http://127.0.0.1:1"));
+    let result = provider.embed_batch(&["hello", "world"]);
+
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("request failed") || err.contains("error"),
+        "Should report connection error: {err}"
+    );
+}
+
+// ── Edge case inputs ──────────────────────────────────────────────────
+
+#[test]
+fn openai_embed_empty_string() {
+    use crate::EmbeddingProvider;
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("POST", "/embeddings")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"data": [{"embedding": [0.1, 0.2]}]}"#)
+        .create();
+
+    let server_url = server.url();
+    let provider = OpenAIProvider::new("test-key", "model", 2, Some(&server_url));
+    let result = provider.embed("");
+    mock.assert();
+
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().len(), 2);
+}
+
+#[test]
+fn openai_embed_very_long_string() {
+    use crate::EmbeddingProvider;
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("POST", "/embeddings")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"data": [{"embedding": [0.1, 0.2]}]}"#)
+        .create();
+
+    let server_url = server.url();
+    let provider = OpenAIProvider::new("test-key", "model", 2, Some(&server_url));
+    let long_text = "x".repeat(15_000);
+    let result = provider.embed(&long_text);
+    mock.assert();
+
+    assert!(result.is_ok());
+}
+
+// ── API key handling ──────────────────────────────────────────────────
+
+#[test]
+fn openai_embed_blank_api_key() {
+    use crate::EmbeddingProvider;
+    let mut server = mockito::Server::new();
+    // Server still gets called — blank key is sent in Authorization header.
+    // reqwest may trim the trailing space from "Bearer ", so we match loosely.
+    let mock = server
+        .mock("POST", "/embeddings")
+        .with_status(401)
+        .with_body("Invalid API key")
+        .create();
+
+    let server_url = server.url();
+    let provider = OpenAIProvider::new("", "model", 768, Some(&server_url));
+    let result = provider.embed("test");
+    mock.assert();
+
+    // FINDING: Blank API key is not rejected at construction time;
+    // it proceeds to make the request and fails with a server-side auth error.
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("401"),
+        "Blank API key should cause auth failure: {err}"
+    );
+}
+
+#[test]
+fn openai_embed_whitespace_only_api_key() {
+    use crate::EmbeddingProvider;
+    let mut server = mockito::Server::new();
+    // reqwest trims header values, so whitespace-only key becomes effectively blank.
+    let mock = server
+        .mock("POST", "/embeddings")
+        .with_status(401)
+        .with_body("Invalid API key")
+        .create();
+
+    let server_url = server.url();
+    let provider = OpenAIProvider::new("   ", "model", 768, Some(&server_url));
+    let result = provider.embed("test");
+    mock.assert();
+
+    // FINDING: Whitespace-only API key is not rejected at construction time;
+    // it proceeds to make the request and fails with a server-side auth error.
+    assert!(result.is_err());
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("401"),
+        "Whitespace-only API key should cause auth failure: {err}"
+    );
+}

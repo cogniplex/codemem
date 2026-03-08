@@ -251,3 +251,174 @@ fn start_session_ignores_duplicate() {
     let sessions = storage.list_sessions(None).unwrap();
     assert_eq!(sessions.len(), 1);
 }
+
+// ── find_memory_ids_by_tag Tests ────────────────────────────────────
+
+fn tagged_memory(content: &str, tags: Vec<String>, namespace: Option<String>) -> MemoryNode {
+    let now = chrono::Utc::now();
+    MemoryNode {
+        id: uuid::Uuid::new_v4().to_string(),
+        content: content.to_string(),
+        memory_type: MemoryType::Context,
+        importance: 0.5,
+        confidence: 1.0,
+        access_count: 0,
+        content_hash: Storage::content_hash(content),
+        tags,
+        metadata: HashMap::new(),
+        namespace,
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: now,
+    }
+}
+
+#[test]
+fn find_memory_ids_by_tag_basic_match() {
+    let storage = Storage::open_in_memory().unwrap();
+    let m1 = tagged_memory("tagged memory one", vec!["alpha".to_string()], None);
+    let m2 = tagged_memory(
+        "tagged memory two",
+        vec!["alpha".to_string(), "beta".to_string()],
+        None,
+    );
+    let m3 = tagged_memory("tagged memory three", vec!["beta".to_string()], None);
+    storage.insert_memory(&m1).unwrap();
+    storage.insert_memory(&m2).unwrap();
+    storage.insert_memory(&m3).unwrap();
+
+    let ids = storage
+        .find_memory_ids_by_tag("alpha", None, "nonexistent")
+        .unwrap();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.contains(&m1.id));
+    assert!(ids.contains(&m2.id));
+}
+
+#[test]
+fn find_memory_ids_by_tag_empty_tags_not_matched() {
+    let storage = Storage::open_in_memory().unwrap();
+    let m1 = tagged_memory("no tags memory", vec![], None);
+    storage.insert_memory(&m1).unwrap();
+
+    let ids = storage
+        .find_memory_ids_by_tag("anything", None, "nonexistent")
+        .unwrap();
+    assert!(ids.is_empty());
+}
+
+#[test]
+fn find_memory_ids_by_tag_special_characters() {
+    let storage = Storage::open_in_memory().unwrap();
+    // Tags with %, _, and " which would break LIKE-based queries
+    let m_percent = tagged_memory("percent tag", vec!["100%".to_string()], None);
+    let m_underscore = tagged_memory("underscore tag", vec!["my_tag".to_string()], None);
+    let m_quote = tagged_memory("quote tag", vec!["say\"hello".to_string()], None);
+    storage.insert_memory(&m_percent).unwrap();
+    storage.insert_memory(&m_underscore).unwrap();
+    storage.insert_memory(&m_quote).unwrap();
+
+    // json_each should handle these correctly
+    let ids = storage
+        .find_memory_ids_by_tag("100%", None, "nonexistent")
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids[0], m_percent.id);
+
+    let ids = storage
+        .find_memory_ids_by_tag("my_tag", None, "nonexistent")
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids[0], m_underscore.id);
+
+    let ids = storage
+        .find_memory_ids_by_tag("say\"hello", None, "nonexistent")
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids[0], m_quote.id);
+}
+
+#[test]
+fn find_memory_ids_by_tag_limit_50_boundary() {
+    let storage = Storage::open_in_memory().unwrap();
+    let mut all_ids = Vec::new();
+    for i in 0..55 {
+        let m = tagged_memory(
+            &format!("memory number {i}"),
+            vec!["shared-tag".to_string()],
+            None,
+        );
+        all_ids.push(m.id.clone());
+        storage.insert_memory(&m).unwrap();
+    }
+
+    let ids = storage
+        .find_memory_ids_by_tag("shared-tag", None, "nonexistent")
+        .unwrap();
+    assert_eq!(ids.len(), 50, "LIMIT 50 should cap results at 50");
+}
+
+#[test]
+fn find_memory_ids_by_tag_namespace_isolation() {
+    let storage = Storage::open_in_memory().unwrap();
+    let m_ns_a = tagged_memory(
+        "ns-a memory",
+        vec!["shared".to_string()],
+        Some("ns-a".to_string()),
+    );
+    let m_ns_b = tagged_memory(
+        "ns-b memory",
+        vec!["shared".to_string()],
+        Some("ns-b".to_string()),
+    );
+    storage.insert_memory(&m_ns_a).unwrap();
+    storage.insert_memory(&m_ns_b).unwrap();
+
+    let ids = storage
+        .find_memory_ids_by_tag("shared", Some("ns-a"), "nonexistent")
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids[0], m_ns_a.id);
+
+    let ids = storage
+        .find_memory_ids_by_tag("shared", Some("ns-b"), "nonexistent")
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids[0], m_ns_b.id);
+}
+
+#[test]
+fn find_memory_ids_by_tag_exclude_id() {
+    let storage = Storage::open_in_memory().unwrap();
+    let m1 = tagged_memory("first tagged", vec!["mytag".to_string()], None);
+    let m2 = tagged_memory("second tagged", vec!["mytag".to_string()], None);
+    storage.insert_memory(&m1).unwrap();
+    storage.insert_memory(&m2).unwrap();
+
+    // Exclude m1's id
+    let ids = storage
+        .find_memory_ids_by_tag("mytag", None, &m1.id)
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids[0], m2.id);
+}
+
+#[test]
+fn find_memory_ids_by_tag_null_namespace_handling() {
+    let storage = Storage::open_in_memory().unwrap();
+    let m_null_ns = tagged_memory("null ns memory", vec!["tag-x".to_string()], None);
+    let m_with_ns = tagged_memory(
+        "with ns memory",
+        vec!["tag-x".to_string()],
+        Some("proj".to_string()),
+    );
+    storage.insert_memory(&m_null_ns).unwrap();
+    storage.insert_memory(&m_with_ns).unwrap();
+
+    // When namespace is None, the query uses `namespace IS NULL`, so only null-ns memory matches
+    let ids = storage
+        .find_memory_ids_by_tag("tag-x", None, "nonexistent")
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(ids[0], m_null_ns.id);
+}

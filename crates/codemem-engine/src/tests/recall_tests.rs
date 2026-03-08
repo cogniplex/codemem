@@ -452,6 +452,147 @@ fn resolve_entity_memories_skips_expired_edges() {
     );
 }
 
+// ── Temporal edge filtering in expansion ─────────────────────────────
+
+#[test]
+fn recall_expansion_excludes_expired_edge_memories() {
+    let engine = CodememEngine::for_testing();
+    let now = chrono::Utc::now();
+    let past = now - chrono::Duration::hours(1);
+
+    // Create seed memory and a second memory connected by an expired edge
+    let m1 = make_memory("temp-exp-seed", "temporal test seed about architecture");
+    let m2 = make_memory("temp-exp-target", "expired edge target about architecture");
+    engine.persist_memory(&m1).unwrap();
+    engine.persist_memory(&m2).unwrap();
+
+    // Create an expired edge between them
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        let edge = Edge {
+            id: "temp-expired-edge".to_string(),
+            src: "temp-exp-seed".to_string(),
+            dst: "temp-exp-target".to_string(),
+            relationship: RelationshipType::LeadsTo,
+            weight: 0.8,
+            properties: HashMap::new(),
+            created_at: now,
+            valid_from: None,
+            valid_to: Some(past), // expired
+        };
+        let _ = graph.add_edge(edge);
+    }
+
+    // recall_with_expansion filters expired edges during BFS expansion
+    let results = engine
+        .recall_with_expansion("temporal test architecture", 10, 2, None)
+        .unwrap();
+
+    // The target memory may still appear via direct BM25 scoring (both contain "architecture"),
+    // but it should NOT appear with expansion_path referencing the expired edge.
+    // The key assertion: if target is found, it must be via "direct" scoring, not expansion.
+    for r in &results {
+        if r.result.memory.id == "temp-exp-target" {
+            assert_eq!(
+                r.expansion_path, "direct",
+                "expired edge should not be used for expansion; got path: {}",
+                r.expansion_path
+            );
+        }
+    }
+}
+
+#[test]
+fn recall_expansion_includes_active_edge_memories() {
+    let engine = CodememEngine::for_testing();
+    let now = chrono::Utc::now();
+    let future = now + chrono::Duration::hours(24);
+
+    let m1 = make_memory("temp-act-seed", "active edge seed about modules");
+    let m2 = make_memory(
+        "temp-act-target",
+        "active edge target totally unrelated xyzzy",
+    );
+    engine.persist_memory(&m1).unwrap();
+    engine.persist_memory(&m2).unwrap();
+
+    // Create an active edge (valid_to in the future)
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        let edge = Edge {
+            id: "temp-active-edge".to_string(),
+            src: "temp-act-seed".to_string(),
+            dst: "temp-act-target".to_string(),
+            relationship: RelationshipType::LeadsTo,
+            weight: 0.8,
+            properties: HashMap::new(),
+            created_at: now,
+            valid_from: Some(now - chrono::Duration::hours(1)),
+            valid_to: Some(future),
+        };
+        let _ = graph.add_edge(edge);
+    }
+
+    let results = engine
+        .recall_with_expansion("active edge seed modules", 10, 2, None)
+        .unwrap();
+
+    let found = results
+        .iter()
+        .any(|r| r.result.memory.id == "temp-act-target");
+    assert!(
+        found,
+        "memory connected via active (valid_to > now) edge should be reachable via expansion"
+    );
+}
+
+#[test]
+fn recall_expansion_excludes_future_valid_from_edges() {
+    let engine = CodememEngine::for_testing();
+    let now = chrono::Utc::now();
+    let future = now + chrono::Duration::hours(24);
+
+    let m1 = make_memory("temp-fut-seed", "future edge seed about patterns");
+    let m2 = make_memory(
+        "temp-fut-target",
+        "future edge target completely unrelated abcdef",
+    );
+    engine.persist_memory(&m1).unwrap();
+    engine.persist_memory(&m2).unwrap();
+
+    // Create edge with future valid_from (not yet active)
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        let edge = Edge {
+            id: "temp-future-edge".to_string(),
+            src: "temp-fut-seed".to_string(),
+            dst: "temp-fut-target".to_string(),
+            relationship: RelationshipType::LeadsTo,
+            weight: 0.8,
+            properties: HashMap::new(),
+            created_at: now,
+            valid_from: Some(future), // not yet active
+            valid_to: None,
+        };
+        let _ = graph.add_edge(edge);
+    }
+
+    let results = engine
+        .recall_with_expansion("future edge seed patterns", 10, 2, None)
+        .unwrap();
+
+    // Target should not appear via expansion (edge not yet active)
+    for r in &results {
+        if r.result.memory.id == "temp-fut-target" {
+            assert_eq!(
+                r.expansion_path, "direct",
+                "future valid_from edge should not be used for expansion; got path: {}",
+                r.expansion_path
+            );
+        }
+    }
+}
+
 // ── Recall with expansion ───────────────────────────────────────────
 
 #[test]

@@ -112,7 +112,7 @@ fn split_camel_case(s: &str) -> Vec<String> {
 ///
 /// Supports serialization via `serialize()`/`deserialize()` for persistence
 /// across restarts, avoiding the need to rebuild from all stored memories.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Bm25Index {
     /// Number of documents containing each term: term -> count
     doc_freq: HashMap<String, usize>,

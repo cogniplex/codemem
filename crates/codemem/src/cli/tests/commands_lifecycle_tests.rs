@@ -657,3 +657,104 @@ fn no_substance_trivial_session() {
     };
     assert!(!has_substance(&cat));
 }
+
+// ── has_substance boundary at exactly 4 reads ─────────────────────────
+
+#[test]
+fn no_substance_exactly_four_reads() {
+    // has_substance requires files_read.len() >= 5, so 4 is NOT enough.
+    let cat = SessionCategories {
+        files_read: (0..4).map(|i| format!("file{i}.rs")).collect(),
+        files_edited: vec![],
+        searches: vec![],
+        decisions: vec![],
+        prompts: vec![],
+    };
+    assert!(!has_substance(&cat));
+}
+
+// ── build_session_summary truncation ──────────────────────────────────
+
+#[test]
+fn build_summary_truncates_prompts_at_three() {
+    let cat = SessionCategories {
+        files_read: vec![],
+        files_edited: vec![],
+        searches: vec![],
+        decisions: vec![],
+        prompts: vec![
+            "first".into(),
+            "second".into(),
+            "third".into(),
+            "fourth".into(),
+        ],
+    };
+    let summary = build_session_summary(&cat);
+    assert!(summary.contains("first"));
+    assert!(summary.contains("second"));
+    assert!(summary.contains("third"));
+    assert!(
+        !summary.contains("fourth"),
+        "4th prompt should be truncated"
+    );
+}
+
+#[test]
+fn build_summary_truncates_files_read_at_five() {
+    let cat = SessionCategories {
+        files_read: (0..6).map(|i| format!("/project/src/f{i}.rs")).collect(),
+        files_edited: vec![],
+        searches: vec![],
+        decisions: vec![],
+        prompts: vec![],
+    };
+    let summary = build_session_summary(&cat);
+    // Shows "6 file(s)" in the count, but only lists first 5
+    assert!(summary.contains("6 file(s)"));
+    assert!(summary.contains("f4.rs"), "5th file should be included");
+    assert!(!summary.contains("f5.rs"), "6th file should be truncated");
+}
+
+#[test]
+fn build_summary_truncates_decisions_at_three() {
+    let cat = SessionCategories {
+        files_read: vec![],
+        files_edited: vec![],
+        searches: vec![],
+        decisions: vec![
+            "decision-a".into(),
+            "decision-b".into(),
+            "decision-c".into(),
+            "decision-d".into(),
+        ],
+        prompts: vec![],
+    };
+    let summary = build_session_summary(&cat);
+    assert!(summary.contains("decision-a"));
+    assert!(summary.contains("decision-c"));
+    assert!(
+        !summary.contains("decision-d"),
+        "4th decision should be truncated"
+    );
+}
+
+// ── categorize_memories: unknown tool silently ignored ─────────────────
+
+#[test]
+fn categorize_memories_unknown_tool_silently_ignored() {
+    let memories = vec![
+        make_tool_memory("m1", "WebFetch", ""),
+        make_tool_memory("m2", "WebSearch", ""),
+        make_tool_memory("m3", "Agent", ""),
+    ];
+    let cat = categorize_memories(&memories);
+    assert!(
+        cat.files_read.is_empty(),
+        "WebFetch should not appear as read"
+    );
+    assert!(
+        cat.files_edited.is_empty(),
+        "WebSearch should not appear as edit"
+    );
+    assert!(cat.searches.is_empty(), "Agent should not appear as search");
+}

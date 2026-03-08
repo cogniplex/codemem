@@ -57,3 +57,7 @@ impl From<toml::de::Error> for CodememError {
         CodememError::Config(e.to_string())
     }
 }
+
+#[cfg(test)]
+#[path = "tests/error_tests.rs"]
+mod tests;

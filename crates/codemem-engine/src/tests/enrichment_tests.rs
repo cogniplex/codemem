@@ -1431,6 +1431,363 @@ fn enrich_security_respects_namespace_in_insights() {
     }
 }
 
+// ── run_enrichments pipeline tests ────────────────────────────────────
+
+#[test]
+fn run_enrichments_with_empty_graph_produces_zero_insights() {
+    let engine = CodememEngine::for_testing();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().to_str().unwrap();
+
+    let result = engine.run_enrichments(path, &[], 30, None, None);
+    assert_eq!(
+        result.total_insights, 0,
+        "empty graph should produce zero enrichment insights"
+    );
+}
+
+#[test]
+fn run_enrichments_selected_analyses_only_runs_requested() {
+    let engine = CodememEngine::for_testing();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().to_str().unwrap();
+
+    // Only run doc_coverage and api_surface
+    let analyses = vec!["doc_coverage".to_string(), "api_surface".to_string()];
+    let result = engine.run_enrichments(path, &analyses, 30, None, None);
+
+    // These keys should be present in results
+    assert!(
+        result.results.get("doc_coverage").is_some(),
+        "doc_coverage result should be present"
+    );
+    assert!(
+        result.results.get("api_surface").is_some(),
+        "api_surface result should be present"
+    );
+
+    // Analyses not requested should NOT be present
+    assert!(
+        result.results.get("security").is_none(),
+        "security should not be present when not requested"
+    );
+    assert!(
+        result.results.get("architecture").is_none(),
+        "architecture should not be present when not requested"
+    );
+}
+
+#[test]
+fn run_enrichments_complexity_with_real_source_file() {
+    let engine = CodememEngine::for_testing();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+
+    // Write a source file with a very complex function (many decision points)
+    // Need > 10 cyclomatic complexity: 1 base + each if/for/while/match/&&/|| adds 1
+    let source = r#"fn complex_handler(request: Request) -> Response {
+    if request.method == "GET" {
+        if request.authenticated {
+            if request.has_permission("read") {
+                for item in request.items() {
+                    if item.is_valid() {
+                        if item.is_active() {
+                            match item.kind() {
+                                Kind::A => { process_a(item); }
+                                Kind::B => { process_b(item); }
+                                _ => { handle_default(item); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if request.method == "POST" {
+        if request.body.is_some() && request.content_type == "json" {
+            if request.authorized && request.valid {
+                process_post(request);
+            }
+        }
+    } else if request.method == "DELETE" {
+        if request.is_admin() || request.has_permission("delete") {
+            delete_handler(request);
+        }
+    }
+    Response::ok()
+}
+"#;
+    std::fs::write(src_dir.join("handler.rs"), source).unwrap();
+
+    // Add a function node pointing to our file
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        let mut func = function_node("fn:complex_handler", "complex_handler", "src/handler.rs");
+        func.payload.insert("line_start".into(), json!(1));
+        func.payload.insert("line_end".into(), json!(32));
+        graph.add_node(func).unwrap();
+    }
+
+    let analyses = vec!["complexity".to_string()];
+    let result = engine.run_enrichments(tmp.path().to_str().unwrap(), &analyses, 30, None, None);
+
+    let complexity = &result.results["complexity"];
+    assert_eq!(
+        complexity["symbols_analyzed"], 1,
+        "should analyze 1 function"
+    );
+    // The function has many if/else if/match/for/&&/|| — cyclomatic > 10
+    let high_count = complexity["high_complexity_count"].as_u64().unwrap_or(0);
+    assert!(
+        high_count >= 1,
+        "complex function should be flagged as high complexity"
+    );
+}
+
+#[test]
+fn run_enrichments_code_smells_detects_deep_nesting_in_real_file() {
+    let engine = CodememEngine::for_testing();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+
+    // Write a file with deeply nested code (>4 levels)
+    let source = r#"fn deeply_nested() {
+    if true {
+        if true {
+            if true {
+                if true {
+                    if true {
+                        println!("deep");
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+    std::fs::write(src_dir.join("nested.rs"), source).unwrap();
+
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        let mut func = function_node("fn:deeply_nested", "deeply_nested", "src/nested.rs");
+        func.payload.insert("line_start".into(), json!(1));
+        func.payload.insert("line_end".into(), json!(13));
+        graph.add_node(func).unwrap();
+    }
+
+    let analyses = vec!["code_smells".to_string()];
+    let result = engine.run_enrichments(tmp.path().to_str().unwrap(), &analyses, 30, None, None);
+
+    assert!(
+        result.total_insights >= 1,
+        "deeply nested function should trigger code smell insight"
+    );
+}
+
+#[test]
+fn run_enrichments_produces_static_analysis_tagged_insights() {
+    let engine = CodememEngine::for_testing();
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    // Set up graph with security-relevant files
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        graph.add_node(file_node("src/auth.rs")).unwrap();
+        graph
+            .add_node(endpoint_node("ep:login", "POST /api/login"))
+            .unwrap();
+    }
+
+    let analyses = vec!["security".to_string()];
+    let result = engine.run_enrichments(tmp.path().to_str().unwrap(), &analyses, 30, None, None);
+
+    assert!(
+        result.total_insights >= 1,
+        "security analysis should produce insights"
+    );
+
+    // Verify that stored insights have the static-analysis tag
+    let all_ids = engine.storage.list_memory_ids().unwrap_or_default();
+    let mut found_static_analysis = false;
+    for id in &all_ids {
+        if let Ok(Some(mem)) = engine.storage.get_memory(id) {
+            if mem.tags.contains(&"static-analysis".to_string()) {
+                found_static_analysis = true;
+                assert_eq!(
+                    mem.memory_type,
+                    codemem_core::MemoryType::Insight,
+                    "static-analysis tagged memory should be Insight type"
+                );
+            }
+        }
+    }
+    assert!(
+        found_static_analysis,
+        "should find at least one memory tagged with static-analysis"
+    );
+}
+
+#[test]
+fn run_enrichments_with_namespace_passes_to_insights() {
+    let engine = CodememEngine::for_testing();
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        graph.add_node(file_node("src/credentials.rs")).unwrap();
+    }
+
+    let analyses = vec!["security".to_string()];
+    let result = engine.run_enrichments(
+        tmp.path().to_str().unwrap(),
+        &analyses,
+        30,
+        Some("test-ns"),
+        None,
+    );
+
+    assert!(result.total_insights >= 1);
+
+    let all_ids = engine.storage.list_memory_ids().unwrap_or_default();
+    for id in &all_ids {
+        if let Ok(Some(mem)) = engine.storage.get_memory(id) {
+            if mem.tags.contains(&"static-analysis".to_string()) {
+                assert_eq!(
+                    mem.namespace.as_deref(),
+                    Some("test-ns"),
+                    "insight namespace should match the one passed to run_enrichments"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn run_enrichments_change_impact_requires_file_path() {
+    let engine = CodememEngine::for_testing();
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    let analyses = vec!["change_impact".to_string()];
+    let result = engine.run_enrichments(
+        tmp.path().to_str().unwrap(),
+        &analyses,
+        30,
+        None,
+        None, // no file_path provided
+    );
+
+    let change_impact = &result.results["change_impact"];
+    assert!(
+        change_impact.get("error").is_some(),
+        "change_impact without file_path should produce an error in results"
+    );
+}
+
+#[test]
+fn run_enrichments_git_on_non_git_dir_reports_error_in_results() {
+    let engine = CodememEngine::for_testing();
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    let analyses = vec!["git".to_string()];
+    let result = engine.run_enrichments(tmp.path().to_str().unwrap(), &analyses, 30, None, None);
+
+    let git_result = &result.results["git"];
+    assert!(
+        git_result.get("error").is_some(),
+        "git enrichment on non-git dir should report error: {:?}",
+        git_result
+    );
+}
+
+// ── enrich_complexity with real files ────────────────────────────────
+
+#[test]
+fn enrich_complexity_annotates_graph_nodes() {
+    let engine = CodememEngine::for_testing();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+
+    let source = r#"fn simple_function() {
+    let x = 1;
+    let y = 2;
+    println!("{}", x + y);
+}
+"#;
+    std::fs::write(src_dir.join("simple.rs"), source).unwrap();
+
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        let mut func = function_node("fn:simple_function", "simple_function", "src/simple.rs");
+        func.payload.insert("line_start".into(), json!(1));
+        func.payload.insert("line_end".into(), json!(5));
+        graph.add_node(func).unwrap();
+    }
+
+    engine.enrich_complexity(None, Some(tmp.path())).unwrap();
+
+    let graph = engine.lock_graph().unwrap();
+    let node = graph.get_node("fn:simple_function").unwrap().unwrap();
+    assert!(
+        node.payload.contains_key("cyclomatic_complexity"),
+        "function should be annotated with cyclomatic_complexity"
+    );
+    assert!(
+        node.payload.contains_key("cognitive_complexity"),
+        "function should be annotated with cognitive_complexity"
+    );
+
+    let cyc = node.payload["cyclomatic_complexity"].as_u64().unwrap();
+    assert!(
+        cyc <= 5,
+        "simple function should have low cyclomatic complexity, got {}",
+        cyc
+    );
+}
+
+// ── enrich_doc_coverage: insight content validation ──────────────────
+
+#[test]
+fn enrich_doc_coverage_insight_mentions_coverage_percentage() {
+    let engine = CodememEngine::for_testing();
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        // 0 documented out of 2 public = 0% coverage
+        for i in 0..2 {
+            graph
+                .add_node(method_node(
+                    &format!("fn:undoc_{i}"),
+                    &format!("undoc_{i}"),
+                    "src/poorly_covered.rs",
+                    "public",
+                    None,
+                ))
+                .unwrap();
+        }
+    }
+
+    engine.enrich_doc_coverage(None).unwrap();
+
+    let all_ids = engine.storage.list_memory_ids().unwrap_or_default();
+    let mut found_coverage_insight = false;
+    for id in &all_ids {
+        if let Ok(Some(mem)) = engine.storage.get_memory(id) {
+            if mem.content.contains("coverage") && mem.content.contains("poorly_covered.rs") {
+                found_coverage_insight = true;
+                assert!(
+                    mem.content.contains('%'),
+                    "doc coverage insight should mention percentage"
+                );
+            }
+        }
+    }
+    assert!(
+        found_coverage_insight,
+        "should produce a coverage insight for undocumented file"
+    );
+}
+
 // ── Multiple enrichments compose correctly ───────────────────────────
 
 #[test]

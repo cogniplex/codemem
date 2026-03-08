@@ -182,3 +182,7 @@ pub use codemem_core::content_hash;
 #[cfg(test)]
 #[path = "tests/lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/hooks_integration.rs"]
+mod hooks_integration_tests;

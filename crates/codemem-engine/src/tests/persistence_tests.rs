@@ -746,3 +746,331 @@ fn persist_cleans_stale_chunks_on_reindex() {
         "stale chunk should be removed from storage on re-index"
     );
 }
+
+// ── Memory ops provenance: refine_memory ────────────────────────────
+
+fn make_test_memory(id: &str, content: &str) -> codemem_core::MemoryNode {
+    let now = chrono::Utc::now();
+    codemem_core::MemoryNode {
+        id: id.to_string(),
+        content: content.to_string(),
+        memory_type: codemem_core::MemoryType::Insight,
+        importance: 0.5,
+        confidence: 0.8,
+        access_count: 0,
+        content_hash: codemem_storage::Storage::content_hash(content),
+        tags: vec!["test".to_string()],
+        metadata: std::collections::HashMap::new(),
+        namespace: None,
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: now,
+    }
+}
+
+#[test]
+fn refine_memory_creates_evolved_into_edge() {
+    let engine = CodememEngine::for_testing();
+
+    let old_memory = make_test_memory("old-mem-1", "original insight");
+    engine.persist_memory(&old_memory).unwrap();
+
+    let (new_memory, new_id) = engine
+        .refine_memory("old-mem-1", Some("refined insight"), None, None)
+        .unwrap();
+
+    assert_ne!(new_id, "old-mem-1");
+    assert_eq!(new_memory.content, "refined insight");
+
+    // Verify EVOLVED_INTO edge from old -> new
+    let graph = engine.lock_graph().unwrap();
+    let edges = graph.get_edges("old-mem-1").unwrap();
+    let evolved_edge = edges
+        .iter()
+        .find(|e| e.dst == new_id && e.relationship == RelationshipType::EvolvedInto);
+    assert!(
+        evolved_edge.is_some(),
+        "should create EVOLVED_INTO edge from old to new, edges: {edges:?}"
+    );
+}
+
+#[test]
+fn refine_memory_old_memory_still_exists() {
+    let engine = CodememEngine::for_testing();
+
+    let old_memory = make_test_memory("old-mem-2", "original content");
+    engine.persist_memory(&old_memory).unwrap();
+
+    engine
+        .refine_memory("old-mem-2", Some("updated content"), None, None)
+        .unwrap();
+
+    // Old memory should still be retrievable
+    let old = engine.storage.get_memory("old-mem-2").unwrap();
+    assert!(
+        old.is_some(),
+        "old memory should still exist after refinement"
+    );
+    assert_eq!(old.unwrap().content, "original content");
+}
+
+#[test]
+fn refine_memory_updates_content_tags_importance() {
+    let engine = CodememEngine::for_testing();
+
+    let old_memory = make_test_memory("old-mem-3", "old content");
+    engine.persist_memory(&old_memory).unwrap();
+
+    let new_tags = vec!["refined".to_string(), "v2".to_string()];
+    let (new_memory, _new_id) = engine
+        .refine_memory(
+            "old-mem-3",
+            Some("new content"),
+            Some(new_tags.clone()),
+            Some(0.9),
+        )
+        .unwrap();
+
+    assert_eq!(new_memory.content, "new content");
+    assert_eq!(new_memory.tags, new_tags);
+    assert!((new_memory.importance - 0.9).abs() < f64::EPSILON);
+    // Should inherit memory_type from old
+    assert_eq!(new_memory.memory_type, codemem_core::MemoryType::Insight);
+}
+
+#[test]
+fn refine_memory_nonexistent_returns_error() {
+    let engine = CodememEngine::for_testing();
+
+    let result = engine.refine_memory("nonexistent-id", Some("content"), None, None);
+    assert!(
+        result.is_err(),
+        "should return error for nonexistent memory"
+    );
+}
+
+// ── Memory ops provenance: split_memory ─────────────────────────────
+
+#[test]
+fn split_memory_creates_part_of_edges() {
+    let engine = CodememEngine::for_testing();
+
+    let source = make_test_memory("source-mem-1", "combined insight about A and B");
+    engine.persist_memory(&source).unwrap();
+
+    let parts = vec![
+        crate::SplitPart {
+            content: "insight about A".to_string(),
+            tags: Some(vec!["topic-a".to_string()]),
+            importance: None,
+        },
+        crate::SplitPart {
+            content: "insight about B".to_string(),
+            tags: Some(vec!["topic-b".to_string()]),
+            importance: None,
+        },
+    ];
+
+    let child_ids = engine.split_memory("source-mem-1", &parts).unwrap();
+    assert_eq!(child_ids.len(), 2);
+
+    // Verify PART_OF edges: child -> source
+    let graph = engine.lock_graph().unwrap();
+    for child_id in &child_ids {
+        let edges = graph.get_edges(child_id).unwrap();
+        let part_of_edge = edges
+            .iter()
+            .find(|e| e.dst == "source-mem-1" && e.relationship == RelationshipType::PartOf);
+        assert!(
+            part_of_edge.is_some(),
+            "child {child_id} should have PART_OF edge to source, edges: {edges:?}"
+        );
+    }
+}
+
+#[test]
+fn split_memory_original_still_exists() {
+    let engine = CodememEngine::for_testing();
+
+    let source = make_test_memory("source-mem-2", "original combined");
+    engine.persist_memory(&source).unwrap();
+
+    let parts = vec![crate::SplitPart {
+        content: "part one".to_string(),
+        tags: None,
+        importance: None,
+    }];
+
+    engine.split_memory("source-mem-2", &parts).unwrap();
+
+    let original = engine.storage.get_memory("source-mem-2").unwrap();
+    assert!(
+        original.is_some(),
+        "original memory should still exist after split"
+    );
+}
+
+#[test]
+fn split_memory_single_part_works() {
+    let engine = CodememEngine::for_testing();
+
+    let source = make_test_memory("source-mem-3", "content to extract");
+    engine.persist_memory(&source).unwrap();
+
+    let parts = vec![crate::SplitPart {
+        content: "extracted part".to_string(),
+        tags: None,
+        importance: Some(0.7),
+    }];
+
+    let child_ids = engine.split_memory("source-mem-3", &parts).unwrap();
+    assert_eq!(child_ids.len(), 1);
+
+    let child = engine.storage.get_memory(&child_ids[0]).unwrap().unwrap();
+    assert_eq!(child.content, "extracted part");
+    assert!((child.importance - 0.7).abs() < f64::EPSILON);
+}
+
+#[test]
+fn split_memory_empty_parts_returns_error() {
+    let engine = CodememEngine::for_testing();
+
+    let source = make_test_memory("source-mem-4", "some content");
+    engine.persist_memory(&source).unwrap();
+
+    let parts: Vec<crate::SplitPart> = vec![];
+    let result = engine.split_memory("source-mem-4", &parts);
+    assert!(
+        result.is_err(),
+        "split with empty parts should return error"
+    );
+}
+
+#[test]
+fn split_memory_nonexistent_source_returns_error() {
+    let engine = CodememEngine::for_testing();
+
+    let parts = vec![crate::SplitPart {
+        content: "part".to_string(),
+        tags: None,
+        importance: None,
+    }];
+
+    let result = engine.split_memory("nonexistent-source", &parts);
+    assert!(
+        result.is_err(),
+        "should return error for nonexistent source memory"
+    );
+}
+
+// ── Memory ops provenance: merge_memories ───────────────────────────
+
+#[test]
+fn merge_memories_creates_summarizes_edges() {
+    let engine = CodememEngine::for_testing();
+
+    let mem_a = make_test_memory("merge-a", "insight about pattern A");
+    let mem_b = make_test_memory("merge-b", "insight about pattern B");
+    engine.persist_memory(&mem_a).unwrap();
+    engine.persist_memory(&mem_b).unwrap();
+
+    let merged_id = engine
+        .merge_memories(
+            &["merge-a".to_string(), "merge-b".to_string()],
+            "combined insight about patterns A and B",
+            codemem_core::MemoryType::Insight,
+            0.8,
+            vec!["merged".to_string()],
+        )
+        .unwrap();
+
+    // Verify SUMMARIZES edges: merged -> each source
+    let graph = engine.lock_graph().unwrap();
+    let edges = graph.get_edges(&merged_id).unwrap();
+
+    let summarizes_a = edges
+        .iter()
+        .find(|e| e.dst == "merge-a" && e.relationship == RelationshipType::Summarizes);
+    assert!(
+        summarizes_a.is_some(),
+        "should create SUMMARIZES edge to merge-a, edges: {edges:?}"
+    );
+
+    let summarizes_b = edges
+        .iter()
+        .find(|e| e.dst == "merge-b" && e.relationship == RelationshipType::Summarizes);
+    assert!(
+        summarizes_b.is_some(),
+        "should create SUMMARIZES edge to merge-b, edges: {edges:?}"
+    );
+}
+
+#[test]
+fn merge_memories_confidence_averaging() {
+    let engine = CodememEngine::for_testing();
+
+    let mut mem_a = make_test_memory("conf-a", "insight A");
+    mem_a.confidence = 0.6;
+    let mut mem_b = make_test_memory("conf-b", "insight B");
+    mem_b.confidence = 1.0;
+    engine.persist_memory(&mem_a).unwrap();
+    engine.persist_memory(&mem_b).unwrap();
+
+    let merged_id = engine
+        .merge_memories(
+            &["conf-a".to_string(), "conf-b".to_string()],
+            "merged insight",
+            codemem_core::MemoryType::Insight,
+            0.7,
+            vec![],
+        )
+        .unwrap();
+
+    let merged = engine.storage.get_memory(&merged_id).unwrap().unwrap();
+    // Average of 0.6 and 1.0 = 0.8
+    assert!(
+        (merged.confidence - 0.8).abs() < f64::EPSILON,
+        "confidence should be average of sources, got: {}",
+        merged.confidence
+    );
+}
+
+#[test]
+fn merge_memories_nonexistent_source_returns_error() {
+    let engine = CodememEngine::for_testing();
+
+    let mem_a = make_test_memory("exists-a", "content");
+    engine.persist_memory(&mem_a).unwrap();
+
+    let result = engine.merge_memories(
+        &["exists-a".to_string(), "does-not-exist".to_string()],
+        "merged",
+        codemem_core::MemoryType::Insight,
+        0.5,
+        vec![],
+    );
+    assert!(
+        result.is_err(),
+        "should return error when a source memory does not exist"
+    );
+}
+
+#[test]
+fn merge_memories_requires_at_least_two_sources() {
+    let engine = CodememEngine::for_testing();
+
+    let mem_a = make_test_memory("single-a", "content");
+    engine.persist_memory(&mem_a).unwrap();
+
+    let result = engine.merge_memories(
+        &["single-a".to_string()],
+        "merged",
+        codemem_core::MemoryType::Insight,
+        0.5,
+        vec![],
+    );
+    assert!(
+        result.is_err(),
+        "should require at least 2 source IDs for merge"
+    );
+}

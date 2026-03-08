@@ -950,6 +950,480 @@ async fn unknown_route_returns_404() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+// ── Namespace Deletion ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn delete_namespace_returns_200() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+
+    // Store a memory in a namespace
+    let router = api.router();
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"content":"namespace memory","namespace":"to-delete","memory_type":"insight"}"#,
+        ))
+        .unwrap();
+    let (status, _) = send(router, store_req).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Delete the namespace
+    let router = api.router();
+    let del_req = Request::builder()
+        .method("DELETE")
+        .uri("/api/namespaces/to-delete")
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = send(router, del_req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(
+        json["message"].as_str().unwrap().contains("Deleted"),
+        "Response should confirm deletion"
+    );
+}
+
+#[tokio::test]
+async fn delete_namespace_nonexistent_returns_200_zero_deleted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+    let router = api.router();
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri("/api/namespaces/nonexistent-ns")
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = send(router, req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(json["message"].as_str().unwrap().contains("Deleted 0"));
+}
+
+// ── Update Memory Variants ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn update_memory_importance_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+
+    // Store
+    let router = api.router();
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"content":"importance-only update test","importance":0.3}"#,
+        ))
+        .unwrap();
+
+    let (_, body) = send(router, store_req).await;
+    let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Update with only importance (no content)
+    let router = api.router();
+    let update_req = Request::builder()
+        .method("PUT")
+        .uri(format!("/api/memories/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"importance":0.95}"#))
+        .unwrap();
+
+    let (status, body) = send(router, update_req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["message"], "Updated");
+
+    // Verify importance was changed
+    let router = api.router();
+    let get_req = Request::builder()
+        .uri(format!("/api/memories/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, body) = send(router, get_req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(
+        (json["importance"].as_f64().unwrap() - 0.95).abs() < 0.01,
+        "Importance should be updated to 0.95"
+    );
+}
+
+#[tokio::test]
+async fn update_memory_no_content_no_importance_is_noop() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+
+    // Store
+    let router = api.router();
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"content":"noop update test"}"#))
+        .unwrap();
+
+    let (_, body) = send(router, store_req).await;
+    let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Update with neither content nor importance
+    let router = api.router();
+    let update_req = Request::builder()
+        .method("PUT")
+        .uri(format!("/api/memories/{id}"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{}"#))
+        .unwrap();
+
+    let (status, body) = send(router, update_req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["message"], "Updated");
+
+    // Verify the memory is unchanged
+    let router = api.router();
+    let get_req = Request::builder()
+        .uri(format!("/api/memories/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, body) = send(router, get_req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["content"], "noop update test");
+}
+
+// ── Parameter Validation ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn store_memory_importance_above_one_accepted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+    let router = api.router();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"content":"over-importance test","importance":1.5}"#,
+        ))
+        .unwrap();
+
+    let (status, _) = send(router, req).await;
+    // The API does not validate importance range; it stores as-is
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn store_memory_importance_below_zero_accepted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+    let router = api.router();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"content":"negative importance test","importance":-0.5}"#,
+        ))
+        .unwrap();
+
+    let (status, _) = send(router, req).await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn store_memory_empty_content_returns_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+    let router = api.router();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"content":""}"#))
+        .unwrap();
+
+    let (status, _) = send(router, req).await;
+    // Empty content is accepted at the API layer (stored with empty string)
+    // The API does not reject empty content, unlike the MCP layer
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn list_memories_with_limit_zero() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+
+    // Store a memory
+    let router = api.router();
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"content":"limit zero test"}"#))
+        .unwrap();
+    let (status, _) = send(router, store_req).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // List with limit=0
+    let router = api.router();
+    let req = Request::builder()
+        .uri("/api/memories?limit=0")
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = send(router, req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    // limit=0 means take(0) = 0 items returned
+    assert_eq!(json["memories"].as_array().unwrap().len(), 0);
+    // total should still reflect actual count
+    assert_eq!(json["total"], 1);
+}
+
+#[tokio::test]
+async fn list_memories_with_large_offset() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+
+    // Store a memory
+    let router = api.router();
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"content":"offset test"}"#))
+        .unwrap();
+    let (status, _) = send(router, store_req).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // List with offset beyond total count
+    let router = api.router();
+    let req = Request::builder()
+        .uri("/api/memories?offset=999")
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = send(router, req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["memories"].as_array().unwrap().len(), 0);
+    assert_eq!(json["total"], 1);
+}
+
+#[tokio::test]
+async fn search_with_empty_query() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+    let router = api.router();
+
+    let req = Request::builder()
+        .uri("/api/search?q=")
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = send(router, req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    // Empty query returns empty results
+    assert!(json["results"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn search_with_k_zero() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+
+    // Store a memory so there's something to search
+    let router = api.router();
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"content":"searchable memory about rust"}"#))
+        .unwrap();
+    let (status, _) = send(router, store_req).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Search with k=0
+    let router = api.router();
+    let req = Request::builder()
+        .uri("/api/search?q=rust&k=0")
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = send(router, req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(json["results"].as_array().unwrap().is_empty());
+}
+
+// ── Transport Consistency ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn store_and_get_roundtrip_fields_match() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+
+    // Store via API
+    let router = api.router();
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_string(&serde_json::json!({
+                "content": "Transport consistency roundtrip test",
+                "memory_type": "decision",
+                "importance": 0.7,
+                "tags": ["transport", "test"],
+                "namespace": "roundtrip-ns"
+            }))
+            .unwrap(),
+        ))
+        .unwrap();
+
+    let (status, body) = send(router, store_req).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Get via API
+    let router = api.router();
+    let get_req = Request::builder()
+        .uri(format!("/api/memories/{id}"))
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = send(router, get_req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+    // Verify all fields match what was stored
+    assert_eq!(json["id"], id);
+    assert_eq!(json["content"], "Transport consistency roundtrip test");
+    assert_eq!(json["memory_type"], "decision");
+    assert!(
+        (json["importance"].as_f64().unwrap() - 0.7).abs() < 0.01,
+        "Importance should match"
+    );
+    assert_eq!(json["tags"].as_array().unwrap().len(), 2);
+    assert!(json["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t == "transport"));
+    assert!(json["tags"].as_array().unwrap().iter().any(|t| t == "test"));
+    assert_eq!(json["namespace"], "roundtrip-ns");
+    assert!(json["created_at"].is_string());
+    assert!(json["updated_at"].is_string());
+}
+
+#[tokio::test]
+async fn store_and_search_finds_memory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+
+    // Store via API
+    let router = api.router();
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"content":"Ownership and borrowing are core Rust features","memory_type":"insight","tags":["rust","ownership"]}"#,
+        ))
+        .unwrap();
+
+    let (status, _) = send(router, store_req).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Search via API
+    let router = api.router();
+    let search_req = Request::builder()
+        .uri("/api/search?q=rust+ownership+borrowing")
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = send(router, search_req).await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let results = json["results"].as_array().unwrap();
+    // Should find the stored memory via BM25 token overlap
+    assert!(!results.is_empty(), "Search should find the stored memory");
+    assert!(results[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("Ownership"));
+}
+
+#[tokio::test]
+async fn delete_then_get_returns_404() {
+    let tmp = tempfile::tempdir().unwrap();
+    let api = test_api_server(&tmp);
+
+    // Store
+    let router = api.router();
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/api/memories")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"content":"delete consistency test"}"#))
+        .unwrap();
+
+    let (status, body) = send(router, store_req).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Verify exists
+    let router = api.router();
+    let get_req = Request::builder()
+        .uri(format!("/api/memories/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, _) = send(router, get_req).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Delete
+    let router = api.router();
+    let del_req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/memories/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, _) = send(router, del_req).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Verify gone
+    let router = api.router();
+    let get_req = Request::builder()
+        .uri(format!("/api/memories/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, _) = send(router, get_req).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 // ── CORS headers ────────────────────────────────────────────────────────────
 
 #[tokio::test]

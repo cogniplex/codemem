@@ -478,3 +478,292 @@ fn from_env_case_insensitive() {
     let provider = result.expect("Provider name should be case-insensitive");
     assert_eq!(provider.name(), "ollama");
 }
+
+// ── Concurrency tests ────────────────────────────────────────────────
+
+#[test]
+fn cached_provider_concurrent_embed_no_panic() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let mock = MockProvider::new(4);
+    let provider = Arc::new(CachedProvider::new(Box::new(mock), 100));
+
+    let handles: Vec<_> = (0..10)
+        .map(|i| {
+            let p = Arc::clone(&provider);
+            thread::spawn(move || {
+                let text = format!("text_{}", i);
+                let result = p.embed(&text);
+                assert!(result.is_ok(), "Thread {i} should not panic or error");
+                let embedding = result.unwrap();
+                assert_eq!(embedding.len(), 4);
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().expect("Thread should not panic");
+    }
+
+    // All 10 unique texts should be in the cache
+    let (size, _) = provider.cache_stats();
+    assert_eq!(size, 10);
+}
+
+#[test]
+fn cached_provider_concurrent_embed_same_key() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let count_clone = call_count.clone();
+
+    struct SlowCountingMock {
+        dims: usize,
+        count: Arc<AtomicUsize>,
+    }
+    impl EmbeddingProvider for SlowCountingMock {
+        fn dimensions(&self) -> usize {
+            self.dims
+        }
+        fn embed(&self, _text: &str) -> Result<Vec<f32>, CodememError> {
+            self.count.fetch_add(1, Ordering::SeqCst);
+            // Small sleep to increase chance of concurrent access
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            Ok(vec![0.42; self.dims])
+        }
+        fn name(&self) -> &str {
+            "slow-counting"
+        }
+    }
+
+    let provider = Arc::new(CachedProvider::new(
+        Box::new(SlowCountingMock {
+            dims: 4,
+            count: count_clone,
+        }),
+        100,
+    ));
+
+    // All threads embed the same key
+    let handles: Vec<_> = (0..10)
+        .map(|_| {
+            let p = Arc::clone(&provider);
+            thread::spawn(move || {
+                let result = p.embed("same_key");
+                assert!(result.is_ok());
+                let embedding = result.unwrap();
+                // All should get the same value regardless of cache hit/miss
+                assert_eq!(embedding, vec![0.42; 4]);
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().expect("Thread should not panic");
+    }
+
+    // Cache should have exactly 1 entry for "same_key"
+    let (size, _) = provider.cache_stats();
+    assert_eq!(size, 1);
+}
+
+#[test]
+fn cached_provider_concurrent_embed_batch_no_corruption() {
+    use std::sync::Arc;
+    use std::thread;
+
+    /// A mock that returns distinct embeddings per text for verifiability.
+    struct DistinctMock {
+        dims: usize,
+    }
+    impl EmbeddingProvider for DistinctMock {
+        fn dimensions(&self) -> usize {
+            self.dims
+        }
+        fn embed(&self, text: &str) -> Result<Vec<f32>, CodememError> {
+            // Use first byte of text as a distinguishing value
+            let val = text.as_bytes().first().copied().unwrap_or(0) as f32 / 255.0;
+            Ok(vec![val; self.dims])
+        }
+        fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CodememError> {
+            texts.iter().map(|t| self.embed(t)).collect()
+        }
+        fn name(&self) -> &str {
+            "distinct"
+        }
+    }
+
+    let provider = Arc::new(CachedProvider::new(
+        Box::new(DistinctMock { dims: 4 }),
+        1000,
+    ));
+
+    let handles: Vec<_> = (0..5)
+        .map(|i| {
+            let p = Arc::clone(&provider);
+            thread::spawn(move || {
+                let texts: Vec<String> = (0..3).map(|j| format!("t{}_{}", i, j)).collect();
+                let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+                let result = p.embed_batch(&text_refs);
+                assert!(result.is_ok(), "Thread {i} batch should succeed");
+                let embeddings = result.unwrap();
+                assert_eq!(embeddings.len(), 3, "Thread {i} should get 3 embeddings");
+
+                // Verify each embedding has the correct dimension
+                for emb in &embeddings {
+                    assert_eq!(emb.len(), 4);
+                }
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().expect("Thread should not panic");
+    }
+
+    // All 15 unique texts should be cached (5 threads x 3 texts)
+    let (size, _) = provider.cache_stats();
+    assert_eq!(size, 15);
+}
+
+#[test]
+fn cached_provider_concurrent_reads_and_writes() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let mock = MockProvider::new(4);
+    let provider = Arc::new(CachedProvider::new(Box::new(mock), 100));
+
+    // Pre-populate some entries
+    for i in 0..5 {
+        provider.embed(&format!("pre_{}", i)).unwrap();
+    }
+
+    // Mix of reads (cached) and writes (new keys)
+    let handles: Vec<_> = (0..10)
+        .map(|i| {
+            let p = Arc::clone(&provider);
+            thread::spawn(move || {
+                if i % 2 == 0 {
+                    // Read a cached key
+                    let result = p.embed(&format!("pre_{}", i % 5));
+                    assert!(result.is_ok());
+                } else {
+                    // Write a new key
+                    let result = p.embed(&format!("new_{}", i));
+                    assert!(result.is_ok());
+                }
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().expect("Thread should not panic");
+    }
+}
+
+// ── Edge case input tests ────────────────────────────────────────────
+
+#[test]
+fn cached_provider_embed_empty_string() {
+    let mock = MockProvider::new(4);
+    let provider = CachedProvider::new(Box::new(mock), 100);
+
+    let result = provider.embed("");
+    assert!(result.is_ok());
+    let embedding = result.unwrap();
+    assert_eq!(embedding.len(), 4);
+
+    // Empty string should be cached
+    let (size, _) = provider.cache_stats();
+    assert_eq!(size, 1);
+
+    // Second call should hit cache
+    let result2 = provider.embed("");
+    assert!(result2.is_ok());
+    assert_eq!(result2.unwrap(), embedding);
+}
+
+#[test]
+fn cached_provider_embed_very_long_string() {
+    let mock = MockProvider::new(4);
+    let provider = CachedProvider::new(Box::new(mock), 100);
+
+    // Create a string larger than 10KB
+    let long_text = "a".repeat(15_000);
+    let result = provider.embed(&long_text);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().len(), 4);
+}
+
+#[test]
+fn cached_provider_batch_with_duplicates_avoids_redundant_calls() {
+    use std::sync::Arc;
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let count_clone = call_count.clone();
+
+    struct CountingBatchMock {
+        dims: usize,
+        count: Arc<AtomicUsize>,
+    }
+    impl EmbeddingProvider for CountingBatchMock {
+        fn dimensions(&self) -> usize {
+            self.dims
+        }
+        fn embed(&self, _text: &str) -> Result<Vec<f32>, CodememError> {
+            self.count.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![0.1; self.dims])
+        }
+        fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CodememError> {
+            // Each text in the batch counts as one inner call
+            for _ in texts {
+                self.count.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(texts.iter().map(|_| vec![0.1; self.dims]).collect())
+        }
+        fn name(&self) -> &str {
+            "counting-batch"
+        }
+    }
+
+    let provider = CachedProvider::new(
+        Box::new(CountingBatchMock {
+            dims: 4,
+            count: count_clone,
+        }),
+        100,
+    );
+
+    // Pre-populate "hello" in cache
+    provider.embed("hello").unwrap();
+    let after_first = call_count.load(Ordering::SeqCst);
+    assert_eq!(after_first, 1);
+
+    // Batch with duplicates — "hello" should come from cache,
+    // only "world" should hit the inner provider
+    let result = provider.embed_batch(&["hello", "world", "hello"]).unwrap();
+    assert_eq!(result.len(), 3);
+
+    let after_batch = call_count.load(Ordering::SeqCst);
+    // Only "world" should have been forwarded (1 new inner call)
+    assert_eq!(
+        after_batch - after_first,
+        1,
+        "Only uncached text should hit inner provider"
+    );
+}
+
+#[test]
+fn cached_provider_batch_zero_items() {
+    let mock = MockProvider::new(4);
+    let provider = CachedProvider::new(Box::new(mock), 100);
+
+    let result = provider.embed_batch(&[]).unwrap();
+    assert!(result.is_empty());
+
+    let (size, _) = provider.cache_stats();
+    assert_eq!(size, 0);
+}

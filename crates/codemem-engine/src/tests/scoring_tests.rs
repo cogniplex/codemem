@@ -175,3 +175,315 @@ fn truncate_empty_string() {
 fn truncate_zero_max() {
     assert_eq!(truncate_content("abc", 0), "...");
 }
+
+// ── graph_strength_for_memory edge cases ────────────────────────────
+
+/// Helper: create a memory node in the graph.
+fn add_memory_node(graph: &mut GraphEngine, id: &str) {
+    let node = GraphNode {
+        id: id.to_string(),
+        kind: NodeKind::Memory,
+        label: "test memory".to_string(),
+        payload: HashMap::new(),
+        centrality: 0.0,
+        memory_id: Some(id.to_string()),
+        namespace: None,
+    };
+    graph.add_node(node).unwrap();
+}
+
+/// Helper: create a code node in the graph.
+fn add_code_node(graph: &mut GraphEngine, id: &str, kind: NodeKind) {
+    let node = GraphNode {
+        id: id.to_string(),
+        kind,
+        label: id.to_string(),
+        payload: HashMap::new(),
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+    };
+    graph.add_node(node).unwrap();
+}
+
+/// Helper: add an edge between two nodes.
+fn add_test_edge(
+    graph: &mut GraphEngine,
+    id: &str,
+    src: &str,
+    dst: &str,
+    rel: RelationshipType,
+    weight: f64,
+) {
+    let now = Utc::now();
+    let edge = Edge {
+        id: id.to_string(),
+        src: src.to_string(),
+        dst: dst.to_string(),
+        relationship: rel,
+        weight,
+        properties: HashMap::new(),
+        created_at: now,
+        valid_from: None,
+        valid_to: None,
+    };
+    graph.add_edge(edge).unwrap();
+}
+
+#[test]
+fn graph_strength_code_only_neighbors() {
+    let mut graph = GraphEngine::new();
+
+    add_memory_node(&mut graph, "mem-code-only");
+    add_code_node(&mut graph, "sym:CodeA", NodeKind::Function);
+    add_code_node(&mut graph, "sym:CodeB", NodeKind::Function);
+
+    // Memory -> two code nodes
+    add_test_edge(
+        &mut graph,
+        "e1",
+        "mem-code-only",
+        "sym:CodeA",
+        RelationshipType::RelatesTo,
+        0.6,
+    );
+    add_test_edge(
+        &mut graph,
+        "e2",
+        "mem-code-only",
+        "sym:CodeB",
+        RelationshipType::RelatesTo,
+        0.8,
+    );
+
+    graph.recompute_centrality();
+
+    let score = graph_strength_for_memory(&graph, "mem-code-only");
+    assert!(
+        score > 0.0,
+        "code-only neighbors should produce non-zero score, got {score}"
+    );
+
+    // The score should only have code_score component (no memory component blended)
+    // With code_neighbor_count=2, connectivity = 2/5 = 0.4
+    // avg_edge_w = (0.6+0.8)/2 = 0.7
+    // code_score = 0.4*pagerank + 0.3*betweenness + 0.2*0.4 + 0.1*0.7
+    // When no memory neighbors, code_score is used fully (no 70/30 blend)
+    assert!(score <= 1.0, "score should be capped at 1.0, got {score}");
+}
+
+#[test]
+fn graph_strength_memory_only_neighbors() {
+    let mut graph = GraphEngine::new();
+
+    add_memory_node(&mut graph, "mem-center");
+    add_memory_node(&mut graph, "mem-peer1");
+    add_memory_node(&mut graph, "mem-peer2");
+
+    // Center memory -> two other memories
+    add_test_edge(
+        &mut graph,
+        "e1",
+        "mem-peer1",
+        "mem-center",
+        RelationshipType::SharesTheme,
+        0.5,
+    );
+    add_test_edge(
+        &mut graph,
+        "e2",
+        "mem-peer2",
+        "mem-center",
+        RelationshipType::PrecededBy,
+        0.8,
+    );
+
+    graph.recompute_centrality();
+
+    let score = graph_strength_for_memory(&graph, "mem-center");
+    assert!(
+        score > 0.0,
+        "memory-only neighbors should produce non-zero score, got {score}"
+    );
+
+    // memory_score = 0.6 * connectivity + 0.4 * avg_edge_w
+    // connectivity = 2/10 = 0.2
+    // avg_edge_w = (0.5 + 0.8) / 2 = 0.65
+    // memory_score = 0.6*0.2 + 0.4*0.65 = 0.12 + 0.26 = 0.38
+    let expected_approx = 0.38;
+    assert!(
+        (score - expected_approx).abs() < 0.05,
+        "memory-only score should be approximately {expected_approx}, got {score}"
+    );
+}
+
+#[test]
+fn graph_strength_both_code_and_memory_blend() {
+    let mut graph = GraphEngine::new();
+
+    add_memory_node(&mut graph, "mem-both");
+    add_code_node(&mut graph, "sym:CodeX", NodeKind::Function);
+    add_memory_node(&mut graph, "mem-peer");
+
+    // Code neighbor
+    add_test_edge(
+        &mut graph,
+        "e1",
+        "mem-both",
+        "sym:CodeX",
+        RelationshipType::RelatesTo,
+        0.7,
+    );
+    // Memory neighbor
+    add_test_edge(
+        &mut graph,
+        "e2",
+        "mem-peer",
+        "mem-both",
+        RelationshipType::SharesTheme,
+        0.5,
+    );
+
+    graph.recompute_centrality();
+
+    let score = graph_strength_for_memory(&graph, "mem-both");
+    assert!(
+        score > 0.0,
+        "both code+memory neighbors should produce non-zero score, got {score}"
+    );
+
+    // Verify the 70/30 blend is applied
+    // Compute code_score and memory_score independently
+    let code_only_score = {
+        let mut g = GraphEngine::new();
+        add_memory_node(&mut g, "mem-co");
+        add_code_node(&mut g, "sym:CodeX2", NodeKind::Function);
+        add_test_edge(
+            &mut g,
+            "e1",
+            "mem-co",
+            "sym:CodeX2",
+            RelationshipType::RelatesTo,
+            0.7,
+        );
+        g.recompute_centrality();
+        graph_strength_for_memory(&g, "mem-co")
+    };
+
+    let memory_only_score = {
+        let mut g = GraphEngine::new();
+        add_memory_node(&mut g, "mem-mo");
+        add_memory_node(&mut g, "mem-mo-peer");
+        add_test_edge(
+            &mut g,
+            "e1",
+            "mem-mo-peer",
+            "mem-mo",
+            RelationshipType::SharesTheme,
+            0.5,
+        );
+        g.recompute_centrality();
+        graph_strength_for_memory(&g, "mem-mo")
+    };
+
+    let expected_blend = 0.7 * code_only_score + 0.3 * memory_only_score;
+    assert!(
+        (score - expected_blend).abs() < 0.1,
+        "blended score {score} should approximate 0.7*{code_only_score} + 0.3*{memory_only_score} = {expected_blend}"
+    );
+}
+
+#[test]
+fn graph_strength_no_neighbors_returns_zero() {
+    let mut graph = GraphEngine::new();
+
+    // Memory node with no edges
+    add_memory_node(&mut graph, "mem-isolated");
+    graph.recompute_centrality();
+
+    let score = graph_strength_for_memory(&graph, "mem-isolated");
+    assert!(
+        score == 0.0,
+        "isolated memory should have graph_strength of 0.0, got {score}"
+    );
+}
+
+#[test]
+fn graph_strength_nonexistent_memory_returns_zero() {
+    let graph = GraphEngine::new();
+
+    let score = graph_strength_for_memory(&graph, "nonexistent");
+    assert!(
+        score == 0.0,
+        "nonexistent memory should return 0.0, got {score}"
+    );
+}
+
+#[test]
+fn graph_strength_code_connectivity_caps_at_one() {
+    let mut graph = GraphEngine::new();
+
+    add_memory_node(&mut graph, "mem-many-code");
+    // Add 8 code neighbors (>5, so connectivity should cap at 1.0)
+    for i in 0..8 {
+        let code_id = format!("sym:Code{i}");
+        add_code_node(&mut graph, &code_id, NodeKind::Function);
+        add_test_edge(
+            &mut graph,
+            &format!("e{i}"),
+            "mem-many-code",
+            &code_id,
+            RelationshipType::RelatesTo,
+            0.5,
+        );
+    }
+
+    graph.recompute_centrality();
+
+    let score = graph_strength_for_memory(&graph, "mem-many-code");
+    assert!(
+        score <= 1.0,
+        "score should be capped at 1.0 even with many code neighbors, got {score}"
+    );
+    assert!(
+        score > 0.0,
+        "should have non-zero score with many code neighbors"
+    );
+}
+
+#[test]
+fn graph_strength_memory_connectivity_caps_at_one() {
+    let mut graph = GraphEngine::new();
+
+    add_memory_node(&mut graph, "mem-many-mem");
+    // Add 15 memory neighbors (>10, so connectivity should cap at 1.0)
+    for i in 0..15 {
+        let peer_id = format!("mem-peer-{i}");
+        add_memory_node(&mut graph, &peer_id);
+        add_test_edge(
+            &mut graph,
+            &format!("e{i}"),
+            &peer_id,
+            "mem-many-mem",
+            RelationshipType::SharesTheme,
+            0.5,
+        );
+    }
+
+    graph.recompute_centrality();
+
+    let score = graph_strength_for_memory(&graph, "mem-many-mem");
+    assert!(
+        score <= 1.0,
+        "score should be capped at 1.0 even with many memory neighbors, got {score}"
+    );
+
+    // With 15 memory neighbors, connectivity = min(15/10, 1.0) = 1.0
+    // avg_edge_w = 0.5
+    // memory_score = 0.6*1.0 + 0.4*0.5 = 0.8
+    let expected_approx = 0.8;
+    assert!(
+        (score - expected_approx).abs() < 0.05,
+        "capped memory connectivity score should be approximately {expected_approx}, got {score}"
+    );
+}

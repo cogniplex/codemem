@@ -148,3 +148,130 @@ fn cascade_delete_removes_all_related_data() {
         "cascade delete should return false for already-deleted memory"
     );
 }
+
+// ── Namespace dedup tests ───────────────────────────────────────────
+
+#[test]
+fn dedup_null_namespace_coalesce() {
+    // Two inserts with same content_hash but NULL namespace should dedup
+    let storage = Storage::open_in_memory().unwrap();
+    let m1 = test_memory(); // namespace = None
+    storage.insert_memory(&m1).unwrap();
+
+    let mut m2 = test_memory(); // same content, same hash, namespace = None
+    m2.id = uuid::Uuid::new_v4().to_string();
+    // m2 has the same content_hash as m1 because test_memory() uses the same content
+
+    assert!(
+        matches!(storage.insert_memory(&m2), Err(CodememError::Duplicate(_))),
+        "Same content_hash with NULL namespace should be treated as duplicate"
+    );
+}
+
+#[test]
+fn same_hash_different_namespaces_both_succeed() {
+    let storage = Storage::open_in_memory().unwrap();
+    let content = "identical content for ns test";
+    let now = chrono::Utc::now();
+
+    let m1 = MemoryNode {
+        id: uuid::Uuid::new_v4().to_string(),
+        content: content.to_string(),
+        memory_type: MemoryType::Context,
+        importance: 0.5,
+        confidence: 1.0,
+        access_count: 0,
+        content_hash: Storage::content_hash(content),
+        tags: vec![],
+        metadata: HashMap::new(),
+        namespace: Some("project-a".to_string()),
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: now,
+    };
+
+    let m2 = MemoryNode {
+        id: uuid::Uuid::new_v4().to_string(),
+        content: content.to_string(),
+        memory_type: MemoryType::Context,
+        importance: 0.5,
+        confidence: 1.0,
+        access_count: 0,
+        content_hash: Storage::content_hash(content),
+        tags: vec![],
+        metadata: HashMap::new(),
+        namespace: Some("project-b".to_string()),
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: now,
+    };
+
+    storage.insert_memory(&m1).unwrap();
+    storage.insert_memory(&m2).unwrap();
+
+    // Both should exist
+    assert!(storage.get_memory(&m1.id).unwrap().is_some());
+    assert!(storage.get_memory(&m2.id).unwrap().is_some());
+}
+
+// ── update_memory tests ─────────────────────────────────────────────
+
+#[test]
+fn update_memory_content_and_importance() {
+    let storage = Storage::open_in_memory().unwrap();
+    let memory = test_memory();
+    let id = memory.id.clone();
+    storage.insert_memory(&memory).unwrap();
+
+    storage
+        .update_memory(&id, "Updated content", Some(0.9))
+        .unwrap();
+
+    let updated = storage.get_memory(&id).unwrap().unwrap();
+    assert_eq!(updated.content, "Updated content");
+    assert!((updated.importance - 0.9).abs() < f64::EPSILON);
+    assert_eq!(
+        updated.content_hash,
+        Storage::content_hash("Updated content")
+    );
+}
+
+#[test]
+fn update_memory_content_only() {
+    let storage = Storage::open_in_memory().unwrap();
+    let memory = test_memory();
+    let id = memory.id.clone();
+    let original_importance = memory.importance;
+    storage.insert_memory(&memory).unwrap();
+
+    storage.update_memory(&id, "New content", None).unwrap();
+
+    let updated = storage.get_memory(&id).unwrap().unwrap();
+    assert_eq!(updated.content, "New content");
+    assert!(
+        (updated.importance - original_importance).abs() < f64::EPSILON,
+        "Importance should remain unchanged when None is passed"
+    );
+}
+
+#[test]
+fn update_memory_nonexistent_returns_not_found() {
+    let storage = Storage::open_in_memory().unwrap();
+    let result = storage.update_memory("nonexistent-id", "content", None);
+    assert!(
+        matches!(result, Err(CodememError::NotFound(_))),
+        "Updating a non-existent memory should return NotFound"
+    );
+}
+
+// ── delete non-existent memory ──────────────────────────────────────
+
+#[test]
+fn delete_nonexistent_memory_returns_false() {
+    let storage = Storage::open_in_memory().unwrap();
+    let result = storage.delete_memory("does-not-exist").unwrap();
+    assert!(
+        !result,
+        "Deleting a non-existent memory should return false"
+    );
+}

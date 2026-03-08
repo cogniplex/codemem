@@ -4,6 +4,10 @@ use codemem_core::{
 };
 use std::collections::HashSet;
 
+#[cfg(test)]
+#[path = "tests/graph_linking_tests.rs"]
+mod tests;
+
 impl CodememEngine {
     // ── Auto-linking ─────────────────────────────────────────────────────
 

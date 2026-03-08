@@ -351,3 +351,124 @@ fn refine_nonexistent_errors() {
     let text = result["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("not found"));
 }
+
+// ── MCP Parameter Validation Tests ──────────────────────────────────
+
+#[test]
+fn store_memory_with_importance_above_one() {
+    let server = test_server();
+
+    // importance > 1.0 is accepted (no clamping in MCP layer)
+    let params = json!({
+        "name": "store_memory",
+        "arguments": {
+            "content": "memory with high importance",
+            "importance": 1.5
+        }
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(200));
+    let result = resp.result.unwrap();
+    // Should store successfully (no server-side validation clamp)
+    let text = result["content"][0]["text"].as_str().unwrap();
+    let stored: Value = serde_json::from_str(text).unwrap();
+    assert!(stored["id"].is_string());
+}
+
+#[test]
+fn store_memory_with_importance_below_zero() {
+    let server = test_server();
+
+    // importance < 0.0 is accepted (no clamping in MCP layer)
+    let params = json!({
+        "name": "store_memory",
+        "arguments": {
+            "content": "memory with negative importance",
+            "importance": -0.5
+        }
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(201));
+    let result = resp.result.unwrap();
+    let text = result["content"][0]["text"].as_str().unwrap();
+    let stored: Value = serde_json::from_str(text).unwrap();
+    assert!(stored["id"].is_string());
+}
+
+#[test]
+fn store_memory_with_empty_content_returns_error() {
+    let server = test_server();
+
+    let params = json!({
+        "name": "store_memory",
+        "arguments": {
+            "content": ""
+        }
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(202));
+    let result = resp.result.unwrap();
+    assert_eq!(result["isError"], true);
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("content"),
+        "Error should mention content parameter"
+    );
+}
+
+#[test]
+fn recall_with_k_zero() {
+    let server = test_server();
+
+    store_memory(&server, "some rust memory", "insight", &["rust"]);
+
+    // k=0 should return no results (zero requested)
+    let params = json!({
+        "name": "recall",
+        "arguments": {"query": "rust", "k": 0}
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(203));
+    let result = resp.result.unwrap();
+    let text = result["content"][0]["text"].as_str().unwrap();
+    // With k=0, either no results or the "No matching memories" message
+    let is_empty = text.contains("No matching memories")
+        || serde_json::from_str::<Vec<Value>>(text)
+            .map(|v| v.is_empty())
+            .unwrap_or(false);
+    assert!(is_empty, "k=0 should yield no results, got: {text}");
+}
+
+#[test]
+fn recall_with_negative_k_uses_default() {
+    let server = test_server();
+
+    store_memory(&server, "recall negative k test", "context", &["test"]);
+
+    // Negative k via JSON: as_u64() returns None for negative, so default (10) is used
+    let params = json!({
+        "name": "recall",
+        "arguments": {"query": "recall negative", "k": -1}
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(204));
+    let result = resp.result.unwrap();
+    // Should not error — negative k falls back to default
+    assert!(
+        result["isError"].is_null() || result["isError"] == false,
+        "Negative k should not cause an error"
+    );
+}
+
+#[test]
+fn recall_with_empty_query_returns_error() {
+    let server = test_server();
+
+    let params = json!({
+        "name": "recall",
+        "arguments": {"query": ""}
+    });
+    let resp = server.handle_request("tools/call", Some(&params), json!(205));
+    let result = resp.result.unwrap();
+    assert_eq!(result["isError"], true);
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("query"),
+        "Error should mention query parameter"
+    );
+}

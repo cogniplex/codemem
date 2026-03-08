@@ -121,3 +121,7 @@ impl McpServer {
 #[cfg(test)]
 #[path = "tests/tools_recall_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/tools_namespace_tests.rs"]
+mod namespace_tests;
