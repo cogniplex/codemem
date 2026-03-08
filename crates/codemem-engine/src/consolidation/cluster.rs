@@ -173,33 +173,23 @@ impl CodememEngine {
             }
         }
 
-        // H2: Batch deletes in groups of 100, releasing all locks between batches
+        // H2: Batch deletes in groups of 100, releasing all locks between batches.
+        // SQLite cascade (memory + graph nodes/edges + embeddings) is batched into
+        // a single transaction per chunk; in-memory indices are updated afterwards.
         for batch in ids_to_delete.chunks(100) {
+            let batch_refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
+            if let Err(e) = self.storage.delete_memories_batch_cascade(&batch_refs) {
+                tracing::warn!(
+                    "Failed to batch-delete {} memories during cluster consolidation: {e}",
+                    batch.len()
+                );
+            }
+
             // C1: Lock ordering: graph first, then vector, then bm25
             let mut graph = self.lock_graph()?;
             let mut vector = self.lock_vector()?;
             let mut bm25 = self.lock_bm25()?;
             for id in batch {
-                if let Err(e) = self.storage.delete_memory(id) {
-                    tracing::warn!(
-                        "Failed to delete memory {id} during cluster consolidation: {e}"
-                    );
-                }
-                if let Err(e) = self.storage.delete_embedding(id) {
-                    tracing::warn!(
-                        "Failed to delete embedding {id} during cluster consolidation: {e}"
-                    );
-                }
-                if let Err(e) = self.storage.delete_graph_edges_for_node(id) {
-                    tracing::warn!(
-                        "Failed to delete graph edges for {id} during cluster consolidation: {e}"
-                    );
-                }
-                if let Err(e) = self.storage.delete_graph_node(id) {
-                    tracing::warn!(
-                        "Failed to delete graph node {id} during cluster consolidation: {e}"
-                    );
-                }
                 if let Err(e) = vector.remove(id) {
                     tracing::warn!(
                         "Failed to remove {id} from vector index during cluster consolidation: {e}"
@@ -210,7 +200,6 @@ impl CodememEngine {
                         "Failed to remove {id} from graph during cluster consolidation: {e}"
                     );
                 }
-                // M15: Clean up BM25 index for deleted memories (was missing)
                 bm25.remove_document(id);
             }
             drop(bm25);

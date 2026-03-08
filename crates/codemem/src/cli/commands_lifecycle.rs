@@ -411,6 +411,7 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
             m
         },
         namespace: cwd.map(|s| s.to_string()),
+        session_id: None,
         content_hash,
         created_at: now,
         updated_at: now,
@@ -421,6 +422,7 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
     // Use the engine's persist_memory pipeline for consistent indexing
     match codemem_engine::CodememEngine::from_db_path(&db_path) {
         Ok(engine) => {
+            engine.set_active_session(session_id.map(|s| s.to_string()));
             if let Err(e) = engine.persist_memory(&memory) {
                 tracing::warn!("Failed to persist prompt memory: {e}");
             }
@@ -531,10 +533,17 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
 
     // Build the engine once for both memory persists (if needed)
     let engine = if (has_substance && !session_memories.is_empty()) || !files_edited.is_empty() {
-        codemem_engine::CodememEngine::from_db_path(&db_path).ok()
+        codemem_engine::CodememEngine::from_db_path(&db_path)
+            .ok()
+            .inspect(|eng| {
+                eng.set_active_session(Some(session_id.to_string()));
+            })
     } else {
         None
     };
+
+    // Collect persist errors but never abort — end_session must always run.
+    let mut persist_errors: Vec<String> = Vec::new();
 
     if has_substance && !session_memories.is_empty() {
         let content_hash = codemem_engine::hooks::content_hash(&summary_text);
@@ -567,6 +576,7 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
                 m
             },
             namespace: namespace.map(|s| s.to_string()),
+            session_id: None,
             content_hash,
             created_at: now,
             updated_at: now,
@@ -574,17 +584,12 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
             access_count: 0,
         };
         // Use the engine's persist_memory pipeline for consistent indexing
-        match &engine {
-            Some(eng) => {
-                if let Err(e) = eng.persist_memory(&summary_memory) {
-                    tracing::warn!("Failed to persist session summary: {e}");
-                }
-            }
-            None => {
-                if let Err(e) = storage.insert_memory(&summary_memory) {
-                    tracing::warn!("Failed to insert session summary: {e}");
-                }
-            }
+        let result = match &engine {
+            Some(eng) => eng.persist_memory(&summary_memory),
+            None => storage.insert_memory(&summary_memory),
+        };
+        if let Err(e) = result {
+            persist_errors.push(format!("session summary: {e}"));
         }
     }
 
@@ -615,6 +620,7 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
                 m
             },
             namespace: namespace.map(|s| s.to_string()),
+            session_id: None,
             content_hash: change_hash,
             created_at: now,
             updated_at: now,
@@ -622,23 +628,23 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
             access_count: 0,
         };
         // Use the engine's persist_memory pipeline for consistent indexing
-        match &engine {
-            Some(eng) => {
-                if let Err(e) = eng.persist_memory(&change_memory) {
-                    tracing::warn!("Failed to persist change-tracking memory: {e}");
-                }
-            }
-            None => {
-                if let Err(e) = storage.insert_memory(&change_memory) {
-                    tracing::warn!("Failed to insert change-tracking memory: {e}");
-                }
-            }
+        let result = match &engine {
+            Some(eng) => eng.persist_memory(&change_memory),
+            None => storage.insert_memory(&change_memory),
+        };
+        if let Err(e) = result {
+            persist_errors.push(format!("change-tracking memory: {e}"));
         }
     }
 
-    // End the session with summary
+    // End the session unconditionally — memory persist failures must not prevent this.
     if let Err(e) = storage.end_session(session_id, Some(&summary_text)) {
         tracing::warn!("Failed to end session {session_id}: {e}");
+    }
+
+    // Log any memory persist failures as warnings after the session is safely ended.
+    for err in &persist_errors {
+        tracing::warn!("Failed to persist {err}");
     }
 
     let output = serde_json::json!({"continue": true});

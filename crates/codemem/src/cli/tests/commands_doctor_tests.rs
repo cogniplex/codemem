@@ -61,6 +61,7 @@ fn doctor_storage_stats_with_data() {
         tags: vec![],
         metadata: std::collections::HashMap::new(),
         namespace: None,
+        session_id: None,
         created_at: now,
         updated_at: now,
         last_accessed_at: now,

@@ -23,6 +23,7 @@ fn make_memory_typed(
         tags: vec![],
         metadata: HashMap::new(),
         namespace: namespace.map(String::from),
+        session_id: None,
         created_at: now,
         updated_at: now,
         last_accessed_at: now,

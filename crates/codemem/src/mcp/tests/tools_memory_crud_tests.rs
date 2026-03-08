@@ -164,6 +164,7 @@ fn recall_filters_by_namespace() {
             tags: vec!["rust".to_string()],
             metadata: HashMap::new(),
             namespace: ns.map(String::from),
+            session_id: None,
             created_at: now,
             updated_at: now,
             last_accessed_at: now,

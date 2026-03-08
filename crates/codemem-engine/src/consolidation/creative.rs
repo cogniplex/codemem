@@ -52,6 +52,13 @@ impl CodememEngine {
 
         let now = chrono::Utc::now();
         let mut new_connections = 0usize;
+
+        // Collect nodes and edges to batch-insert after the loop
+        let mut pending_nodes: Vec<GraphNode> = Vec::new();
+        let mut pending_edges: Vec<Edge> = Vec::new();
+        // Track which node IDs we've already queued for insertion to avoid duplicates
+        let mut queued_node_ids: HashSet<String> = HashSet::new();
+
         // C1: Lock ordering: graph first, then vector
         let mut graph = self.lock_graph()?;
         let mut vector = self.lock_vector()?;
@@ -109,6 +116,9 @@ impl CodememEngine {
 
                 // M10: Ensure both nodes exist, using memory content as label when available
                 for nid in [id, neighbor_id] {
+                    if queued_node_ids.contains(nid) {
+                        continue; // Already queued for batch insert
+                    }
                     if graph.get_node(nid).ok().flatten().is_some() {
                         continue; // Node already exists, don't overwrite
                     }
@@ -126,12 +136,8 @@ impl CodememEngine {
                         memory_id: Some(nid.clone()),
                         namespace: None,
                     };
-                    if let Err(e) = self.storage.insert_graph_node(&node) {
-                        tracing::warn!(
-                            "Failed to insert graph node {nid} during creative consolidation: {e}"
-                        );
-                    }
-                    let _ = graph.add_node(node);
+                    pending_nodes.push(node);
+                    queued_node_ids.insert(nid.clone());
                 }
 
                 let edge_id = format!("{id}-SHARES_THEME-{neighbor_id}");
@@ -147,12 +153,37 @@ impl CodememEngine {
                     valid_to: None,
                 };
 
-                if self.storage.insert_graph_edge(&edge).is_ok() {
-                    let _ = graph.add_edge(edge);
-                    new_connections += 1;
-                }
+                pending_edges.push(edge);
+                new_connections += 1;
             }
         }
+
+        // Batch-insert collected nodes and edges into storage
+        if !pending_nodes.is_empty() {
+            if let Err(e) = self.storage.insert_graph_nodes_batch(&pending_nodes) {
+                tracing::warn!(
+                    "Failed to batch-insert {} graph nodes during creative consolidation: {e}",
+                    pending_nodes.len()
+                );
+            }
+        }
+        if !pending_edges.is_empty() {
+            if let Err(e) = self.storage.insert_graph_edges_batch(&pending_edges) {
+                tracing::warn!(
+                    "Failed to batch-insert {} graph edges during creative consolidation: {e}",
+                    pending_edges.len()
+                );
+            }
+        }
+
+        // Add to in-memory graph
+        for node in pending_nodes {
+            let _ = graph.add_node(node);
+        }
+        for edge in pending_edges {
+            let _ = graph.add_edge(edge);
+        }
+
         drop(vector);
         drop(graph);
 

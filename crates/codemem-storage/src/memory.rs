@@ -10,8 +10,19 @@ impl Storage {
     /// Uses BEGIN IMMEDIATE to acquire a write lock before the dedup check,
     /// ensuring the SELECT + INSERT are atomic. INSERT OR IGNORE is a safety
     /// net against the UNIQUE constraint on content_hash.
+    ///
+    /// When an outer transaction is active (via `begin_transaction`), the
+    /// method skips starting its own transaction and executes directly on the
+    /// connection, so that all operations participate in the outer transaction.
     pub fn insert_memory(&self, memory: &MemoryNode) -> Result<(), CodememError> {
+        // Check inside conn lock to avoid TOCTOU race with begin_transaction.
+        // The conn() mutex serializes all access, so the flag check + INSERT
+        // are atomic with respect to other callers.
         let mut conn = self.conn()?;
+        if self.has_outer_transaction() {
+            drop(conn);
+            return self.insert_memory_no_tx(memory);
+        }
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -37,8 +48,8 @@ impl Storage {
         let metadata_json = serde_json::to_string(&memory.metadata)?;
 
         tx.execute(
-            "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 memory.id,
                 memory.content,
@@ -50,6 +61,7 @@ impl Storage {
                 tags_json,
                 metadata_json,
                 memory.namespace,
+                memory.session_id,
                 memory.created_at.timestamp(),
                 memory.updated_at.timestamp(),
                 memory.last_accessed_at.timestamp(),
@@ -59,6 +71,53 @@ impl Storage {
 
         tx.commit()
             .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Insert a memory without starting a new transaction.
+    /// Used when an outer transaction is already active.
+    fn insert_memory_no_tx(&self, memory: &MemoryNode) -> Result<(), CodememError> {
+        let conn = self.conn()?;
+
+        // Check dedup (namespace-scoped) — outer transaction provides atomicity
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM memories WHERE content_hash = ?1 AND namespace IS ?2",
+                params![memory.content_hash, memory.namespace],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        if existing.is_some() {
+            return Err(CodememError::Duplicate(memory.content_hash.clone()));
+        }
+
+        let tags_json = serde_json::to_string(&memory.tags)?;
+        let metadata_json = serde_json::to_string(&memory.metadata)?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                memory.id,
+                memory.content,
+                memory.memory_type.to_string(),
+                memory.importance,
+                memory.confidence,
+                memory.access_count,
+                memory.content_hash,
+                tags_json,
+                metadata_json,
+                memory.namespace,
+                memory.session_id,
+                memory.created_at.timestamp(),
+                memory.updated_at.timestamp(),
+                memory.last_accessed_at.timestamp(),
+            ],
+        )
+        .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         Ok(())
     }
@@ -81,7 +140,7 @@ impl Storage {
 
         let result = conn
             .query_row(
-                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
+                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(MemoryRow {
@@ -95,9 +154,10 @@ impl Storage {
                         tags: row.get(7)?,
                         metadata: row.get(8)?,
                         namespace: row.get(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get(11)?,
-                        last_accessed_at: row.get(12)?,
+                        session_id: row.get(10)?,
+                        created_at: row.get(11)?,
+                        updated_at: row.get(12)?,
+                        last_accessed_at: row.get(13)?,
                     })
                 },
             )
@@ -117,7 +177,7 @@ impl Storage {
 
         let result = conn
             .query_row(
-                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
+                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(MemoryRow {
@@ -131,9 +191,10 @@ impl Storage {
                         tags: row.get(7)?,
                         metadata: row.get(8)?,
                         namespace: row.get(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get(11)?,
-                        last_accessed_at: row.get(12)?,
+                        session_id: row.get(10)?,
+                        created_at: row.get(11)?,
+                        updated_at: row.get(12)?,
+                        last_accessed_at: row.get(13)?,
                     })
                 },
             )
@@ -225,6 +286,62 @@ impl Storage {
             .map_err(|e| CodememError::Storage(e.to_string()))?;
 
         Ok(rows > 0)
+    }
+
+    /// Delete multiple memories and all related data (embeddings, graph nodes/edges) atomically.
+    /// Returns the number of memories that were actually deleted.
+    pub fn delete_memories_batch_cascade(&self, ids: &[&str]) -> Result<usize, CodememError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        let placeholders: String = (1..=ids.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+
+        // Delete edges referencing graph nodes linked to these memories.
+        // Uses ?N numbered params which SQLite allows to be reused in the same statement.
+        let edge_sql = format!(
+            "DELETE FROM graph_edges WHERE \
+             src IN (SELECT id FROM graph_nodes WHERE memory_id IN ({placeholders})) \
+             OR dst IN (SELECT id FROM graph_nodes WHERE memory_id IN ({placeholders})) \
+             OR src IN ({placeholders}) OR dst IN ({placeholders})"
+        );
+        tx.execute(&edge_sql, params.as_slice())
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        // Delete graph nodes linked to these memories (by memory_id column or by id)
+        let node_sql = format!(
+            "DELETE FROM graph_nodes WHERE memory_id IN ({placeholders}) OR id IN ({placeholders})"
+        );
+        tx.execute(&node_sql, params.as_slice())
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        // Delete embeddings
+        let emb_sql = format!("DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})");
+        tx.execute(&emb_sql, params.as_slice())
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        // Delete the memories themselves
+        let mem_sql = format!("DELETE FROM memories WHERE id IN ({placeholders})");
+        let deleted = tx
+            .execute(&mem_sql, params.as_slice())
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        tx.commit()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+
+        Ok(deleted)
     }
 
     /// List all memory IDs with an optional limit.

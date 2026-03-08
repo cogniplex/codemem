@@ -40,6 +40,7 @@ impl McpServer {
             tags,
             metadata: HashMap::new(),
             namespace,
+            session_id: None,
             created_at: now,
             updated_at: now,
             last_accessed_at: now,

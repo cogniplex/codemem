@@ -274,6 +274,18 @@ impl McpServer {
             "tool_calls_total",
             1,
         );
+
+        // Record session activity against the most recent active session (if any).
+        // This tracks MCP tool usage counts for cross-session pattern detection.
+        if let Ok(sessions) = self.engine.storage().list_sessions(None, 10) {
+            if let Some(active) = sessions.iter().find(|s| s.ended_at.is_none()) {
+                let _ = self
+                    .engine
+                    .storage()
+                    .record_session_activity(&active.id, name, None, None, None);
+            }
+        }
+
         result
     }
 

@@ -356,6 +356,7 @@ impl CodememEngine {
                     ],
                     metadata,
                     namespace: namespace.map(|s| s.to_string()),
+                    session_id: None,
                     created_at: now,
                     updated_at: now,
                     last_accessed_at: now,
@@ -392,6 +393,60 @@ impl CodememEngine {
             &unique_cross,
             stored_patterns,
         );
+
+        // 7. Persist a checkpoint memory with session state metadata
+        let memory_count = self.storage.memory_count().unwrap_or(0);
+        let now = chrono::Utc::now();
+        let checkpoint_content = format!(
+            "Session checkpoint for {}: {} actions ({} reads, {} edits, {} searches), {} total memories, {} patterns detected",
+            session_id,
+            activity.total_actions,
+            activity.files_read,
+            activity.files_edited,
+            activity.searches,
+            memory_count,
+            session_patterns.len(),
+        );
+        let hash = codemem_storage::Storage::content_hash(&checkpoint_content);
+
+        let mut checkpoint_metadata = HashMap::new();
+        checkpoint_metadata.insert("checkpoint_type".to_string(), json!("manual"));
+        checkpoint_metadata.insert("session_id".to_string(), json!(session_id));
+        checkpoint_metadata.insert("memory_count".to_string(), json!(memory_count));
+        checkpoint_metadata.insert("timestamp".to_string(), json!(now.to_rfc3339()));
+        checkpoint_metadata.insert("files_read".to_string(), json!(activity.files_read));
+        checkpoint_metadata.insert("files_edited".to_string(), json!(activity.files_edited));
+        checkpoint_metadata.insert("searches".to_string(), json!(activity.searches));
+        checkpoint_metadata.insert("total_actions".to_string(), json!(activity.total_actions));
+        checkpoint_metadata.insert("pattern_count".to_string(), json!(session_patterns.len()));
+        checkpoint_metadata.insert("cross_pattern_count".to_string(), json!(unique_cross.len()));
+        checkpoint_metadata.insert("stored_pattern_count".to_string(), json!(stored_patterns));
+        if !hot_dirs.is_empty() {
+            let dirs: Vec<&str> = hot_dirs.iter().map(|(d, _)| d.as_str()).collect();
+            checkpoint_metadata.insert("hot_directories".to_string(), json!(dirs));
+        }
+
+        let checkpoint_mem = codemem_core::MemoryNode {
+            id: uuid::Uuid::new_v4().to_string(),
+            content: checkpoint_content,
+            memory_type: MemoryType::Context,
+            importance: 0.5,
+            confidence: 1.0,
+            access_count: 0,
+            content_hash: hash,
+            tags: vec![
+                "session-checkpoint".to_string(),
+                format!("session:{session_id}"),
+            ],
+            metadata: checkpoint_metadata,
+            namespace: namespace.map(|s| s.to_string()),
+            session_id: Some(session_id.to_string()),
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+        };
+        // Best-effort persist; don't fail the checkpoint if this errors
+        let _ = self.persist_memory(&checkpoint_mem);
 
         Ok(SessionCheckpointReport {
             files_read: activity.files_read,

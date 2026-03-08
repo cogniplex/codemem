@@ -405,7 +405,7 @@ impl super::CodememEngine {
         drop(graph);
 
         // ── Embed symbols and chunks ────────────────────────────────────────
-        // Phase 1: Collect enriched texts without holding the vector lock.
+        // Phase 1: Collect enriched texts without holding any lock.
         // enrich_symbol_text / enrich_chunk_text only read from the passed-in
         // Symbol/CodeChunk and edges slice, so no lock is required.
         //
@@ -417,8 +417,11 @@ impl super::CodememEngine {
         // channel-based work queue to decouple embedding from persistence.
         let mut symbols_embedded = 0usize;
         let mut chunks_embedded = 0usize;
-        // H3: Acquire embeddings lock, embed batch, drop lock before acquiring vector lock.
-        if let Some(emb) = self.lock_embeddings()? {
+
+        // Quick check: skip expensive text enrichment if no embedding provider.
+        // The per-batch loop also guards against provider disappearing mid-run.
+        let has_embeddings = self.lock_embeddings()?.is_some();
+        if has_embeddings {
             let sym_texts: Vec<(String, String)> = all_symbols
                 .iter()
                 .map(|sym| {
@@ -441,9 +444,9 @@ impl super::CodememEngine {
             // large codebases), we process in manageable chunks, persisting each
             // batch and reporting progress.
             //
-            // The vector lock is acquired per-batch (not held across all batches)
-            // so that remote embedding providers (Ollama/OpenAI) don't block
-            // vector reads for the entire duration.
+            // The embedding lock is acquired per-batch so that SQLite/vector
+            // writes don't hold it, and remote providers (Ollama/OpenAI) don't
+            // block other operations for the entire duration.
             // Persistence batch size: how many items to embed + flush per round.
             // Separate from the GPU batch size (configured on EmbeddingService).
             const EMBED_CHUNK_SIZE: usize = 64;
@@ -456,51 +459,67 @@ impl super::CodememEngine {
             let sym_count = all_symbols.len();
             let mut done = 0usize;
 
-            for chunk in all_pairs.chunks(EMBED_CHUNK_SIZE) {
-                let texts: Vec<&str> = chunk.iter().map(|(_, t)| t.as_str()).collect();
+            for batch in all_pairs.chunks(EMBED_CHUNK_SIZE) {
+                let texts: Vec<&str> = batch.iter().map(|(_, t)| t.as_str()).collect();
 
+                // Acquire embedding lock only for the embed_batch call, then drop.
                 let t0 = std::time::Instant::now();
-                match emb.embed_batch(&texts) {
+                let embed_result = {
+                    let emb = self.lock_embeddings()?;
+                    match emb {
+                        Some(emb_guard) => emb_guard.embed_batch(&texts),
+                        None => break, // Provider disappeared between check and use
+                    }
+                    // emb_guard dropped here — lock released before persistence I/O
+                };
+
+                match embed_result {
                     Ok(embeddings) => {
                         let embed_ms = t0.elapsed().as_millis();
 
                         // Batch-store embeddings to SQLite
                         let t1 = std::time::Instant::now();
-                        let pairs: Vec<(&str, &[f32])> = chunk
+                        let pairs: Vec<(&str, &[f32])> = batch
                             .iter()
                             .zip(embeddings.iter())
-                            .map(|((id, _), emb)| (id.as_str(), emb.as_slice()))
+                            .map(|((id, _), emb_vec)| (id.as_str(), emb_vec.as_slice()))
                             .collect();
                         if let Err(e) = self.storage.store_embeddings_batch(&pairs) {
                             tracing::warn!("Failed to batch-store embeddings: {e}");
                         }
                         let sqlite_ms = t1.elapsed().as_millis();
 
-                        // Insert into in-memory vector index (no batch API)
+                        // Batch-insert into in-memory vector index
                         let t2 = std::time::Instant::now();
-                        let mut vec = self.lock_vector()?;
-                        for ((id, _), embedding) in chunk.iter().zip(embeddings.iter()) {
-                            if let Err(e) = vec.insert(id, embedding) {
-                                tracing::warn!("Failed to insert {id} into vector index: {e}");
+                        let batch_items: Vec<(String, Vec<f32>)> = batch
+                            .iter()
+                            .zip(embeddings.into_iter())
+                            .map(|((id, _), emb_vec)| (id.clone(), emb_vec))
+                            .collect();
+                        let batch_len = batch_items.len();
+                        {
+                            let mut vec = self.lock_vector()?;
+                            if let Err(e) = vec.insert_batch(&batch_items) {
+                                tracing::warn!("Failed to batch-insert into vector index: {e}");
                             }
-                            if done < sym_count {
-                                symbols_embedded += 1;
-                            } else {
-                                chunks_embedded += 1;
-                            }
-                            done += 1;
                         }
                         let vector_ms = t2.elapsed().as_millis();
 
+                        // Update per-type counters using arithmetic instead of loop
+                        let syms_in_batch = batch_len.min(sym_count.saturating_sub(done));
+                        symbols_embedded += syms_in_batch;
+                        chunks_embedded += batch_len - syms_in_batch;
+                        done += batch_len;
+
                         tracing::debug!(
                             "Embed batch {}: embed={embed_ms}ms sqlite={sqlite_ms}ms vector={vector_ms}ms",
-                            chunk.len()
+                            batch_len
                         );
                     }
                     Err(e) => {
                         tracing::warn!(
                             "embed_batch failed for chunk of {} texts: {e}",
-                            chunk.len()
+                            batch.len()
                         );
                         // Don't advance `done` — progress should reflect actual embeddings,
                         // not failed batches. The total will no longer be reached, which
@@ -509,7 +528,6 @@ impl super::CodememEngine {
                 }
                 on_progress(done, total);
             }
-            drop(emb);
             self.save_index();
         }
 
