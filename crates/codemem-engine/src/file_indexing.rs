@@ -401,6 +401,10 @@ impl CodememEngine {
     /// Scan for orphaned symbol/chunk nodes whose files no longer exist on disk.
     /// Also cleans up dangling edges (src or dst node doesn't exist).
     /// Returns `(symbols_cleaned, edges_cleaned)`.
+    ///
+    /// When `project_root` is `None`, file-existence checks are skipped
+    /// (only dangling edge cleanup runs) to avoid CWD-dependent path
+    /// resolution that could cause mass deletion.
     pub fn detect_orphans(
         &self,
         project_root: Option<&Path>,
@@ -411,20 +415,21 @@ impl CodememEngine {
 
         let mut orphan_sym_ids: Vec<String> = Vec::new();
 
-        for node in &all_nodes {
-            if !node.id.starts_with("sym:") && !node.id.starts_with("chunk:") {
-                continue;
-            }
-            let file_path = match node.payload.get("file_path").and_then(|v| v.as_str()) {
-                Some(fp) => fp,
-                None => continue,
-            };
-            let abs_path = match project_root {
-                Some(root) => root.join(file_path),
-                None => std::path::PathBuf::from(file_path),
-            };
-            if !abs_path.exists() {
-                orphan_sym_ids.push(node.id.clone());
+        // Only check file existence when we have a known project root.
+        // Without it, relative paths resolve against CWD which may be wrong.
+        if let Some(root) = project_root {
+            for node in &all_nodes {
+                if !node.id.starts_with("sym:") && !node.id.starts_with("chunk:") {
+                    continue;
+                }
+                let file_path = match node.payload.get("file_path").and_then(|v| v.as_str()) {
+                    Some(fp) => fp,
+                    None => continue,
+                };
+                let abs_path = root.join(file_path);
+                if !abs_path.exists() {
+                    orphan_sym_ids.push(node.id.clone());
+                }
             }
         }
 
