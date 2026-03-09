@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.3](https://github.com/cogniplex/codemem/compare/v0.10.2...v0.10.3) (2026-03-09)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-engine bumped from 0.10.2 to 0.10.3
+
 ## [0.10.2](https://github.com/cogniplex/codemem/compare/v0.10.1...v0.10.2) (2026-03-09)
 
 
