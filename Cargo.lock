@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "codemem"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-embeddings"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-engine"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "ast-grep-core",
