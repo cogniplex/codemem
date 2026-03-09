@@ -15,8 +15,31 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # Detect which files changed to skip irrelevant jobs
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      ui: ${{ steps.filter.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+            ui:
+              - 'ui/**'
+
   fmt:
     name: Format
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -27,6 +50,8 @@ jobs:
 
   clippy:
     name: Clippy
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -38,6 +63,8 @@ jobs:
 
   test:
     name: Test (${{ matrix.os }})
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -50,6 +77,8 @@ jobs:
 
   coverage:
     name: Rust Coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -73,6 +102,8 @@ jobs:
 
   ui-lint:
     name: UI Lint & Typecheck
+    needs: changes
+    if: ${{ needs.changes.outputs.ui == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -86,6 +117,8 @@ jobs:
 
   ui-build:
     name: Build UI + Codemem Binary
+    needs: changes
+    if: ${{ needs.changes.outputs.ui == 'true' || needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -148,6 +181,8 @@ jobs:
 
   bench:
     name: Benchmarks
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
