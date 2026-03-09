@@ -1,6 +1,6 @@
 [package]
 name = "codemem-embeddings"
-version = "0.9.0"
+version = "0.9.1"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -16,7 +16,7 @@ cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 accelerate = ["candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
 
 [dependencies]
-codemem-core = { path = "../codemem-core", version = "0.10.0" }
+codemem-core = { path = "../codemem-core", version = "0.10.1" }
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
 candle-transformers = { workspace = true }
