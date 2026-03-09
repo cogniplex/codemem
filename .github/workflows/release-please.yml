@@ -159,7 +159,17 @@ jobs:
           publish() {
             local crate=$1
             local extra_flags="${2:-}"
-            echo "Publishing $crate..."
+            local local_version
+            local_version=$(cargo metadata --no-deps --format-version 1 | jq -r ".packages[] | select(.name == \"$crate\") | .version")
+            local published
+            published=$(curl -sf "https://crates.io/api/v1/crates/$crate" | jq -r '.crate.max_version // "0.0.0"') || published="0.0.0"
+
+            if [ "$local_version" = "$published" ]; then
+              echo "Skipping $crate v$local_version (already published)"
+              return 0
+            fi
+
+            echo "Publishing $crate v$local_version (current: $published)..."
             cargo publish -p "$crate" --no-verify $extra_flags
             echo "Waiting for crates.io to index $crate..."
             sleep 30
