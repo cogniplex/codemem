@@ -231,9 +231,12 @@ impl CodememEngine {
         );
 
         let file_node_id = format!("file:{file_path}");
+        let mut redirected_pairs: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
+        let mut redirected_edges: Vec<codemem_core::Edge> = Vec::new();
         for sym_id in &stale_ids {
             // Before deleting the symbol, redirect memory→symbol edges to the
-            // parent file node with valid_to set, preserving historical context.
+            // parent file node, preserving historical context.
             // Memory node IDs are UUIDs (no known prefix like sym:/file:/chunk:).
             let edges = self.storage.get_edges_for_node(sym_id.as_str())?;
             for edge in &edges {
@@ -247,6 +250,11 @@ impl CodememEngine {
                     || other.starts_with("chunk:")
                     || other.starts_with("pkg:");
                 if !is_code_node {
+                    // Skip if we already redirected this memory→file pair
+                    let pair = (other.to_string(), file_node_id.clone());
+                    if !redirected_pairs.insert(pair) {
+                        continue;
+                    }
                     let mut redirected = edge.clone();
                     if redirected.src.as_str() == sym_id.as_str() {
                         redirected.src = file_node_id.clone();
@@ -259,6 +267,7 @@ impl CodememEngine {
                     if let Err(e) = self.storage.insert_graph_edge(&redirected) {
                         tracing::warn!("Failed to redirect memory edge {}: {e}", edge.id);
                     }
+                    redirected_edges.push(redirected);
                 }
             }
 
@@ -281,6 +290,11 @@ impl CodememEngine {
                 if let Err(e) = graph.remove_node(sym_id.as_str()) {
                     tracing::warn!("Failed to remove stale {sym_id} from in-memory graph: {e}");
                 }
+            }
+            // Add redirected memory→file edges so they're visible to
+            // in-memory traversal (BFS, PageRank, recall) during this session.
+            for edge in redirected_edges {
+                let _ = graph.add_edge(edge);
             }
         }
         {

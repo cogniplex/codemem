@@ -97,8 +97,12 @@ fn build_subgraph_response(
         })
         .collect();
 
+    // Only include edges whose both endpoints survived the min_centrality filter.
+    let node_ids: std::collections::HashSet<&str> =
+        node_responses.iter().map(|n| n.id.as_str()).collect();
     let edge_responses: Vec<GraphEdgeResponse> = edges
         .into_iter()
+        .filter(|e| node_ids.contains(e.src.as_str()) && node_ids.contains(e.dst.as_str()))
         .map(|e| GraphEdgeResponse {
             id: e.id,
             src: e.src,

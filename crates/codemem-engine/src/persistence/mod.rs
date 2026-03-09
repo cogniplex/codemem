@@ -163,16 +163,19 @@ impl super::CodememEngine {
         // stale nodes that won't conflict with the inserts that follow.
         let mut old_syms_by_file: HashMap<String, HashSet<String>> = HashMap::new();
         for node in graph.get_all_nodes() {
-            if node.id.starts_with("sym:") {
-                if let Some(fp) = node.payload.get("file_path").and_then(|v| v.as_str()) {
-                    if seen_files.contains(fp) {
-                        old_syms_by_file
-                            .entry(fp.to_string())
-                            .or_default()
-                            .insert(node.id);
-                    }
-                }
+            if !node.id.starts_with("sym:") {
+                continue;
             }
+            let Some(fp) = node.payload.get("file_path").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if !seen_files.contains(fp) {
+                continue;
+            }
+            old_syms_by_file
+                .entry(fp.to_string())
+                .or_default()
+                .insert(node.id);
         }
         drop(graph);
         for file_path in seen_files {

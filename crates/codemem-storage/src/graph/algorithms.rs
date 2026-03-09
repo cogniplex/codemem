@@ -1,5 +1,5 @@
 use super::GraphEngine;
-use codemem_core::{Edge, GraphNode, NodeKind};
+use codemem_core::{Edge, GraphNode, NodeKind, RelationshipType};
 use petgraph::graph::NodeIndex;
 use petgraph::Direction;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -560,32 +560,36 @@ impl GraphEngine {
 
     /// Return top-N nodes by centrality and edges between them.
     /// Optionally filter by namespace and/or node kinds.
+    ///
+    /// Non-structural edges (CALLS, IMPORTS, INHERITS, IMPLEMENTS, DEPENDS_ON)
+    /// from top-N nodes pull their targets into the result so that these
+    /// relationship types are visible in the UI graph.
     pub fn subgraph_top_n(
         &self,
         n: usize,
         namespace: Option<&str>,
         kinds: Option<&[NodeKind]>,
     ) -> (Vec<GraphNode>, Vec<Edge>) {
+        let ns_filter = |node: &&GraphNode| -> bool {
+            if let Some(ns) = namespace {
+                node.namespace.as_deref() == Some(ns)
+            } else {
+                true
+            }
+        };
+        let kind_filter = |node: &&GraphNode| -> bool {
+            if let Some(k) = kinds {
+                k.contains(&node.kind)
+            } else {
+                true
+            }
+        };
+
         let mut candidates: Vec<&GraphNode> = self
             .nodes
             .values()
-            .filter(|node| {
-                if let Some(ns) = namespace {
-                    match &node.namespace {
-                        Some(node_ns) => node_ns == ns,
-                        None => false,
-                    }
-                } else {
-                    true
-                }
-            })
-            .filter(|node| {
-                if let Some(k) = kinds {
-                    k.contains(&node.kind)
-                } else {
-                    true
-                }
-            })
+            .filter(ns_filter)
+            .filter(kind_filter)
             .collect();
 
         // Sort by centrality descending
@@ -598,10 +602,47 @@ impl GraphEngine {
         // Take top N
         candidates.truncate(n);
 
-        let top_ids: HashSet<&str> = candidates.iter().map(|node| node.id.as_str()).collect();
-        let nodes_vec: Vec<GraphNode> = candidates.into_iter().cloned().collect();
+        let mut top_ids: HashSet<&str> = candidates.iter().map(|node| node.id.as_str()).collect();
 
-        // Collect edges where both src and dst are in the top-N set
+        // Expand: for non-structural edges from top-N nodes, pull in the
+        // other endpoint so CALLS/IMPORTS/etc. edges appear in the result.
+        // Budget: allow up to 20% extra nodes to keep the response bounded.
+        let budget = n / 5;
+        let mut extra_ids: Vec<&str> = Vec::new();
+        for edge in self.edges.values() {
+            if extra_ids.len() >= budget {
+                break;
+            }
+            if edge.relationship == RelationshipType::Contains
+                || edge.relationship == RelationshipType::PartOf
+            {
+                continue;
+            }
+            let (in_top, other) = if top_ids.contains(edge.src.as_str()) {
+                (true, edge.dst.as_str())
+            } else if top_ids.contains(edge.dst.as_str()) {
+                (true, edge.src.as_str())
+            } else {
+                (false, "")
+            };
+            if in_top && !top_ids.contains(other) {
+                if let Some(node) = self.nodes.get(other) {
+                    if ns_filter(&node) && kind_filter(&node) {
+                        extra_ids.push(other);
+                        top_ids.insert(other);
+                    }
+                }
+            }
+        }
+
+        let mut nodes_vec: Vec<GraphNode> = candidates.into_iter().cloned().collect();
+        for id in &extra_ids {
+            if let Some(node) = self.nodes.get(*id) {
+                nodes_vec.push(node.clone());
+            }
+        }
+
+        // Collect edges where both src and dst are in the expanded set
         let edges_vec: Vec<Edge> = self
             .edges
             .values()
