@@ -239,28 +239,30 @@ impl super::CodememEngine {
                         namespace: ns_string.clone(),
                     });
                 }
-                if i > 0 {
-                    let parent_pkg_id = format!("pkg:{}/", ancestors[i - 1]);
-                    let edge_id = format!("contains:{parent_pkg_id}->{pkg_id}");
-                    if !graph
-                        .get_edges(&parent_pkg_id)
-                        .unwrap_or_default()
-                        .iter()
-                        .any(|e| e.id == edge_id)
-                    {
-                        dir_edges.push(Edge {
-                            id: edge_id,
-                            src: parent_pkg_id,
-                            dst: pkg_id.clone(),
-                            relationship: RelationshipType::Contains,
-                            weight: contains_weight,
-                            valid_from: None,
-                            valid_to: None,
-                            properties: HashMap::new(),
-                            created_at: now,
-                        });
-                    }
+                if i == 0 {
+                    continue;
                 }
+                let parent_pkg_id = format!("pkg:{}/", ancestors[i - 1]);
+                let edge_id = format!("contains:{parent_pkg_id}->{pkg_id}");
+                if graph
+                    .get_edges(&parent_pkg_id)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|e| e.id == edge_id)
+                {
+                    continue;
+                }
+                dir_edges.push(Edge {
+                    id: edge_id,
+                    src: parent_pkg_id,
+                    dst: pkg_id.clone(),
+                    relationship: RelationshipType::Contains,
+                    weight: contains_weight,
+                    valid_from: None,
+                    valid_to: None,
+                    properties: HashMap::new(),
+                    created_at: now,
+                });
             }
             if let Some(last_dir) = ancestors.last() {
                 let parent_pkg_id = format!("pkg:{last_dir}/");
