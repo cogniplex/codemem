@@ -166,15 +166,14 @@ pub async fn search_memories(
         .as_deref()
         .and_then(|t| t.parse::<MemoryType>().ok());
 
-    let results = match state.server.recall(
-        &query.q,
+    let rq = codemem_engine::RecallQuery {
+        query: &query.q,
         k,
         memory_type_filter,
-        query.namespace.as_deref(),
-        &[],
-        None,
-        None,
-    ) {
+        namespace_filter: query.namespace.as_deref(),
+        ..codemem_engine::RecallQuery::new(&query.q, k)
+    };
+    let results = match state.server.recall(&rq) {
         Ok(results) => results.into_iter().map(search_result_to_item).collect(),
         Err(e) => {
             tracing::warn!("Search failed: {e}");

@@ -91,7 +91,12 @@ impl CodememEngine {
         k: usize,
         namespace: Option<&str>,
     ) -> Result<Vec<ImpactResult>, CodememError> {
-        let results = self.recall(query, k, None, namespace, &[], None, None)?;
+        let results = self.recall(&crate::recall::RecallQuery {
+            query,
+            k,
+            namespace_filter: namespace,
+            ..crate::recall::RecallQuery::new(query, k)
+        })?;
 
         if results.is_empty() {
             return Ok(vec![]);

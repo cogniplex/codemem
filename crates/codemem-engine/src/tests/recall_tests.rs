@@ -38,7 +38,7 @@ fn recall_returns_matching_memories() {
         .unwrap();
 
     let results = engine
-        .recall("ownership borrowing", 5, None, None, &[], None, None)
+        .recall(&crate::recall::RecallQuery::new("ownership borrowing", 5))
         .unwrap();
     assert!(!results.is_empty(), "should find at least one result");
     assert_eq!(results[0].memory.id, "r1");
@@ -57,7 +57,7 @@ fn recall_respects_k_limit() {
     }
 
     let results = engine
-        .recall("testing topic", 3, None, None, &[], None, None)
+        .recall(&crate::recall::RecallQuery::new("testing topic", 3))
         .unwrap();
     assert!(results.len() <= 3, "should return at most k=3 results");
 }
@@ -73,7 +73,7 @@ fn recall_sorted_by_score_descending() {
         .unwrap();
 
     let results = engine
-        .recall("alpha beta gamma", 5, None, None, &[], None, None)
+        .recall(&crate::recall::RecallQuery::new("alpha beta gamma", 5))
         .unwrap();
     if results.len() >= 2 {
         assert!(
@@ -112,15 +112,10 @@ fn recall_filters_by_memory_type() {
         .unwrap();
 
     let results = engine
-        .recall(
-            "database schema",
-            5,
-            Some(MemoryType::Decision),
-            None,
-            &[],
-            None,
-            None,
-        )
+        .recall(&crate::recall::RecallQuery {
+            memory_type_filter: Some(MemoryType::Decision),
+            ..crate::recall::RecallQuery::new("database schema", 5)
+        })
         .unwrap();
     for r in &results {
         assert_eq!(
@@ -160,15 +155,10 @@ fn recall_filters_by_namespace() {
         .unwrap();
 
     let results = engine
-        .recall(
-            "architecture notes",
-            5,
-            None,
-            Some("alpha"),
-            &[],
-            None,
-            None,
-        )
+        .recall(&crate::recall::RecallQuery {
+            namespace_filter: Some("alpha"),
+            ..crate::recall::RecallQuery::new("architecture notes", 5)
+        })
         .unwrap();
     for r in &results {
         assert_eq!(
@@ -209,7 +199,10 @@ fn recall_excludes_tags() {
 
     let exclude = vec!["draft".to_string()];
     let results = engine
-        .recall("architecture", 5, None, None, &exclude, None, None)
+        .recall(&crate::recall::RecallQuery {
+            exclude_tags: &exclude,
+            ..crate::recall::RecallQuery::new("architecture", 5)
+        })
         .unwrap();
     for r in &results {
         assert!(
@@ -248,7 +241,10 @@ fn recall_filters_by_min_importance() {
         .unwrap();
 
     let results = engine
-        .recall("testing", 5, None, None, &[], Some(0.5), None)
+        .recall(&crate::recall::RecallQuery {
+            min_importance: Some(0.5),
+            ..crate::recall::RecallQuery::new("testing", 5)
+        })
         .unwrap();
     for r in &results {
         assert!(
@@ -288,7 +284,10 @@ fn recall_filters_by_min_confidence() {
         .unwrap();
 
     let results = engine
-        .recall("deployment", 5, None, None, &[], None, Some(0.8))
+        .recall(&crate::recall::RecallQuery {
+            min_confidence: Some(0.8),
+            ..crate::recall::RecallQuery::new("deployment", 5)
+        })
         .unwrap();
     for r in &results {
         assert!(
@@ -317,15 +316,10 @@ fn recall_scores_low_for_no_token_overlap() {
         .unwrap();
 
     let results = engine
-        .recall(
+        .recall(&crate::recall::RecallQuery::new(
             "quantum_chromodynamics_gluon_plasma",
             5,
-            None,
-            None,
-            &[],
-            None,
-            None,
-        )
+        ))
         .unwrap();
     // BM25 fallback may still return results due to importance/confidence/recency
     // scoring components, but the matching memory should score higher
@@ -386,7 +380,7 @@ fn recall_finds_entity_connected_memories() {
     // Query mentions the entity name — should find the connected memory
     // even though "AuthService" has zero token overlap with "database connection pool"
     let results = engine
-        .recall("AuthService", 10, None, None, &[], None, None)
+        .recall(&crate::recall::RecallQuery::new("AuthService", 10))
         .unwrap();
 
     let found = results.iter().any(|r| r.memory.id == "entity-m1");

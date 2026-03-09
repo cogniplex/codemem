@@ -28,6 +28,33 @@ pub struct NamespaceStats {
     pub newest: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// Parameters for the recall query.
+#[derive(Debug, Clone)]
+pub struct RecallQuery<'a> {
+    pub query: &'a str,
+    pub k: usize,
+    pub memory_type_filter: Option<MemoryType>,
+    pub namespace_filter: Option<&'a str>,
+    pub exclude_tags: &'a [String],
+    pub min_importance: Option<f64>,
+    pub min_confidence: Option<f64>,
+}
+
+impl<'a> RecallQuery<'a> {
+    /// Create a minimal recall query with just the search text and result limit.
+    pub fn new(query: &'a str, k: usize) -> Self {
+        Self {
+            query,
+            k,
+            memory_type_filter: None,
+            namespace_filter: None,
+            exclude_tags: &[],
+            min_importance: None,
+            min_confidence: None,
+        }
+    }
+}
+
 impl CodememEngine {
     /// Core recall logic: search storage with hybrid scoring and return ranked results.
     ///
@@ -35,24 +62,14 @@ impl CodememEngine {
     /// temporal, tag matching, importance, confidence, and recency into a
     /// 9-component hybrid score. Supports filtering by memory type, namespace,
     /// tag exclusion, and minimum importance/confidence thresholds.
-    #[allow(clippy::too_many_arguments)]
-    pub fn recall(
-        &self,
-        query: &str,
-        k: usize,
-        memory_type_filter: Option<MemoryType>,
-        namespace_filter: Option<&str>,
-        exclude_tags: &[String],
-        min_importance: Option<f64>,
-        min_confidence: Option<f64>,
-    ) -> Result<Vec<SearchResult>, CodememError> {
+    pub fn recall(&self, q: &RecallQuery<'_>) -> Result<Vec<SearchResult>, CodememError> {
         // Try vector search first (if embeddings available)
         let vector_results: Vec<(String, f32)> = if let Some(emb_guard) = self.lock_embeddings()? {
-            match emb_guard.embed(query) {
+            match emb_guard.embed(q.query) {
                 Ok(query_embedding) => {
                     drop(emb_guard);
                     let vec = self.lock_vector()?;
-                    vec.search(&query_embedding, k * 2) // over-fetch for re-ranking
+                    vec.search(&query_embedding, q.k * 2) // over-fetch for re-ranking
                         .unwrap_or_default()
                 }
                 Err(e) => {
@@ -67,7 +84,7 @@ impl CodememEngine {
         // H1: Use code-aware tokenizer for query tokens so that compound identifiers
         // like "parseFunction" are split into ["parse", "function"] — matching the
         // tokenization used when documents were added to the BM25 index.
-        let query_tokens: Vec<String> = crate::bm25::tokenize(query);
+        let query_tokens: Vec<String> = crate::bm25::tokenize(q.query);
         let query_token_refs: Vec<&str> = query_tokens.iter().map(|s| s.as_str()).collect();
 
         // Graph and BM25 intentionally load different data: graph stores structural relationships
@@ -83,33 +100,21 @@ impl CodememEngine {
         // Entity expansion: find memories connected to code entities mentioned in the query.
         // This ensures that structurally related memories are candidates even when they are
         // semantically distant from the query text.
-        let entity_memory_ids = self.resolve_entity_memories(query, &graph, now);
+        let entity_memory_ids = self.resolve_entity_memories(q.query, &graph, now);
 
         let mut results: Vec<SearchResult> = Vec::new();
         let weights = self.scoring_weights()?;
 
         if vector_results.is_empty() {
             // Fallback: batch-load all memories matching filters in one query
-            let type_str = memory_type_filter.as_ref().map(|t| t.to_string());
+            let type_str = q.memory_type_filter.as_ref().map(|t| t.to_string());
             let all_memories = self
                 .storage
-                .list_memories_filtered(namespace_filter, type_str.as_deref())?;
+                .list_memories_filtered(q.namespace_filter, type_str.as_deref())?;
 
             for memory in all_memories {
-                // Apply quality filters
-                if !exclude_tags.is_empty() && memory.tags.iter().any(|t| exclude_tags.contains(t))
-                {
+                if !Self::passes_quality_filters(&memory, q) {
                     continue;
-                }
-                if let Some(min) = min_importance {
-                    if memory.importance < min {
-                        continue;
-                    }
-                }
-                if let Some(min) = min_confidence {
-                    if memory.confidence < min {
-                        continue;
-                    }
                 }
 
                 let breakdown = compute_score(&memory, &query_token_refs, 0.0, &graph, &bm25, now);
@@ -143,31 +148,19 @@ impl CodememEngine {
 
             for memory in candidate_memories {
                 // Apply memory_type filter
-                if let Some(ref filter_type) = memory_type_filter {
+                if let Some(ref filter_type) = q.memory_type_filter {
                     if memory.memory_type != *filter_type {
                         continue;
                     }
                 }
                 // Apply namespace filter
-                if let Some(ns) = namespace_filter {
+                if let Some(ns) = q.namespace_filter {
                     if memory.namespace.as_deref() != Some(ns) {
                         continue;
                     }
                 }
-                // Apply quality filters
-                if !exclude_tags.is_empty() && memory.tags.iter().any(|t| exclude_tags.contains(t))
-                {
+                if !Self::passes_quality_filters(&memory, q) {
                     continue;
-                }
-                if let Some(min) = min_importance {
-                    if memory.importance < min {
-                        continue;
-                    }
-                }
-                if let Some(min) = min_confidence {
-                    if memory.confidence < min {
-                        continue;
-                    }
                 }
 
                 let similarity = sim_map.get(memory.id.as_str()).copied().unwrap_or(0.0);
@@ -190,9 +183,27 @@ impl CodememEngine {
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        results.truncate(k);
+        results.truncate(q.k);
 
         Ok(results)
+    }
+
+    /// Check exclude_tags, min_importance, and min_confidence filters.
+    fn passes_quality_filters(memory: &MemoryNode, q: &RecallQuery<'_>) -> bool {
+        if !q.exclude_tags.is_empty() && memory.tags.iter().any(|t| q.exclude_tags.contains(t)) {
+            return false;
+        }
+        if let Some(min) = q.min_importance {
+            if memory.importance < min {
+                return false;
+            }
+        }
+        if let Some(min) = q.min_confidence {
+            if memory.confidence < min {
+                return false;
+            }
+        }
+        true
     }
 
     /// Recall with graph expansion: vector search (or BM25 fallback) for seed

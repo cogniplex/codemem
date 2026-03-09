@@ -217,7 +217,7 @@ fn recall_public_api_returns_search_results() {
 
     // Use the public recall() method directly
     let results = server
-        .recall("Rust ownership", 10, None, None, &[], None, None)
+        .recall(&codemem_engine::RecallQuery::new("Rust ownership", 10))
         .unwrap();
 
     assert!(
@@ -236,15 +236,10 @@ fn recall_public_api_with_memory_type_filter() {
     store_memory(&server, "api filter test content two", "pattern", &["test"]);
 
     let results = server
-        .recall(
-            "api filter test",
-            10,
-            Some(MemoryType::Pattern),
-            None,
-            &[],
-            None,
-            None,
-        )
+        .recall(&codemem_engine::RecallQuery {
+            memory_type_filter: Some(MemoryType::Pattern),
+            ..codemem_engine::RecallQuery::new("api filter test", 10)
+        })
         .unwrap();
 
     assert_eq!(results.len(), 1);
@@ -289,7 +284,10 @@ fn recall_public_api_with_min_confidence() {
     }
 
     let results = server
-        .recall("confidence test", 10, None, None, &[], None, Some(0.5))
+        .recall(&codemem_engine::RecallQuery {
+            min_confidence: Some(0.5),
+            ..codemem_engine::RecallQuery::new("confidence test", 10)
+        })
         .unwrap();
 
     assert_eq!(results.len(), 1);

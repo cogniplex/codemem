@@ -90,7 +90,7 @@ pub use enrichment::{EnrichResult, EnrichmentPipelineResult};
 pub use persistence::{edge_weight_for, IndexPersistResult};
 
 // Re-export recall types
-pub use recall::{ExpandedResult, NamespaceStats};
+pub use recall::{ExpandedResult, NamespaceStats, RecallQuery};
 
 // Re-export search types
 pub use search::{CodeSearchResult, SummaryTreeNode, SymbolSearchResult};

@@ -15,7 +15,7 @@
 //! Transport: Newline-delimited JSON-RPC messages over stdio.
 //! All logging goes to stderr; stdout is reserved for JSON-RPC only.
 
-use codemem_core::{CodememError, MemoryType, StorageBackend};
+use codemem_core::{CodememError, StorageBackend};
 use codemem_engine::CodememEngine;
 use serde_json::{json, Value};
 use std::io::{self, BufRead};
@@ -91,26 +91,11 @@ impl McpServer {
 
     /// Core recall logic: delegates to `CodememEngine::recall()`.
     /// Used by the REST API layer and consolidation tools.
-    #[allow(clippy::too_many_arguments)]
     pub fn recall(
         &self,
-        query: &str,
-        k: usize,
-        memory_type_filter: Option<MemoryType>,
-        namespace_filter: Option<&str>,
-        exclude_tags: &[String],
-        min_importance: Option<f64>,
-        min_confidence: Option<f64>,
+        q: &codemem_engine::RecallQuery<'_>,
     ) -> Result<Vec<codemem_core::SearchResult>, CodememError> {
-        self.engine.recall(
-            query,
-            k,
-            memory_type_filter,
-            namespace_filter,
-            exclude_tags,
-            min_importance,
-            min_confidence,
-        )
+        self.engine.recall(q)
     }
 
     pub fn storage(&self) -> &dyn StorageBackend {

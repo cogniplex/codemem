@@ -3,6 +3,7 @@
 
 mod compaction;
 
+use crate::index::{CodeChunk, ResolvedEdge, Symbol};
 use crate::IndexAndResolveResult;
 use codemem_core::{
     CodememError, Edge, GraphBackend, GraphConfig, GraphNode, NodeKind, RelationshipType,
@@ -41,6 +42,12 @@ pub fn edge_weight_for(rel: &RelationshipType, config: &GraphConfig) -> f64 {
     }
 }
 
+/// Intermediate counts from graph node persistence (before embedding).
+struct GraphPersistCounts {
+    packages_created: usize,
+    chunks_stored: usize,
+}
+
 impl super::CodememEngine {
     /// Persist all indexing results (file nodes, package tree, symbol nodes, chunk nodes,
     /// edges, embeddings, compaction) into storage and the in-memory graph.
@@ -62,6 +69,48 @@ impl super::CodememEngine {
         namespace: Option<&str>,
         on_progress: impl Fn(usize, usize),
     ) -> Result<IndexPersistResult, CodememError> {
+        let seen_files = &results.file_paths;
+
+        // 1. Persist all graph nodes and edges
+        let graph_counts = self.persist_graph_nodes(results, namespace)?;
+
+        // 2. Embed symbols and chunks
+        let (symbols_embedded, chunks_embedded) = self.embed_and_persist(
+            &results.symbols,
+            &results.chunks,
+            &results.edges,
+            on_progress,
+        )?;
+
+        // 3. Auto-compact
+        let (chunks_pruned, symbols_pruned) = if self.config.chunking.auto_compact {
+            self.compact_graph(seen_files)
+        } else {
+            (0, 0)
+        };
+
+        Ok(IndexPersistResult {
+            files_created: seen_files.len(),
+            packages_created: graph_counts.packages_created,
+            symbols_stored: results.symbols.len(),
+            chunks_stored: graph_counts.chunks_stored,
+            edges_resolved: results.edges.len(),
+            symbols_embedded,
+            chunks_embedded,
+            chunks_pruned,
+            symbols_pruned,
+        })
+    }
+
+    // ── Graph Node Persistence ───────────────────────────────────────────
+
+    /// Persist file, package, symbol, chunk nodes and all edges into storage
+    /// and the in-memory graph. Returns counts for the result struct.
+    fn persist_graph_nodes(
+        &self,
+        results: &IndexAndResolveResult,
+        namespace: Option<&str>,
+    ) -> Result<GraphPersistCounts, CodememError> {
         let all_symbols = &results.symbols;
         let all_chunks = &results.chunks;
         let seen_files = &results.file_paths;
@@ -69,37 +118,101 @@ impl super::CodememEngine {
 
         let now = chrono::Utc::now();
         let ns_string = namespace.map(|s| s.to_string());
+        let contains_weight = edge_weight_for(&RelationshipType::Contains, &self.config.graph);
 
         let mut graph = self.lock_graph()?;
 
-        // ── File nodes ──────────────────────────────────────────────────────
-        let mut file_nodes = Vec::with_capacity(seen_files.len());
-        for file_path in seen_files {
-            let node_id = format!("file:{file_path}");
-            let mut payload = HashMap::new();
-            payload.insert(
-                "file_path".to_string(),
-                serde_json::Value::String(file_path.clone()),
-            );
-            file_nodes.push(GraphNode {
-                id: node_id,
-                kind: NodeKind::File,
-                label: file_path.clone(),
-                payload,
-                centrality: 0.0,
-                memory_id: None,
-                namespace: ns_string.clone(),
-            });
-        }
-        let _ = self.storage.insert_graph_nodes_batch(&file_nodes);
-        for node in file_nodes {
-            let _ = graph.add_node(node);
-        }
+        // ── File nodes
+        let file_nodes: Vec<GraphNode> = seen_files
+            .iter()
+            .map(|file_path| {
+                let mut payload = HashMap::new();
+                payload.insert(
+                    "file_path".to_string(),
+                    serde_json::Value::String(file_path.clone()),
+                );
+                GraphNode {
+                    id: format!("file:{file_path}"),
+                    kind: NodeKind::File,
+                    label: file_path.clone(),
+                    payload,
+                    centrality: 0.0,
+                    memory_id: None,
+                    namespace: ns_string.clone(),
+                }
+            })
+            .collect();
+        self.persist_nodes_to_storage_and_graph(&file_nodes, &mut graph);
 
-        // ── Package (directory) nodes ───────────────────────────────────────
+        // ── Package (directory) nodes
+        let (dir_nodes, dir_edges, created_dirs) =
+            self.build_package_tree(seen_files, &ns_string, contains_weight, now, &graph);
+        self.persist_nodes_to_storage_and_graph(&dir_nodes, &mut graph);
+        self.persist_edges_to_storage_and_graph(&dir_edges, &mut graph);
+
+        // ── Symbol nodes + file→symbol edges
+        let (sym_nodes, sym_edges) =
+            Self::build_symbol_nodes(all_symbols, &ns_string, contains_weight, now);
+        self.persist_nodes_to_storage_and_graph(&sym_nodes, &mut graph);
+        self.persist_edges_to_storage_and_graph(&sym_edges, &mut graph);
+
+        // ── Resolved reference edges
+        let ref_edges = Self::build_reference_edges(edges, &self.config.graph, now);
+        self.persist_edges_to_storage_and_graph(&ref_edges, &mut graph);
+
+        // ── Chunk nodes + file→chunk / symbol→chunk edges
+        for file_path in seen_files {
+            let prefix = format!("chunk:{file_path}:");
+            let _ = self.storage.delete_graph_nodes_by_prefix(&prefix);
+        }
+        let (chunk_nodes, chunk_edges) =
+            Self::build_chunk_nodes(all_chunks, &ns_string, contains_weight, now);
+        let chunk_count = chunk_nodes.len();
+        self.persist_nodes_to_storage_and_graph(&chunk_nodes, &mut graph);
+        self.persist_edges_to_storage_and_graph(&chunk_edges, &mut graph);
+
+        drop(graph);
+
+        Ok(GraphPersistCounts {
+            packages_created: created_dirs,
+            chunks_stored: chunk_count,
+        })
+    }
+
+    /// Batch-insert nodes into both SQLite and the in-memory graph.
+    fn persist_nodes_to_storage_and_graph(
+        &self,
+        nodes: &[GraphNode],
+        graph: &mut crate::GraphEngine,
+    ) {
+        let _ = self.storage.insert_graph_nodes_batch(nodes);
+        for node in nodes {
+            let _ = graph.add_node(node.clone());
+        }
+    }
+
+    /// Batch-insert edges into both SQLite and the in-memory graph.
+    fn persist_edges_to_storage_and_graph(&self, edges: &[Edge], graph: &mut crate::GraphEngine) {
+        let _ = self.storage.insert_graph_edges_batch(edges);
+        for edge in edges {
+            let _ = graph.add_edge(edge.clone());
+        }
+    }
+
+    /// Build directory/package nodes and CONTAINS edges from file paths.
+    /// Returns (nodes, edges, number_of_dirs_created).
+    fn build_package_tree(
+        &self,
+        seen_files: &HashSet<String>,
+        ns_string: &Option<String>,
+        contains_weight: f64,
+        now: chrono::DateTime<chrono::Utc>,
+        graph: &crate::GraphEngine,
+    ) -> (Vec<GraphNode>, Vec<Edge>, usize) {
         let mut created_dirs: HashSet<String> = HashSet::new();
         let mut dir_nodes = Vec::new();
         let mut dir_edges = Vec::new();
+
         for file_path in seen_files {
             let p = std::path::Path::new(file_path);
             let mut ancestors: Vec<String> = Vec::new();
@@ -126,7 +239,6 @@ impl super::CodememEngine {
                         namespace: ns_string.clone(),
                     });
                 }
-                // CONTAINS edge from parent dir to this dir
                 if i > 0 {
                     let parent_pkg_id = format!("pkg:{}/", ancestors[i - 1]);
                     let edge_id = format!("contains:{parent_pkg_id}->{pkg_id}");
@@ -136,25 +248,20 @@ impl super::CodememEngine {
                         .iter()
                         .any(|e| e.id == edge_id)
                     {
-                        let edge = Edge {
+                        dir_edges.push(Edge {
                             id: edge_id,
                             src: parent_pkg_id,
                             dst: pkg_id.clone(),
                             relationship: RelationshipType::Contains,
-                            weight: edge_weight_for(
-                                &RelationshipType::Contains,
-                                &self.config.graph,
-                            ),
+                            weight: contains_weight,
                             valid_from: None,
                             valid_to: None,
                             properties: HashMap::new(),
                             created_at: now,
-                        };
-                        dir_edges.push(edge);
+                        });
                     }
                 }
             }
-            // CONTAINS edge from innermost directory to file
             if let Some(last_dir) = ancestors.last() {
                 let parent_pkg_id = format!("pkg:{last_dir}/");
                 let file_node_id = format!("file:{file_path}");
@@ -164,7 +271,7 @@ impl super::CodememEngine {
                     src: parent_pkg_id,
                     dst: file_node_id,
                     relationship: RelationshipType::Contains,
-                    weight: edge_weight_for(&RelationshipType::Contains, &self.config.graph),
+                    weight: contains_weight,
                     valid_from: None,
                     valid_to: None,
                     properties: HashMap::new(),
@@ -172,91 +279,27 @@ impl super::CodememEngine {
                 });
             }
         }
-        let _ = self.storage.insert_graph_nodes_batch(&dir_nodes);
-        for node in dir_nodes {
-            let _ = graph.add_node(node);
-        }
-        let _ = self.storage.insert_graph_edges_batch(&dir_edges);
-        for edge in dir_edges {
-            let _ = graph.add_edge(edge);
-        }
 
-        // ── Symbol nodes ────────────────────────────────────────────────────
-        let mut sym_nodes = Vec::with_capacity(all_symbols.len());
-        let mut sym_edges = Vec::with_capacity(all_symbols.len());
-        for sym in all_symbols {
+        let count = created_dirs.len();
+        (dir_nodes, dir_edges, count)
+    }
+
+    /// Build symbol graph nodes and file→symbol CONTAINS edges.
+    fn build_symbol_nodes(
+        symbols: &[Symbol],
+        ns_string: &Option<String>,
+        contains_weight: f64,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> (Vec<GraphNode>, Vec<Edge>) {
+        let mut sym_nodes = Vec::with_capacity(symbols.len());
+        let mut sym_edges = Vec::with_capacity(symbols.len());
+
+        for sym in symbols {
             let kind = NodeKind::from(sym.kind);
-
-            let mut payload = HashMap::new();
-            payload.insert(
-                "symbol_kind".to_string(),
-                serde_json::Value::String(sym.kind.to_string()),
-            );
-            payload.insert(
-                "signature".to_string(),
-                serde_json::Value::String(sym.signature.clone()),
-            );
-            payload.insert(
-                "file_path".to_string(),
-                serde_json::Value::String(sym.file_path.clone()),
-            );
-            payload.insert("line_start".to_string(), serde_json::json!(sym.line_start));
-            payload.insert("line_end".to_string(), serde_json::json!(sym.line_end));
-            payload.insert(
-                "visibility".to_string(),
-                serde_json::Value::String(sym.visibility.to_string()),
-            );
-            if let Some(ref doc) = sym.doc_comment {
-                payload.insert(
-                    "doc_comment".to_string(),
-                    serde_json::Value::String(doc.clone()),
-                );
-            }
-            if !sym.parameters.is_empty() {
-                payload.insert(
-                    "parameters".to_string(),
-                    serde_json::to_value(&sym.parameters).unwrap_or_default(),
-                );
-            }
-            if let Some(ref ret) = sym.return_type {
-                payload.insert(
-                    "return_type".to_string(),
-                    serde_json::Value::String(ret.clone()),
-                );
-            }
-            if sym.is_async {
-                payload.insert("is_async".to_string(), serde_json::json!(true));
-            }
-            if !sym.attributes.is_empty() {
-                payload.insert(
-                    "attributes".to_string(),
-                    serde_json::to_value(&sym.attributes).unwrap_or_default(),
-                );
-            }
-            if !sym.throws.is_empty() {
-                payload.insert(
-                    "throws".to_string(),
-                    serde_json::to_value(&sym.throws).unwrap_or_default(),
-                );
-            }
-            if let Some(ref gp) = sym.generic_params {
-                payload.insert(
-                    "generic_params".to_string(),
-                    serde_json::Value::String(gp.clone()),
-                );
-            }
-            if sym.is_abstract {
-                payload.insert("is_abstract".to_string(), serde_json::json!(true));
-            }
-            if let Some(ref parent) = sym.parent {
-                payload.insert(
-                    "parent".to_string(),
-                    serde_json::Value::String(parent.clone()),
-                );
-            }
+            let payload = Self::build_symbol_payload(sym);
 
             let sym_node_id = format!("sym:{}", sym.qualified_name);
-            let node = GraphNode {
+            sym_nodes.push(GraphNode {
                 id: sym_node_id.clone(),
                 kind,
                 label: sym.qualified_name.clone(),
@@ -264,34 +307,104 @@ impl super::CodememEngine {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: ns_string.clone(),
-            };
-            sym_nodes.push(node);
+            });
 
-            // CONTAINS edge: file → symbol
             let file_node_id = format!("file:{}", sym.file_path);
             sym_edges.push(Edge {
                 id: format!("contains:{file_node_id}->{sym_node_id}"),
                 src: file_node_id,
                 dst: sym_node_id,
                 relationship: RelationshipType::Contains,
-                weight: edge_weight_for(&RelationshipType::Contains, &self.config.graph),
+                weight: contains_weight,
                 valid_from: None,
                 valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
             });
         }
-        let _ = self.storage.insert_graph_nodes_batch(&sym_nodes);
-        for node in sym_nodes {
-            let _ = graph.add_node(node);
-        }
-        let _ = self.storage.insert_graph_edges_batch(&sym_edges);
-        for edge in sym_edges {
-            let _ = graph.add_edge(edge);
-        }
 
-        // ── Resolved reference edges ────────────────────────────────────────
-        let ref_edges: Vec<Edge> = edges
+        (sym_nodes, sym_edges)
+    }
+
+    /// Build the payload HashMap for a symbol's graph node.
+    fn build_symbol_payload(sym: &Symbol) -> HashMap<String, serde_json::Value> {
+        let mut payload = HashMap::new();
+        payload.insert(
+            "symbol_kind".to_string(),
+            serde_json::Value::String(sym.kind.to_string()),
+        );
+        payload.insert(
+            "signature".to_string(),
+            serde_json::Value::String(sym.signature.clone()),
+        );
+        payload.insert(
+            "file_path".to_string(),
+            serde_json::Value::String(sym.file_path.clone()),
+        );
+        payload.insert("line_start".to_string(), serde_json::json!(sym.line_start));
+        payload.insert("line_end".to_string(), serde_json::json!(sym.line_end));
+        payload.insert(
+            "visibility".to_string(),
+            serde_json::Value::String(sym.visibility.to_string()),
+        );
+        if let Some(ref doc) = sym.doc_comment {
+            payload.insert(
+                "doc_comment".to_string(),
+                serde_json::Value::String(doc.clone()),
+            );
+        }
+        if !sym.parameters.is_empty() {
+            payload.insert(
+                "parameters".to_string(),
+                serde_json::to_value(&sym.parameters).unwrap_or_default(),
+            );
+        }
+        if let Some(ref ret) = sym.return_type {
+            payload.insert(
+                "return_type".to_string(),
+                serde_json::Value::String(ret.clone()),
+            );
+        }
+        if sym.is_async {
+            payload.insert("is_async".to_string(), serde_json::json!(true));
+        }
+        if !sym.attributes.is_empty() {
+            payload.insert(
+                "attributes".to_string(),
+                serde_json::to_value(&sym.attributes).unwrap_or_default(),
+            );
+        }
+        if !sym.throws.is_empty() {
+            payload.insert(
+                "throws".to_string(),
+                serde_json::to_value(&sym.throws).unwrap_or_default(),
+            );
+        }
+        if let Some(ref gp) = sym.generic_params {
+            payload.insert(
+                "generic_params".to_string(),
+                serde_json::Value::String(gp.clone()),
+            );
+        }
+        if sym.is_abstract {
+            payload.insert("is_abstract".to_string(), serde_json::json!(true));
+        }
+        if let Some(ref parent) = sym.parent {
+            payload.insert(
+                "parent".to_string(),
+                serde_json::Value::String(parent.clone()),
+            );
+        }
+        payload
+    }
+
+    /// Build edges from resolved cross-file references.
+    fn build_reference_edges(
+        edges: &[ResolvedEdge],
+        graph_config: &GraphConfig,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Vec<Edge> {
+        edges
             .iter()
             .map(|edge| Edge {
                 id: format!(
@@ -301,28 +414,26 @@ impl super::CodememEngine {
                 src: format!("sym:{}", edge.source_qualified_name),
                 dst: format!("sym:{}", edge.target_qualified_name),
                 relationship: edge.relationship,
-                weight: edge_weight_for(&edge.relationship, &self.config.graph),
+                weight: edge_weight_for(&edge.relationship, graph_config),
                 valid_from: None,
                 valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
             })
-            .collect();
-        let _ = self.storage.insert_graph_edges_batch(&ref_edges);
-        for e in ref_edges {
-            let _ = graph.add_edge(e);
-        }
+            .collect()
+    }
 
-        // ── Chunk nodes ─────────────────────────────────────────────────────
-        // Cleanup stale chunk nodes for files being re-indexed
-        for file_path in seen_files {
-            let prefix = format!("chunk:{file_path}:");
-            let _ = self.storage.delete_graph_nodes_by_prefix(&prefix);
-        }
+    /// Build chunk graph nodes and file→chunk / symbol→chunk CONTAINS edges.
+    fn build_chunk_nodes(
+        chunks: &[CodeChunk],
+        ns_string: &Option<String>,
+        contains_weight: f64,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> (Vec<GraphNode>, Vec<Edge>) {
+        let mut chunk_nodes = Vec::with_capacity(chunks.len());
+        let mut chunk_edges = Vec::with_capacity(chunks.len() * 2);
 
-        let mut chunk_nodes = Vec::with_capacity(all_chunks.len());
-        let mut chunk_edges = Vec::with_capacity(all_chunks.len() * 2);
-        for chunk in all_chunks {
+        for chunk in chunks {
             let chunk_id = format!("chunk:{}:{}", chunk.file_path, chunk.index);
 
             let mut payload = HashMap::new();
@@ -363,21 +474,19 @@ impl super::CodememEngine {
                 namespace: ns_string.clone(),
             });
 
-            // CONTAINS edge: file → chunk
             let file_node_id = format!("file:{}", chunk.file_path);
             chunk_edges.push(Edge {
                 id: format!("contains:{file_node_id}->{chunk_id}"),
                 src: file_node_id,
                 dst: chunk_id.clone(),
                 relationship: RelationshipType::Contains,
-                weight: edge_weight_for(&RelationshipType::Contains, &self.config.graph),
+                weight: contains_weight,
                 valid_from: None,
                 valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
             });
 
-            // CONTAINS edge: parent symbol → chunk
             if let Some(ref parent_sym) = chunk.parent_symbol {
                 let parent_node_id = format!("sym:{parent_sym}");
                 chunk_edges.push(Edge {
@@ -385,7 +494,7 @@ impl super::CodememEngine {
                     src: parent_node_id,
                     dst: chunk_id,
                     relationship: RelationshipType::Contains,
-                    weight: edge_weight_for(&RelationshipType::Contains, &self.config.graph),
+                    weight: contains_weight,
                     valid_from: None,
                     valid_to: None,
                     properties: HashMap::new(),
@@ -393,161 +502,118 @@ impl super::CodememEngine {
                 });
             }
         }
-        let chunk_count = chunk_nodes.len();
-        let _ = self.storage.insert_graph_nodes_batch(&chunk_nodes);
-        for node in chunk_nodes {
-            let _ = graph.add_node(node);
-        }
-        let _ = self.storage.insert_graph_edges_batch(&chunk_edges);
-        for edge in chunk_edges {
-            let _ = graph.add_edge(edge);
-        }
-        drop(graph);
 
-        // ── Embed symbols and chunks ────────────────────────────────────────
-        // Phase 1: Collect enriched texts without holding any lock.
-        // enrich_symbol_text / enrich_chunk_text only read from the passed-in
-        // Symbol/CodeChunk and edges slice, so no lock is required.
-        //
-        // A12: Embedding bottleneck — The embedding provider is behind a Mutex,
-        // so `embed_batch` runs sequentially even though CPU-bound inference
-        // (Candle) could benefit from parallelism. For large codebases, this is
-        // the primary bottleneck. Potential fix: wrap the provider in an Arc and
-        // use `tokio::spawn_blocking` for CPU-bound Candle inference, or use a
-        // channel-based work queue to decouple embedding from persistence.
+        (chunk_nodes, chunk_edges)
+    }
+
+    // ── Embedding Persistence ────────────────────────────────────────────
+
+    /// Embed symbols and chunks, persisting embeddings to SQLite and the
+    /// vector index in batches with progress reporting.
+    ///
+    /// Returns (symbols_embedded, chunks_embedded).
+    fn embed_and_persist(
+        &self,
+        symbols: &[Symbol],
+        chunks: &[CodeChunk],
+        edges: &[ResolvedEdge],
+        on_progress: impl Fn(usize, usize),
+    ) -> Result<(usize, usize), CodememError> {
         let mut symbols_embedded = 0usize;
         let mut chunks_embedded = 0usize;
 
         // Quick check: skip expensive text enrichment if no embedding provider.
-        // The per-batch loop also guards against provider disappearing mid-run.
         let has_embeddings = self.lock_embeddings()?.is_some();
-        if has_embeddings {
-            let sym_texts: Vec<(String, String)> = all_symbols
-                .iter()
-                .map(|sym| {
-                    let id = format!("sym:{}", sym.qualified_name);
-                    let text = self.enrich_symbol_text(sym, edges);
-                    (id, text)
-                })
-                .collect();
-            let chunk_texts: Vec<(String, String)> = all_chunks
-                .iter()
-                .map(|chunk| {
-                    let id = format!("chunk:{}:{}", chunk.file_path, chunk.index);
-                    let text = self.enrich_chunk_text(chunk);
-                    (id, text)
-                })
-                .collect();
-
-            // Phase 2+3: Embed in chunks and persist progressively.
-            // Instead of one giant embed_batch (which blocks with no progress for
-            // large codebases), we process in manageable chunks, persisting each
-            // batch and reporting progress.
-            //
-            // The embedding lock is acquired per-batch so that SQLite/vector
-            // writes don't hold it, and remote providers (Ollama/OpenAI) don't
-            // block other operations for the entire duration.
-            // Persistence batch size: how many items to embed + flush per round.
-            // Separate from the GPU batch size (configured on EmbeddingService).
-            const EMBED_CHUNK_SIZE: usize = 64;
-
-            // all_pairs is ordered: symbols first, then chunks (via chain).
-            // sym_count is used to attribute embedded items to the correct counter.
-            let all_pairs: Vec<(String, String)> =
-                sym_texts.into_iter().chain(chunk_texts).collect();
-            let total = all_pairs.len();
-            let sym_count = all_symbols.len();
-            let mut done = 0usize;
-
-            for batch in all_pairs.chunks(EMBED_CHUNK_SIZE) {
-                let texts: Vec<&str> = batch.iter().map(|(_, t)| t.as_str()).collect();
-
-                // Acquire embedding lock only for the embed_batch call, then drop.
-                let t0 = std::time::Instant::now();
-                let embed_result = {
-                    let emb = self.lock_embeddings()?;
-                    match emb {
-                        Some(emb_guard) => emb_guard.embed_batch(&texts),
-                        None => break, // Provider disappeared between check and use
-                    }
-                    // emb_guard dropped here — lock released before persistence I/O
-                };
-
-                match embed_result {
-                    Ok(embeddings) => {
-                        let embed_ms = t0.elapsed().as_millis();
-
-                        // Batch-store embeddings to SQLite
-                        let t1 = std::time::Instant::now();
-                        let pairs: Vec<(&str, &[f32])> = batch
-                            .iter()
-                            .zip(embeddings.iter())
-                            .map(|((id, _), emb_vec)| (id.as_str(), emb_vec.as_slice()))
-                            .collect();
-                        if let Err(e) = self.storage.store_embeddings_batch(&pairs) {
-                            tracing::warn!("Failed to batch-store embeddings: {e}");
-                        }
-                        let sqlite_ms = t1.elapsed().as_millis();
-
-                        // Batch-insert into in-memory vector index
-                        let t2 = std::time::Instant::now();
-                        let batch_items: Vec<(String, Vec<f32>)> = batch
-                            .iter()
-                            .zip(embeddings.into_iter())
-                            .map(|((id, _), emb_vec)| (id.clone(), emb_vec))
-                            .collect();
-                        let batch_len = batch_items.len();
-                        {
-                            let mut vec = self.lock_vector()?;
-                            if let Err(e) = vec.insert_batch(&batch_items) {
-                                tracing::warn!("Failed to batch-insert into vector index: {e}");
-                            }
-                        }
-                        let vector_ms = t2.elapsed().as_millis();
-
-                        // Update per-type counters using arithmetic instead of loop
-                        let syms_in_batch = batch_len.min(sym_count.saturating_sub(done));
-                        symbols_embedded += syms_in_batch;
-                        chunks_embedded += batch_len - syms_in_batch;
-                        done += batch_len;
-
-                        tracing::debug!(
-                            "Embed batch {}: embed={embed_ms}ms sqlite={sqlite_ms}ms vector={vector_ms}ms",
-                            batch_len
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "embed_batch failed for chunk of {} texts: {e}",
-                            batch.len()
-                        );
-                        // Don't advance `done` — progress should reflect actual embeddings,
-                        // not failed batches. The total will no longer be reached, which
-                        // correctly signals incomplete embedding to the caller.
-                    }
-                }
-                on_progress(done, total);
-            }
-            self.save_index();
+        if !has_embeddings {
+            return Ok((0, 0));
         }
 
-        // ── Auto-compact ────────────────────────────────────────────────────
-        let (chunks_pruned, symbols_pruned) = if self.config.chunking.auto_compact {
-            self.compact_graph(seen_files)
-        } else {
-            (0, 0)
-        };
+        // Phase 1: Collect enriched texts without holding any lock.
+        let sym_texts: Vec<(String, String)> = symbols
+            .iter()
+            .map(|sym| {
+                let id = format!("sym:{}", sym.qualified_name);
+                let text = self.enrich_symbol_text(sym, edges);
+                (id, text)
+            })
+            .collect();
+        let chunk_texts: Vec<(String, String)> = chunks
+            .iter()
+            .map(|chunk| {
+                let id = format!("chunk:{}:{}", chunk.file_path, chunk.index);
+                let text = self.enrich_chunk_text(chunk);
+                (id, text)
+            })
+            .collect();
 
-        Ok(IndexPersistResult {
-            files_created: seen_files.len(),
-            packages_created: created_dirs.len(),
-            symbols_stored: all_symbols.len(),
-            chunks_stored: chunk_count,
-            edges_resolved: edges.len(),
-            symbols_embedded,
-            chunks_embedded,
-            chunks_pruned,
-            symbols_pruned,
-        })
+        // Phase 2+3: Embed in batches and persist progressively.
+        const EMBED_CHUNK_SIZE: usize = 64;
+
+        let all_pairs: Vec<(String, String)> = sym_texts.into_iter().chain(chunk_texts).collect();
+        let total = all_pairs.len();
+        let sym_count = symbols.len();
+        let mut done = 0usize;
+
+        for batch in all_pairs.chunks(EMBED_CHUNK_SIZE) {
+            let texts: Vec<&str> = batch.iter().map(|(_, t)| t.as_str()).collect();
+
+            let t0 = std::time::Instant::now();
+            let embed_result = {
+                let emb = self.lock_embeddings()?;
+                match emb {
+                    Some(emb_guard) => emb_guard.embed_batch(&texts),
+                    None => break,
+                }
+            };
+
+            match embed_result {
+                Ok(embeddings) => {
+                    let embed_ms = t0.elapsed().as_millis();
+
+                    let t1 = std::time::Instant::now();
+                    let pairs: Vec<(&str, &[f32])> = batch
+                        .iter()
+                        .zip(embeddings.iter())
+                        .map(|((id, _), emb_vec)| (id.as_str(), emb_vec.as_slice()))
+                        .collect();
+                    if let Err(e) = self.storage.store_embeddings_batch(&pairs) {
+                        tracing::warn!("Failed to batch-store embeddings: {e}");
+                    }
+                    let sqlite_ms = t1.elapsed().as_millis();
+
+                    let t2 = std::time::Instant::now();
+                    let batch_items: Vec<(String, Vec<f32>)> = batch
+                        .iter()
+                        .zip(embeddings.into_iter())
+                        .map(|((id, _), emb_vec)| (id.clone(), emb_vec))
+                        .collect();
+                    let batch_len = batch_items.len();
+                    {
+                        let mut vec = self.lock_vector()?;
+                        if let Err(e) = vec.insert_batch(&batch_items) {
+                            tracing::warn!("Failed to batch-insert into vector index: {e}");
+                        }
+                    }
+                    let vector_ms = t2.elapsed().as_millis();
+
+                    let syms_in_batch = batch_len.min(sym_count.saturating_sub(done));
+                    symbols_embedded += syms_in_batch;
+                    chunks_embedded += batch_len - syms_in_batch;
+                    done += batch_len;
+
+                    tracing::debug!(
+                        "Embed batch {}: embed={embed_ms}ms sqlite={sqlite_ms}ms vector={vector_ms}ms",
+                        batch_len
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("embed_batch failed for chunk of {} texts: {e}", batch.len());
+                }
+            }
+            on_progress(done, total);
+        }
+        self.save_index();
+
+        Ok((symbols_embedded, chunks_embedded))
     }
 }
