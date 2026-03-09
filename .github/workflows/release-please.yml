@@ -15,8 +15,6 @@ env:
 
 jobs:
   release-please:
-    # Skip runs triggered by release-please's own merge commits to prevent loops
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore: release main') }}
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
