@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.2](https://github.com/cogniplex/codemem/compare/v0.10.1...v0.10.2) (2026-03-09)
+
+
+### Bug Fixes
+
+* cargo install codemem broken on crates.io ([#17](https://github.com/cogniplex/codemem/issues/17)) ([13e5e78](https://github.com/cogniplex/codemem/commit/13e5e781ead4298ec0d2078071ac3f03f487a48e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-engine bumped from 0.10.1 to 0.10.2
+
 ## [0.10.1](https://github.com/cogniplex/codemem/compare/v0.10.0...v0.10.1) (2026-03-09)
 
 
