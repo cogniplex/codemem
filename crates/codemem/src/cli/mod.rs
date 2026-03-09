@@ -12,7 +12,6 @@ mod commands_migrate;
 mod commands_search;
 
 use clap::{Parser, Subcommand};
-use codemem_core::{StorageBackend, VectorBackend};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -329,7 +328,7 @@ pub fn run() -> anyhow::Result<()> {
             // H3: Open lightweight storage instead of the full engine
             // (avoids loading vector index, building graph, populating BM25).
             let db_path = codemem_db_path();
-            let storage = codemem_storage::Storage::open(&db_path)?;
+            let storage = codemem_engine::Storage::open(&db_path)?;
             match action {
                 SessionAction::List { namespace } => {
                     commands_lifecycle::cmd_sessions_list(&storage, namespace.as_deref())?;
@@ -345,7 +344,7 @@ pub fn run() -> anyhow::Result<()> {
         Commands::Context => {
             // H3: Open lightweight storage instead of the full engine.
             let db_path = codemem_db_path();
-            match codemem_storage::Storage::open(&db_path) {
+            match codemem_engine::Storage::open(&db_path) {
                 Ok(storage) => {
                     commands_lifecycle::cmd_context(&storage)?;
                 }
@@ -369,28 +368,6 @@ pub fn run() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-// ── Helpers (shared across modules) ────────────────────────────────────────
-
-/// Rebuild the HNSW vector index from all stored embeddings in the database.
-pub(crate) fn rebuild_vector_index_with_dims(
-    storage: &codemem_storage::Storage,
-    dimensions: usize,
-) -> anyhow::Result<codemem_storage::HnswIndex> {
-    let vector_config = codemem_core::VectorConfig {
-        dimensions,
-        ..codemem_core::VectorConfig::default()
-    };
-    let mut vector = codemem_storage::HnswIndex::new(vector_config)?;
-    let embeddings = storage.list_all_embeddings()?;
-    for (id, floats) in &embeddings {
-        if let Err(e) = vector.insert(id, floats) {
-            tracing::warn!("Failed to insert embedding for {id}: {e}");
-        }
-    }
-    tracing::info!("Rebuilt vector index with {} entries", embeddings.len());
-    Ok(vector)
 }
 
 /// Return the system-wide Codemem database path: ~/.codemem/codemem.db

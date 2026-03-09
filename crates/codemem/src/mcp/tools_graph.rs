@@ -4,7 +4,7 @@
 
 use super::types::ToolResult;
 use super::McpServer;
-use codemem_core::{GraphBackend, NodeKind, RelationshipType, VectorBackend};
+use codemem_core::{NodeKind, RelationshipType, VectorBackend};
 use codemem_engine::IndexCache;
 use serde_json::{json, Value};
 
@@ -20,7 +20,6 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .unwrap_or("bfs");
 
-        // Parse optional exclude_kinds filter
         let exclude_kinds: Vec<NodeKind> = args
             .get("exclude_kinds")
             .and_then(|v| v.as_array())
@@ -31,7 +30,6 @@ impl McpServer {
             })
             .unwrap_or_default();
 
-        // Parse optional include_relationships filter
         let include_relationships: Option<Vec<RelationshipType>> = args
             .get("include_relationships")
             .and_then(|v| v.as_array())
@@ -41,38 +39,13 @@ impl McpServer {
                     .collect()
             });
 
-        let graph = match self.lock_graph() {
-            Ok(g) => g,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
-
-        let has_filters = !exclude_kinds.is_empty() || include_relationships.is_some();
-
-        let nodes = if has_filters {
-            match algorithm {
-                "bfs" => graph.bfs_filtered(
-                    start,
-                    depth,
-                    &exclude_kinds,
-                    include_relationships.as_deref(),
-                ),
-                "dfs" => graph.dfs_filtered(
-                    start,
-                    depth,
-                    &exclude_kinds,
-                    include_relationships.as_deref(),
-                ),
-                _ => return ToolResult::tool_error(format!("Unknown algorithm: {algorithm}")),
-            }
-        } else {
-            match algorithm {
-                "bfs" => graph.bfs(start, depth),
-                "dfs" => graph.dfs(start, depth),
-                _ => return ToolResult::tool_error(format!("Unknown algorithm: {algorithm}")),
-            }
-        };
-
-        match nodes {
+        match self.engine.graph_traverse(
+            start,
+            depth,
+            algorithm,
+            &exclude_kinds,
+            include_relationships.as_deref(),
+        ) {
             Ok(nodes) => {
                 let output: Vec<Value> = nodes
                     .iter()
@@ -114,8 +87,8 @@ impl McpServer {
                 Ok(v) => v.stats(),
                 Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
             };
-            let graph_stats = match self.lock_graph() {
-                Ok(g) => g.stats(),
+            let graph_stats = match self.engine.graph_stats() {
+                Ok(s) => s,
                 Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
             };
 
@@ -431,13 +404,9 @@ impl McpServer {
         // Optionally include dependencies from graph
         if include_deps {
             let node_id = format!("sym:{qualified_name}");
-            let graph = match self.lock_graph() {
-                Ok(g) => g,
-                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-            };
-
-            let edges: Vec<Value> = graph
-                .get_edges(&node_id)
+            let edges: Vec<Value> = self
+                .engine
+                .get_node_edges(&node_id)
                 .unwrap_or_default()
                 .iter()
                 .map(|e| {
@@ -472,13 +441,9 @@ impl McpServer {
             .unwrap_or("both");
 
         let node_id = format!("sym:{qualified_name}");
-        let graph = match self.lock_graph() {
-            Ok(g) => g,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
 
         // Get direct edges (filtered by direction)
-        let edges = match graph.get_edges(&node_id) {
+        let edges = match self.engine.get_node_edges(&node_id) {
             Ok(e) => e,
             Err(_) => {
                 return ToolResult::tool_error(format!("Node not found in graph: {qualified_name}"))
@@ -520,7 +485,10 @@ impl McpServer {
             )
         } else {
             // depth>1: BFS reachability (impact analysis)
-            let nodes = match graph.bfs(&node_id, depth) {
+            let nodes = match self
+                .engine
+                .graph_traverse(&node_id, depth, "bfs", &[], None)
+            {
                 Ok(n) => n,
                 Err(e) => {
                     return ToolResult::tool_error(format!(
@@ -574,11 +542,10 @@ impl McpServer {
             .and_then(|v| v.as_f64())
             .unwrap_or(1.0);
 
-        let graph = match self.lock_graph() {
-            Ok(g) => g,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+        let communities = match self.engine.louvain_communities(resolution) {
+            Ok(c) => c,
+            Err(e) => return ToolResult::tool_error(format!("Error: {e}")),
         };
-        let communities = graph.louvain_communities(resolution);
 
         let output: Vec<Value> = communities
             .iter()
@@ -677,38 +644,31 @@ impl McpServer {
         let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
         let damping = args.get("damping").and_then(|v| v.as_f64()).unwrap_or(0.85);
 
-        let graph = match self.lock_graph() {
-            Ok(g) => g,
-            Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-        };
-        let scores = graph.pagerank(damping, 100, 1e-6);
+        match self.engine.find_important_nodes(top_k, damping) {
+            Ok(ranked) => {
+                let results: Vec<Value> = ranked
+                    .iter()
+                    .map(|r| {
+                        json!({
+                            "id": r.id,
+                            "pagerank": format!("{:.6}", r.score),
+                            "kind": r.kind,
+                            "label": r.label,
+                        })
+                    })
+                    .collect();
 
-        // Sort by score descending
-        let mut sorted: Vec<(String, f64)> = scores.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        sorted.truncate(top_k);
-
-        let results: Vec<Value> = sorted
-            .iter()
-            .map(|(id, score)| {
-                let node = graph.get_node(id).ok().flatten();
-                json!({
-                    "id": id,
-                    "pagerank": format!("{:.6}", score),
-                    "kind": node.as_ref().map(|n| n.kind.to_string()),
-                    "label": node.as_ref().map(|n| n.label.clone()),
-                })
-            })
-            .collect();
-
-        ToolResult::text(
-            serde_json::to_string_pretty(&json!({
-                "damping": damping,
-                "top_k": top_k,
-                "results": results,
-            }))
-            .expect("JSON serialization of literal"),
-        )
+                ToolResult::text(
+                    serde_json::to_string_pretty(&json!({
+                        "damping": damping,
+                        "top_k": top_k,
+                        "results": results,
+                    }))
+                    .expect("JSON serialization of literal"),
+                )
+            }
+            Err(e) => ToolResult::tool_error(format!("Error: {e}")),
+        }
     }
 
     // ── Summary Tree Tool ────────────────────────────────────────────────

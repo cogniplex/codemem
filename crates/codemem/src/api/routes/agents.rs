@@ -238,7 +238,8 @@ fn build_tool_params(
             // index_codebase requires `path`, not namespace/repo_id
             let raw_path = if let Some(rid) = repo_id {
                 state
-                    .storage_direct()
+                    .server
+                    .engine
                     .get_repo(rid)
                     .ok()
                     .flatten()
@@ -265,7 +266,8 @@ fn build_tool_params(
             let mut params = json!({});
             let raw_path = if let Some(rid) = repo_id {
                 state
-                    .storage_direct()
+                    .server
+                    .engine
                     .get_repo(rid)
                     .ok()
                     .flatten()

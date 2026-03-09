@@ -13,9 +13,9 @@
 use codemem_core::{
     CodememConfig, CodememError, ScoringWeights, StorageBackend, VectorBackend, VectorConfig,
 };
-use codemem_storage::graph::GraphEngine;
-use codemem_storage::HnswIndex;
-use codemem_storage::Storage;
+pub use codemem_storage::graph::GraphEngine;
+pub use codemem_storage::HnswIndex;
+pub use codemem_storage::Storage;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 #[cfg(test)]
@@ -30,11 +30,14 @@ pub mod enrichment;
 mod enrichment_text;
 mod file_indexing;
 mod graph_linking;
+pub mod graph_ops;
 pub mod hooks;
 pub mod index;
+pub mod insights;
 mod memory_ops;
 pub mod metrics;
 pub mod patterns;
+pub mod pca;
 pub mod persistence;
 pub mod recall;
 pub mod scoring;
@@ -221,7 +224,9 @@ impl CodememEngine {
         // Load existing vector index if it exists
         let index_path = db_path.with_extension("idx");
         if index_path.exists() {
-            vector.load(&index_path)?;
+            if let Err(e) = vector.load(&index_path) {
+                tracing::warn!("Stale or corrupt vector index, will rebuild: {e}");
+            }
         }
 
         // C6: Vector index consistency check — compare vector index count vs DB embedding count.
@@ -459,7 +464,44 @@ impl CodememEngine {
     pub(crate) fn is_dirty(&self) -> bool {
         self.dirty.load(Ordering::Acquire)
     }
+
+    // ── Repository Management (delegates to storage) ─────────────────
+
+    /// List all registered repositories.
+    pub fn list_repos(&self) -> Result<Vec<codemem_core::Repository>, CodememError> {
+        self.storage.list_repos()
+    }
+
+    /// Add a new repository.
+    pub fn add_repo(&self, repo: &codemem_core::Repository) -> Result<(), CodememError> {
+        self.storage.add_repo(repo)
+    }
+
+    /// Get a repository by ID.
+    pub fn get_repo(&self, id: &str) -> Result<Option<codemem_core::Repository>, CodememError> {
+        self.storage.get_repo(id)
+    }
+
+    /// Remove a repository by ID.
+    pub fn remove_repo(&self, id: &str) -> Result<bool, CodememError> {
+        self.storage.remove_repo(id)
+    }
+
+    /// Update a repository's status and optionally its last-indexed timestamp.
+    pub fn update_repo_status(
+        &self,
+        id: &str,
+        status: &str,
+        indexed_at: Option<&str>,
+    ) -> Result<(), CodememError> {
+        self.storage.update_repo_status(id, status, indexed_at)
+    }
 }
 
 // Re-export types from file_indexing at crate root for API compatibility
 pub use file_indexing::{IndexEnrichResult, SessionContext};
+
+// Re-export embeddings types so downstream crates need not depend on codemem-embeddings directly.
+/// Create an embedding provider from environment configuration.
+pub use codemem_embeddings::from_env as embeddings_from_env;
+pub use codemem_embeddings::{EmbeddingProvider, EmbeddingService};

@@ -1,6 +1,6 @@
 use super::*;
 use crate::mcp::test_helpers::*;
-use codemem_core::{Edge, GraphNode, NodeKind, RelationshipType};
+use codemem_core::{Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
 use std::collections::HashMap;
 
 // ── Structural Tool Tests ───────────────────────────────────────────

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{CodememError, Edge, GraphNode, MemoryNode, NodeKind, RelationshipType, Session};
+use crate::{
+    CodememError, Edge, GraphNode, MemoryNode, NodeKind, RelationshipType, Repository, Session,
+};
 
 // ── Traits ──────────────────────────────────────────────────────────────────
 
@@ -418,6 +420,14 @@ pub trait StorageBackend: Send + Sync {
         limit: usize,
     ) -> Result<Vec<GraphNode>, CodememError>;
 
+    /// List memories matching a specific tag, with optional namespace filter.
+    fn list_memories_by_tag(
+        &self,
+        tag: &str,
+        namespace: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<MemoryNode>, CodememError>;
+
     /// List memories with optional namespace and memory_type filters.
     fn list_memories_filtered(
         &self,
@@ -494,6 +504,28 @@ pub trait StorageBackend: Send + Sync {
         session_id: &str,
         pattern: &str,
     ) -> Result<usize, CodememError>;
+
+    // ── Repository Management ────────────────────────────────────────
+
+    /// List all registered repositories.
+    fn list_repos(&self) -> Result<Vec<Repository>, CodememError>;
+
+    /// Add a new repository.
+    fn add_repo(&self, repo: &Repository) -> Result<(), CodememError>;
+
+    /// Get a repository by ID.
+    fn get_repo(&self, id: &str) -> Result<Option<Repository>, CodememError>;
+
+    /// Remove a repository by ID. Returns true if it existed.
+    fn remove_repo(&self, id: &str) -> Result<bool, CodememError>;
+
+    /// Update a repository's status and optionally its last-indexed timestamp.
+    fn update_repo_status(
+        &self,
+        id: &str,
+        status: &str,
+        indexed_at: Option<&str>,
+    ) -> Result<(), CodememError>;
 
     // ── Stats ───────────────────────────────────────────────────────
 

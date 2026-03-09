@@ -357,7 +357,7 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
     }
 
     let db_path = super::codemem_db_path();
-    let storage = match codemem_storage::Storage::open_without_migrations(&db_path) {
+    let storage = match codemem_engine::Storage::open_without_migrations(&db_path) {
         Ok(s) => s,
         Err(_) => {
             let output = serde_json::json!({"continue": true});
@@ -464,7 +464,7 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
     }
 
     let db_path = super::codemem_db_path();
-    let storage = match codemem_storage::Storage::open_without_migrations(&db_path) {
+    let storage = match codemem_engine::Storage::open_without_migrations(&db_path) {
         Ok(s) => s,
         Err(_) => {
             let output = serde_json::json!({"continue": true});

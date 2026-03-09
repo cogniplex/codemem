@@ -2,7 +2,7 @@ use super::*;
 use crate::mcp::scoring::compute_score;
 use crate::mcp::test_helpers::*;
 use chrono::Utc;
-use codemem_core::{Edge, GraphNode, NodeKind, RelationshipType};
+use codemem_core::{Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
 use std::collections::HashMap;
 
 #[test]

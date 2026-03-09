@@ -4,7 +4,6 @@
 //! and optional embedded frontend. Can optionally mount the MCP HTTP
 //! transport for remote MCP clients.
 
-mod pca;
 pub mod routes;
 pub mod sse;
 pub mod types;
@@ -30,20 +29,6 @@ pub struct AppState {
     pub indexing_events: broadcast::Sender<IndexProgress>,
     /// Broadcast channel for file watcher events (SSE).
     pub watch_events: broadcast::Sender<codemem_engine::watch::WatchEvent>,
-    /// Direct storage handle for repo operations (needs Arc<Storage> for async tasks).
-    storage_direct: Arc<codemem_storage::Storage>,
-}
-
-impl AppState {
-    /// Access the direct storage handle for repo operations.
-    pub fn storage_direct(&self) -> &codemem_storage::Storage {
-        &self.storage_direct
-    }
-
-    /// Get an Arc clone of the storage for async tasks.
-    pub fn storage_direct_arc(&self) -> Arc<codemem_storage::Storage> {
-        Arc::clone(&self.storage_direct)
-    }
 }
 
 /// The API server that wraps the MCP server and provides REST endpoints.
@@ -53,10 +38,7 @@ pub struct ApiServer {
 
 impl ApiServer {
     /// Create a new API server wrapping the given MCP server.
-    ///
-    /// Opens a separate storage connection for repo operations that need
-    /// to be sent across async task boundaries.
-    pub fn new(server: Arc<McpServer>, storage: codemem_storage::Storage) -> Self {
+    pub fn new(server: Arc<McpServer>) -> Self {
         let (indexing_tx, _) = broadcast::channel::<IndexProgress>(256);
         let (watch_tx, _) = broadcast::channel::<codemem_engine::watch::WatchEvent>(256);
 
@@ -64,7 +46,6 @@ impl ApiServer {
             server,
             indexing_events: indexing_tx,
             watch_events: watch_tx,
-            storage_direct: Arc::new(storage),
         });
 
         Self { state }

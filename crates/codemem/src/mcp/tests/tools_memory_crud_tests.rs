@@ -1,6 +1,6 @@
 use super::*;
 use crate::mcp::test_helpers::*;
-use codemem_core::{GraphNode, MemoryNode, NodeKind};
+use codemem_core::{GraphBackend, GraphNode, MemoryNode, NodeKind};
 use std::collections::HashMap;
 
 #[test]

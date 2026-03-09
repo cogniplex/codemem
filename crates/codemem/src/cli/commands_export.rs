@@ -9,7 +9,7 @@ pub(crate) fn cmd_export(
     format: &str,
 ) -> anyhow::Result<()> {
     let db_path = super::codemem_db_path();
-    let storage = codemem_storage::Storage::open(&db_path)?;
+    let storage = codemem_engine::Storage::open(&db_path)?;
 
     let memory_type_filter: Option<codemem_core::MemoryType> =
         memory_type.and_then(|s| s.parse().ok());

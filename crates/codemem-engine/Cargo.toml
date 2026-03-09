@@ -7,6 +7,12 @@ license.workspace = true
 repository.workspace = true
 description = "Domain logic engine for Codemem: indexing, hooks, watching, scoring, recall, consolidation"
 
+[features]
+default = []
+metal = ["codemem-embeddings/metal"]
+cuda = ["codemem-embeddings/cuda"]
+accelerate = ["codemem-embeddings/accelerate"]
+
 [dependencies]
 codemem-core = { path = "../codemem-core", version = "0.10.0" }
 codemem-storage = { path = "../codemem-storage", version = "0.10.0" }
@@ -30,6 +36,9 @@ toml = { workspace = true }
 ast-grep-core = "0.41"
 ast-grep-language = "0.41"
 serde_yaml = "0.9"
+
+# PCA / linear algebra
+ndarray = { workspace = true }
 
 # File watching
 notify = { workspace = true }

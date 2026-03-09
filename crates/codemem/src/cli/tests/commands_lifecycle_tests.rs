@@ -61,7 +61,7 @@ fn short_path_deeply_nested() {
 
 #[test]
 fn sessions_list_empty() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
     // Verify the storage query returns empty (cmd_sessions_list prints "No sessions recorded")
     let sessions = storage.list_sessions(None).unwrap();
     assert!(sessions.is_empty());
@@ -70,7 +70,7 @@ fn sessions_list_empty() {
 
 #[test]
 fn sessions_list_after_start() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
     storage.start_session("sess-1", Some("test-ns")).unwrap();
 
     let sessions = storage.list_sessions(None).unwrap();
@@ -81,7 +81,7 @@ fn sessions_list_after_start() {
 
 #[test]
 fn sessions_list_with_namespace_filter() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
     storage.start_session("sess-a", Some("ns-a")).unwrap();
     storage.start_session("sess-b", Some("ns-b")).unwrap();
 
@@ -101,7 +101,7 @@ fn sessions_list_with_namespace_filter() {
 
 #[test]
 fn sessions_start_creates_session() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
     cmd_sessions_start(&storage, Some("my-project")).unwrap();
 
     let sessions = storage.list_sessions(Some("my-project")).unwrap();
@@ -111,7 +111,7 @@ fn sessions_start_creates_session() {
 
 #[test]
 fn sessions_start_no_namespace() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
     cmd_sessions_start(&storage, None).unwrap();
 
     let sessions = storage.list_sessions(None).unwrap();
@@ -122,7 +122,7 @@ fn sessions_start_no_namespace() {
 
 #[test]
 fn sessions_end_with_summary() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
     storage.start_session("end-test", Some("ns")).unwrap();
 
     cmd_sessions_end(&storage, "end-test", Some("all done")).unwrap();
@@ -135,7 +135,7 @@ fn sessions_end_with_summary() {
 
 #[test]
 fn sessions_end_without_summary() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
     storage.start_session("end-no-sum", None).unwrap();
 
     cmd_sessions_end(&storage, "end-no-sum", None).unwrap();
@@ -149,7 +149,7 @@ fn sessions_end_without_summary() {
 
 #[test]
 fn context_empty_storage_outputs_empty_json() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
     // cmd_context reads from stdin, so we can't easily call it directly.
     // But we can verify the storage-layer queries it depends on return empty.
     let sessions = storage.list_sessions(None).unwrap();
@@ -160,7 +160,7 @@ fn context_empty_storage_outputs_empty_json() {
 
 #[test]
 fn context_with_sessions_and_memories() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
 
     // Create a session with summary
     storage
@@ -221,7 +221,7 @@ fn context_with_sessions_and_memories() {
 
 #[test]
 fn context_pending_analysis_detection() {
-    let storage = codemem_storage::Storage::open_in_memory().unwrap();
+    let storage = codemem_engine::Storage::open_in_memory().unwrap();
 
     let mut memory = codemem_core::MemoryNode::test_default(
         "Files modified in session abc: src/main.rs, src/lib.rs",

@@ -4,7 +4,7 @@ use super::args::{parse_memory_type, parse_opt_string, parse_string_array};
 use super::scoring::format_recall_results;
 use super::types::ToolResult;
 use super::McpServer;
-use codemem_core::{CodememError, Edge, GraphBackend, MemoryType, RelationshipType};
+use codemem_core::{CodememError, Edge, MemoryType, RelationshipType};
 use codemem_engine::SplitPart;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -23,6 +23,7 @@ impl McpServer {
             .unwrap_or(0.5);
         let tags = parse_string_array(args, "tags");
         let namespace = parse_opt_string(args, "namespace");
+        let links = parse_string_array(args, "links");
 
         let mut memory = codemem_core::MemoryNode::new(content, memory_type);
         let id = memory.id.clone();
@@ -30,51 +31,13 @@ impl McpServer {
         memory.tags = tags;
         memory.namespace = namespace;
 
-        match self.engine.persist_memory(&memory) {
+        match self.engine.store_memory_with_links(&memory, &links) {
             Ok(()) => {}
             Err(CodememError::Duplicate(h)) => {
                 return ToolResult::text(format!("Memory already exists (hash: {h})"));
             }
             Err(e) => return ToolResult::tool_error(format!("Storage error: {e}")),
         }
-
-        // Handle optional `links` parameter: create RELATES_TO edges to linked nodes
-        if let Some(links) = args.get("links").and_then(|v| v.as_array()) {
-            let mut graph = match self.lock_graph() {
-                Ok(g) => g,
-                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
-            };
-            let now = chrono::Utc::now();
-            for link_val in links {
-                if let Some(link_id) = link_val.as_str() {
-                    let edge = Edge {
-                        id: format!("{id}-RELATES_TO-{link_id}"),
-                        src: id.clone(),
-                        dst: link_id.to_string(),
-                        relationship: RelationshipType::RelatesTo,
-                        weight: 1.0,
-                        properties: HashMap::new(),
-                        created_at: now,
-                        valid_from: None,
-                        valid_to: None,
-                    };
-                    if let Err(e) = self.engine.storage().insert_graph_edge(&edge) {
-                        tracing::warn!("Failed to persist link edge to {link_id}: {e}");
-                    }
-                    if let Err(e) = graph.add_edge(edge) {
-                        tracing::warn!("Failed to add link edge to {link_id}: {e}");
-                    }
-                }
-            }
-        }
-
-        // Auto-link memory to code nodes mentioned in content
-        let explicit_links = parse_string_array(args, "links");
-        self.engine
-            .auto_link_to_code_nodes(&id, content, &explicit_links);
-
-        // Persist vector index to disk
-        self.engine.save_index();
 
         ToolResult::text(
             serde_json::to_string_pretty(&json!({
