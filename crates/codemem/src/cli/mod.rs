@@ -370,6 +370,15 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Derive a short namespace from a working-directory path.
+/// Returns the directory basename (e.g. `/Users/me/project` → `"project"`).
+pub(crate) fn namespace_from_path(path: &str) -> &str {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or(path)
+}
+
 /// Return the system-wide Codemem database path: ~/.codemem/codemem.db
 pub(crate) fn codemem_db_path() -> PathBuf {
     dirs::home_dir()
