@@ -332,59 +332,59 @@ impl McpServer {
     pub(crate) fn tool_session_context(&self, args: &Value) -> ToolResult {
         let namespace = args.get("namespace").and_then(|v| v.as_str());
 
-        match self.engine.session_context(namespace) {
-            Ok(ctx) => {
-                let recent_memories: Vec<Value> = ctx
-                    .recent_memories
-                    .iter()
-                    .map(|m| {
-                        json!({
-                            "id": m.id,
-                            "content": m.content,
-                            "memory_type": m.memory_type.to_string(),
-                            "importance": m.importance,
-                            "tags": m.tags,
-                            "created_at": m.created_at.to_rfc3339(),
-                        })
-                    })
-                    .collect();
+        let ctx = match self.engine.session_context(namespace) {
+            Ok(ctx) => ctx,
+            Err(e) => return ToolResult::tool_error(format!("Session context error: {e}")),
+        };
 
-                let pending: Vec<Value> = ctx
-                    .pending_analyses
-                    .iter()
-                    .map(|m| {
-                        json!({
-                            "id": m.id,
-                            "content": m.content,
-                            "tags": m.tags,
-                        })
-                    })
-                    .collect();
+        let recent_memories: Vec<Value> = ctx
+            .recent_memories
+            .iter()
+            .map(|m| {
+                json!({
+                    "id": m.id,
+                    "content": m.content,
+                    "memory_type": m.memory_type.to_string(),
+                    "importance": m.importance,
+                    "tags": m.tags,
+                    "created_at": m.created_at.to_rfc3339(),
+                })
+            })
+            .collect();
 
-                let patterns: Vec<Value> = ctx
-                    .active_patterns
-                    .iter()
-                    .take(5)
-                    .map(|p| {
-                        json!({
-                            "pattern_type": p.pattern_type.to_string(),
-                            "description": p.description,
-                            "confidence": p.confidence,
-                        })
-                    })
-                    .collect();
+        let pending: Vec<Value> = ctx
+            .pending_analyses
+            .iter()
+            .map(|m| {
+                json!({
+                    "id": m.id,
+                    "content": m.content,
+                    "tags": m.tags,
+                })
+            })
+            .collect();
 
-                ToolResult::text(
-                    serde_json::to_string_pretty(&json!({
-                        "recent_memories": recent_memories,
-                        "pending_analyses": pending,
-                        "active_patterns": patterns,
-                    }))
-                    .expect("JSON serialization of literal"),
-                )
-            }
-            Err(e) => ToolResult::tool_error(format!("Session context error: {e}")),
-        }
+        let patterns: Vec<Value> = ctx
+            .active_patterns
+            .iter()
+            .take(5)
+            .map(|p| {
+                json!({
+                    "pattern_type": p.pattern_type.to_string(),
+                    "description": p.description,
+                    "confidence": p.confidence,
+                })
+            })
+            .collect();
+
+        ToolResult::text(
+            serde_json::to_string_pretty(&json!({
+                "recent_memories": recent_memories,
+                "pending_analyses": pending,
+                "active_patterns": patterns,
+            }))
+            .expect("JSON serialization of literal"),
+        )
     }
 }
 

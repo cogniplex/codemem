@@ -14,6 +14,38 @@ use axum::{
 use codemem_core::{GraphBackend, NodeKind};
 use std::sync::Arc;
 
+/// Collect edges whose both endpoints are in `node_ids`, deduplicating by edge ID.
+fn collect_edges_between(
+    graph: &codemem_engine::GraphEngine,
+    nodes: &[codemem_core::GraphNode],
+    node_ids: &std::collections::HashSet<&str>,
+) -> Vec<GraphEdgeResponse> {
+    let mut edges = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for node in nodes {
+        let node_edges = match graph.get_edges(&node.id) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for edge in node_edges {
+            if !node_ids.contains(edge.src.as_str())
+                || !node_ids.contains(edge.dst.as_str())
+                || !seen.insert(edge.id.clone())
+            {
+                continue;
+            }
+            edges.push(GraphEdgeResponse {
+                id: edge.id,
+                src: edge.src,
+                dst: edge.dst,
+                relationship: edge.relationship.to_string(),
+                weight: edge.weight,
+            });
+        }
+    }
+    edges
+}
+
 /// Collect a BFS subgraph (nodes + edges between them) from a start node.
 /// Shared helper for `get_neighbors` and `get_impact`.
 fn collect_subgraph(
@@ -22,32 +54,12 @@ fn collect_subgraph(
     depth: usize,
 ) -> Result<SubgraphResponse, codemem_core::CodememError> {
     let reachable = graph.bfs(start_id, depth)?;
-
     let node_ids: std::collections::HashSet<&str> =
         reachable.iter().map(|n| n.id.as_str()).collect();
 
-    let mut edges = Vec::new();
-    let mut seen_edges = std::collections::HashSet::new();
-    for node in &reachable {
-        if let Ok(node_edges) = graph.get_edges(&node.id) {
-            for edge in node_edges {
-                if node_ids.contains(edge.src.as_str())
-                    && node_ids.contains(edge.dst.as_str())
-                    && seen_edges.insert(edge.id.clone())
-                {
-                    edges.push(GraphEdgeResponse {
-                        id: edge.id,
-                        src: edge.src,
-                        dst: edge.dst,
-                        relationship: edge.relationship.to_string(),
-                        weight: edge.weight,
-                    });
-                }
-            }
-        }
-    }
+    let edges = collect_edges_between(graph, &reachable, &node_ids);
 
-    let nodes: Vec<GraphNodeResponse> = reachable
+    let nodes = reachable
         .into_iter()
         .map(|n| GraphNodeResponse {
             id: n.id,
@@ -60,6 +72,46 @@ fn collect_subgraph(
         .collect();
 
     Ok(SubgraphResponse { nodes, edges })
+}
+
+/// Build a top-N subgraph response with optional centrality and kind filters.
+fn build_subgraph_response(
+    graph: &codemem_engine::GraphEngine,
+    max_nodes: usize,
+    namespace: Option<&str>,
+    kinds: Option<&[NodeKind]>,
+    min_centrality: Option<f64>,
+) -> SubgraphResponse {
+    let (nodes, edges) = graph.subgraph_top_n(max_nodes, namespace, kinds);
+
+    let node_responses: Vec<GraphNodeResponse> = nodes
+        .into_iter()
+        .filter(|n| min_centrality.is_none_or(|min_c| n.centrality >= min_c))
+        .map(|n| GraphNodeResponse {
+            id: n.id,
+            kind: n.kind.to_string(),
+            label: n.label,
+            centrality: n.centrality,
+            memory_id: n.memory_id,
+            namespace: n.namespace,
+        })
+        .collect();
+
+    let edge_responses: Vec<GraphEdgeResponse> = edges
+        .into_iter()
+        .map(|e| GraphEdgeResponse {
+            id: e.id,
+            src: e.src,
+            dst: e.dst,
+            relationship: e.relationship.to_string(),
+            weight: e.weight,
+        })
+        .collect();
+
+    SubgraphResponse {
+        nodes: node_responses,
+        edges: edge_responses,
+    }
 }
 
 pub async fn get_subgraph(
@@ -78,43 +130,13 @@ pub async fn get_subgraph(
     let namespace = query.namespace.clone();
 
     let result = state.server.engine.with_graph(|graph| {
-        let (nodes, edges) =
-            graph.subgraph_top_n(max_nodes, namespace.as_deref(), kinds.as_deref());
-
-        let node_responses: Vec<GraphNodeResponse> = nodes
-            .into_iter()
-            .filter(|n| {
-                if let Some(min_c) = min_centrality {
-                    n.centrality >= min_c
-                } else {
-                    true
-                }
-            })
-            .map(|n| GraphNodeResponse {
-                id: n.id,
-                kind: n.kind.to_string(),
-                label: n.label,
-                centrality: n.centrality,
-                memory_id: n.memory_id,
-                namespace: n.namespace,
-            })
-            .collect();
-
-        let edge_responses: Vec<GraphEdgeResponse> = edges
-            .into_iter()
-            .map(|e| GraphEdgeResponse {
-                id: e.id,
-                src: e.src,
-                dst: e.dst,
-                relationship: e.relationship.to_string(),
-                weight: e.weight,
-            })
-            .collect();
-
-        SubgraphResponse {
-            nodes: node_responses,
-            edges: edge_responses,
-        }
+        build_subgraph_response(
+            graph,
+            max_nodes,
+            namespace.as_deref(),
+            kinds.as_deref(),
+            min_centrality,
+        )
     });
 
     Json(result.unwrap_or_else(|_| SubgraphResponse {
