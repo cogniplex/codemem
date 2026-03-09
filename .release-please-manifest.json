@@ -3,6 +3,6 @@
   "crates/codemem-storage": "0.10.1",
   "crates/codemem-embeddings": "0.10.1",
   "crates/codemem-engine": "0.10.3",
-  "crates/codemem": "0.10.3",
+  "crates/codemem": "0.10.4",
   "crates/codemem-bench": "0.8.3"
 }
