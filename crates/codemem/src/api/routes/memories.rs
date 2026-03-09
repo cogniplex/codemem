@@ -90,8 +90,8 @@ pub async fn update_memory(
 ) -> Result<Json<MessageResponse>, (StatusCode, Json<MessageResponse>)> {
     let storage = state.server.storage();
 
-    // Check if memory exists
-    match storage.get_memory(&id) {
+    // Check if memory exists (no-touch to avoid bumping access_count on read-only check)
+    match storage.get_memory_no_touch(&id) {
         Ok(Some(_)) => {}
         Ok(None) => {
             return Err((
@@ -166,15 +166,14 @@ pub async fn search_memories(
         .as_deref()
         .and_then(|t| t.parse::<MemoryType>().ok());
 
-    let results = match state.server.recall(
-        &query.q,
+    let rq = codemem_engine::RecallQuery {
+        query: &query.q,
         k,
         memory_type_filter,
-        query.namespace.as_deref(),
-        &[],
-        None,
-        None,
-    ) {
+        namespace_filter: query.namespace.as_deref(),
+        ..codemem_engine::RecallQuery::new(&query.q, k)
+    };
+    let results = match state.server.recall(&rq) {
         Ok(results) => results.into_iter().map(search_result_to_item).collect(),
         Err(e) => {
             tracing::warn!("Search failed: {e}");

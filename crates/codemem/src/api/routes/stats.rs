@@ -12,14 +12,11 @@ pub async fn get_stats(State(state): State<Arc<AppState>>) -> Json<StatsResponse
     let memory_count = storage.memory_count().unwrap_or(0);
     let embedding_count = storage.list_all_embeddings().map(|e| e.len()).unwrap_or(0);
 
-    let (node_count, edge_count) = {
-        let graph = state
-            .server
-            .graph()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        (graph.node_count(), graph.edge_count())
-    };
+    let (node_count, edge_count) = state
+        .server
+        .engine
+        .with_graph(|graph| (graph.node_count(), graph.edge_count()))
+        .unwrap_or((0, 0));
 
     let session_count = storage.session_count(None).unwrap_or(0);
     let namespace_count = storage.list_namespaces().map(|n| n.len()).unwrap_or(0);
@@ -46,28 +43,13 @@ pub async fn get_health(State(state): State<Arc<AppState>>) -> Json<HealthRespon
         },
     };
 
-    let vector_health = match state.server.vector().lock() {
-        Ok(v) => {
-            let stats = v.stats();
-            ComponentHealth {
-                status: "ok".to_string(),
-                detail: Some(format!("{} vectors", stats.count)),
-            }
-        }
-        Err(e) => ComponentHealth {
-            status: "error".to_string(),
-            detail: Some(e.to_string()),
-        },
-    };
-
-    let graph_health = match state.server.graph().lock() {
-        Ok(g) => ComponentHealth {
+    let vector_health = match state.server.engine.with_vector(|v| {
+        let stats = v.stats();
+        format!("{} vectors", stats.count)
+    }) {
+        Ok(detail) => ComponentHealth {
             status: "ok".to_string(),
-            detail: Some(format!(
-                "{} nodes, {} edges",
-                g.node_count(),
-                g.edge_count()
-            )),
+            detail: Some(detail),
         },
         Err(e) => ComponentHealth {
             status: "error".to_string(),
@@ -75,20 +57,33 @@ pub async fn get_health(State(state): State<Arc<AppState>>) -> Json<HealthRespon
         },
     };
 
-    let embeddings_health = match state.server.embeddings() {
-        Some(emb) => match emb.lock() {
-            Ok(_) => ComponentHealth {
-                status: "ok".to_string(),
-                detail: None,
-            },
-            Err(e) => ComponentHealth {
-                status: "error".to_string(),
-                detail: Some(e.to_string()),
-            },
+    let graph_health = match state
+        .server
+        .engine
+        .with_graph(|g| format!("{} nodes, {} edges", g.node_count(), g.edge_count()))
+    {
+        Ok(detail) => ComponentHealth {
+            status: "ok".to_string(),
+            detail: Some(detail),
         },
-        None => ComponentHealth {
+        Err(e) => ComponentHealth {
+            status: "error".to_string(),
+            detail: Some(e.to_string()),
+        },
+    };
+
+    let embeddings_health = match state.server.engine.lock_embeddings() {
+        Ok(Some(_)) => ComponentHealth {
+            status: "ok".to_string(),
+            detail: None,
+        },
+        Ok(None) => ComponentHealth {
             status: "unavailable".to_string(),
             detail: Some("No embedding provider configured".to_string()),
+        },
+        Err(e) => ComponentHealth {
+            status: "error".to_string(),
+            detail: Some(e.to_string()),
         },
     };
 

@@ -90,7 +90,7 @@ pub use enrichment::{EnrichResult, EnrichmentPipelineResult};
 pub use persistence::{edge_weight_for, IndexPersistResult};
 
 // Re-export recall types
-pub use recall::{ExpandedResult, NamespaceStats};
+pub use recall::{ExpandedResult, NamespaceStats, RecallQuery};
 
 // Re-export search types
 pub use search::{CodeSearchResult, SummaryTreeNode, SymbolSearchResult};
@@ -437,26 +437,26 @@ impl CodememEngine {
         &self.metrics
     }
 
-    /// Access the raw graph Mutex (for callers that need `&Mutex<GraphEngine>`).
-    pub fn graph_mutex(&self) -> &Mutex<GraphEngine> {
-        &self.graph
+    // ── Closure Accessors (safe read-only access for transport layers) ──
+
+    /// Execute a closure with a locked reference to the graph engine.
+    /// Provides safe read-only access without exposing raw mutexes.
+    pub fn with_graph<F, R>(&self, f: F) -> Result<R, CodememError>
+    where
+        F: FnOnce(&GraphEngine) -> R,
+    {
+        let guard = self.lock_graph()?;
+        Ok(f(&guard))
     }
 
-    /// Access the raw vector Mutex (for callers that need `&Mutex<HnswIndex>`).
-    pub fn vector_mutex(&self) -> &Mutex<HnswIndex> {
-        &self.vector
-    }
-
-    /// Access the raw BM25 Mutex (for callers that need `&Mutex<Bm25Index>`).
-    pub fn bm25_mutex(&self) -> &Mutex<Bm25Index> {
-        &self.bm25_index
-    }
-
-    /// Access the raw embeddings Mutex (for callers that need the `Option<&Mutex<...>>`).
-    pub fn embeddings_mutex(
-        &self,
-    ) -> Option<&Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
-        self.embeddings.as_ref()
+    /// Execute a closure with a locked reference to the vector index.
+    /// Provides safe read-only access without exposing raw mutexes.
+    pub fn with_vector<F, R>(&self, f: F) -> Result<R, CodememError>
+    where
+        F: FnOnce(&HnswIndex) -> R,
+    {
+        let guard = self.lock_vector()?;
+        Ok(f(&guard))
     }
 
     /// Check if the engine has unsaved changes (dirty flag is set).
@@ -499,7 +499,7 @@ impl CodememEngine {
 }
 
 // Re-export types from file_indexing at crate root for API compatibility
-pub use file_indexing::{IndexEnrichResult, SessionContext};
+pub use file_indexing::{AnalyzeOptions, AnalyzeProgress, AnalyzeResult, SessionContext};
 
 // Re-export embeddings types so downstream crates need not depend on codemem-embeddings directly.
 /// Create an embedding provider from environment configuration.

@@ -14,36 +14,79 @@ use axum::{
 use codemem_core::{GraphBackend, NodeKind};
 use std::sync::Arc;
 
-pub async fn get_subgraph(
-    State(state): State<Arc<AppState>>,
-    Query(query): Query<SubgraphQuery>,
-) -> Json<SubgraphResponse> {
-    let max_nodes = query.max_nodes.unwrap_or(1000);
+/// Collect edges whose both endpoints are in `node_ids`, deduplicating by edge ID.
+fn collect_edges_between(
+    graph: &codemem_engine::GraphEngine,
+    nodes: &[codemem_core::GraphNode],
+    node_ids: &std::collections::HashSet<&str>,
+) -> Vec<GraphEdgeResponse> {
+    let mut edges = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for node in nodes {
+        let node_edges = match graph.get_edges(&node.id) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for edge in node_edges {
+            if !node_ids.contains(edge.src.as_str())
+                || !node_ids.contains(edge.dst.as_str())
+                || !seen.insert(edge.id.clone())
+            {
+                continue;
+            }
+            edges.push(GraphEdgeResponse {
+                id: edge.id,
+                src: edge.src,
+                dst: edge.dst,
+                relationship: edge.relationship.to_string(),
+                weight: edge.weight,
+            });
+        }
+    }
+    edges
+}
 
-    let kinds: Option<Vec<NodeKind>> = query.kinds.as_deref().map(|k| {
-        k.split(',')
-            .filter_map(|s| s.trim().parse::<NodeKind>().ok())
-            .collect()
-    });
+/// Collect a BFS subgraph (nodes + edges between them) from a start node.
+/// Shared helper for `get_neighbors` and `get_impact`.
+fn collect_subgraph(
+    graph: &codemem_engine::GraphEngine,
+    start_id: &str,
+    depth: usize,
+) -> Result<SubgraphResponse, codemem_core::CodememError> {
+    let reachable = graph.bfs(start_id, depth)?;
+    let node_ids: std::collections::HashSet<&str> =
+        reachable.iter().map(|n| n.id.as_str()).collect();
 
-    let graph = state
-        .server
-        .graph()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let edges = collect_edges_between(graph, &reachable, &node_ids);
 
-    let (nodes, edges) =
-        graph.subgraph_top_n(max_nodes, query.namespace.as_deref(), kinds.as_deref());
+    let nodes = reachable
+        .into_iter()
+        .map(|n| GraphNodeResponse {
+            id: n.id,
+            kind: n.kind.to_string(),
+            label: n.label,
+            centrality: n.centrality,
+            memory_id: n.memory_id,
+            namespace: n.namespace,
+        })
+        .collect();
+
+    Ok(SubgraphResponse { nodes, edges })
+}
+
+/// Build a top-N subgraph response with optional centrality and kind filters.
+fn build_subgraph_response(
+    graph: &codemem_engine::GraphEngine,
+    max_nodes: usize,
+    namespace: Option<&str>,
+    kinds: Option<&[NodeKind]>,
+    min_centrality: Option<f64>,
+) -> SubgraphResponse {
+    let (nodes, edges) = graph.subgraph_top_n(max_nodes, namespace, kinds);
 
     let node_responses: Vec<GraphNodeResponse> = nodes
         .into_iter()
-        .filter(|n| {
-            if let Some(min_c) = query.min_centrality {
-                n.centrality >= min_c
-            } else {
-                true
-            }
-        })
+        .filter(|n| min_centrality.is_none_or(|min_c| n.centrality >= min_c))
         .map(|n| GraphNodeResponse {
             id: n.id,
             kind: n.kind.to_string(),
@@ -65,10 +108,41 @@ pub async fn get_subgraph(
         })
         .collect();
 
-    Json(SubgraphResponse {
+    SubgraphResponse {
         nodes: node_responses,
         edges: edge_responses,
-    })
+    }
+}
+
+pub async fn get_subgraph(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SubgraphQuery>,
+) -> Json<SubgraphResponse> {
+    let max_nodes = query.max_nodes.unwrap_or(1000);
+
+    let kinds: Option<Vec<NodeKind>> = query.kinds.as_deref().map(|k| {
+        k.split(',')
+            .filter_map(|s| s.trim().parse::<NodeKind>().ok())
+            .collect()
+    });
+
+    let min_centrality = query.min_centrality;
+    let namespace = query.namespace.clone();
+
+    let result = state.server.engine.with_graph(|graph| {
+        build_subgraph_response(
+            graph,
+            max_nodes,
+            namespace.as_deref(),
+            kinds.as_deref(),
+            min_centrality,
+        )
+    });
+
+    Json(result.unwrap_or_else(|_| SubgraphResponse {
+        nodes: vec![],
+        edges: vec![],
+    }))
 }
 
 pub async fn get_neighbors(
@@ -77,52 +151,14 @@ pub async fn get_neighbors(
     Query(query): Query<NeighborsQuery>,
 ) -> Result<Json<SubgraphResponse>, StatusCode> {
     let depth = query.depth.unwrap_or(1);
-    let graph = state
+
+    state
         .server
-        .graph()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-
-    let neighbor_nodes = graph.bfs(&id, depth).map_err(|_| StatusCode::NOT_FOUND)?;
-
-    let node_ids: std::collections::HashSet<&str> =
-        neighbor_nodes.iter().map(|n| n.id.as_str()).collect();
-
-    // Get all edges between these nodes
-    let mut edges = Vec::new();
-    let mut seen_edges = std::collections::HashSet::new();
-    for node in &neighbor_nodes {
-        if let Ok(node_edges) = graph.get_edges(&node.id) {
-            for edge in node_edges {
-                if node_ids.contains(edge.src.as_str())
-                    && node_ids.contains(edge.dst.as_str())
-                    && seen_edges.insert(edge.id.clone())
-                {
-                    edges.push(GraphEdgeResponse {
-                        id: edge.id,
-                        src: edge.src,
-                        dst: edge.dst,
-                        relationship: edge.relationship.to_string(),
-                        weight: edge.weight,
-                    });
-                }
-            }
-        }
-    }
-
-    let nodes: Vec<GraphNodeResponse> = neighbor_nodes
-        .into_iter()
-        .map(|n| GraphNodeResponse {
-            id: n.id,
-            kind: n.kind.to_string(),
-            label: n.label,
-            centrality: n.centrality,
-            memory_id: n.memory_id,
-            namespace: n.namespace,
-        })
-        .collect();
-
-    Ok(Json(SubgraphResponse { nodes, edges }))
+        .engine
+        .with_graph(|graph| collect_subgraph(graph, &id, depth))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(Json)
+        .map_err(|_| StatusCode::NOT_FOUND)
 }
 
 pub async fn get_communities(
@@ -130,41 +166,43 @@ pub async fn get_communities(
     Query(query): Query<CommunitiesQuery>,
 ) -> Json<CommunitiesResponse> {
     let resolution = query.resolution.unwrap_or(1.0);
-    let graph = state
-        .server
-        .graph()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let namespace = query.namespace.clone();
 
-    let mut assignment = graph.louvain_with_assignment(resolution);
+    let result = state.server.engine.with_graph(|graph| {
+        let mut assignment = graph.louvain_with_assignment(resolution);
 
-    // Filter by namespace if provided
-    if let Some(ref ns) = query.namespace {
-        let ns_node_ids: std::collections::HashSet<String> = assignment
-            .keys()
-            .filter(|id| {
-                graph
-                    .get_node(id)
-                    .ok()
-                    .flatten()
-                    .and_then(|n| n.namespace)
-                    .as_deref()
-                    == Some(ns.as_str())
-            })
-            .cloned()
-            .collect();
-        assignment.retain(|id, _| ns_node_ids.contains(id));
-    }
+        if let Some(ref ns) = namespace {
+            let ns_node_ids: std::collections::HashSet<String> = assignment
+                .keys()
+                .filter(|id| {
+                    graph
+                        .get_node(id)
+                        .ok()
+                        .flatten()
+                        .and_then(|n| n.namespace)
+                        .as_deref()
+                        == Some(ns.as_str())
+                })
+                .cloned()
+                .collect();
+            assignment.retain(|id, _| ns_node_ids.contains(id));
+        }
 
-    let num_communities = assignment
-        .values()
-        .collect::<std::collections::HashSet<_>>()
-        .len();
+        let num_communities = assignment
+            .values()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
 
-    Json(CommunitiesResponse {
-        communities: assignment,
-        num_communities,
-    })
+        CommunitiesResponse {
+            communities: assignment,
+            num_communities,
+        }
+    });
+
+    Json(result.unwrap_or_else(|_| CommunitiesResponse {
+        communities: std::collections::HashMap::new(),
+        num_communities: 0,
+    }))
 }
 
 pub async fn get_pagerank(
@@ -172,68 +210,65 @@ pub async fn get_pagerank(
     Query(query): Query<PagerankQuery>,
 ) -> Json<PagerankResponse> {
     let top = query.top.unwrap_or(20);
-    let graph = state
-        .server
-        .graph()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let namespace = query.namespace.clone();
 
-    let scores = graph.pagerank(0.85, 100, 1e-6);
+    let result = state.server.engine.with_graph(|graph| {
+        let scores = graph.pagerank(0.85, 100, 1e-6);
 
-    let mut entries: Vec<PagerankEntry> = scores
-        .into_iter()
-        .filter(|(id, _)| {
-            if let Some(ref ns) = query.namespace {
-                graph
-                    .get_node(id)
+        let mut entries: Vec<PagerankEntry> = scores
+            .into_iter()
+            .filter(|(id, _)| {
+                if let Some(ref ns) = namespace {
+                    graph
+                        .get_node(id)
+                        .ok()
+                        .flatten()
+                        .and_then(|n| n.namespace)
+                        .as_deref()
+                        == Some(ns.as_str())
+                } else {
+                    true
+                }
+            })
+            .map(|(id, score)| {
+                let label = graph
+                    .get_node(&id)
                     .ok()
                     .flatten()
-                    .and_then(|n| n.namespace)
-                    .as_deref()
-                    == Some(ns.as_str())
-            } else {
-                true
-            }
-        })
-        .map(|(id, score)| {
-            let label = graph
-                .get_node(&id)
-                .ok()
-                .flatten()
-                .map(|n| n.label.clone())
-                .unwrap_or_else(|| id.clone());
-            PagerankEntry {
-                node_id: id,
-                label,
-                score,
-            }
-        })
-        .collect();
+                    .map(|n| n.label.clone())
+                    .unwrap_or_else(|| id.clone());
+                PagerankEntry {
+                    node_id: id,
+                    label,
+                    score,
+                }
+            })
+            .collect();
 
-    entries.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        entries.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        entries.truncate(top);
+
+        PagerankResponse { scores: entries }
     });
-    entries.truncate(top);
 
-    Json(PagerankResponse { scores: entries })
+    Json(result.unwrap_or_else(|_| PagerankResponse { scores: vec![] }))
 }
 
 pub async fn get_shortest_path(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ShortestPathQuery>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
-    let graph = state
+    state
         .server
-        .graph()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-
-    match graph.shortest_path(&query.from, &query.to) {
-        Ok(path) => Ok(Json(path)),
-        Err(_) => Err(StatusCode::NOT_FOUND),
-    }
+        .engine
+        .with_graph(|graph| graph.shortest_path(&query.from, &query.to))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(Json)
+        .map_err(|_| StatusCode::NOT_FOUND)
 }
 
 pub async fn reload_graph(
@@ -241,16 +276,18 @@ pub async fn reload_graph(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     match state.server.reload_graph() {
         Ok(()) => {
-            let graph = state
+            let result = state
                 .server
-                .graph()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            Ok(Json(serde_json::json!({
-                "status": "ok",
-                "node_count": graph.node_count(),
-                "edge_count": graph.edge_count(),
-            })))
+                .engine
+                .with_graph(|graph| {
+                    serde_json::json!({
+                        "status": "ok",
+                        "node_count": graph.node_count(),
+                        "edge_count": graph.edge_count(),
+                    })
+                })
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            Ok(Json(result))
         }
         Err(e) => {
             tracing::error!("Failed to reload graph: {e}");
@@ -263,52 +300,13 @@ pub async fn get_impact(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<SubgraphResponse>, StatusCode> {
-    let graph = state
+    state
         .server
-        .graph()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-
-    let reachable = graph.bfs(&id, 3).map_err(|_| StatusCode::NOT_FOUND)?;
-
-    let node_ids: std::collections::HashSet<&str> =
-        reachable.iter().map(|n| n.id.as_str()).collect();
-
-    // Collect edges between reachable nodes
-    let mut edges = Vec::new();
-    let mut seen_edges = std::collections::HashSet::new();
-    for node in &reachable {
-        if let Ok(node_edges) = graph.get_edges(&node.id) {
-            for edge in node_edges {
-                if node_ids.contains(edge.src.as_str())
-                    && node_ids.contains(edge.dst.as_str())
-                    && seen_edges.insert(edge.id.clone())
-                {
-                    edges.push(GraphEdgeResponse {
-                        id: edge.id,
-                        src: edge.src,
-                        dst: edge.dst,
-                        relationship: edge.relationship.to_string(),
-                        weight: edge.weight,
-                    });
-                }
-            }
-        }
-    }
-
-    let nodes: Vec<GraphNodeResponse> = reachable
-        .into_iter()
-        .map(|n| GraphNodeResponse {
-            id: n.id,
-            kind: n.kind.to_string(),
-            label: n.label,
-            centrality: n.centrality,
-            memory_id: n.memory_id,
-            namespace: n.namespace,
-        })
-        .collect();
-
-    Ok(Json(SubgraphResponse { nodes, edges }))
+        .engine
+        .with_graph(|graph| collect_subgraph(graph, &id, 3))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(Json)
+        .map_err(|_| StatusCode::NOT_FOUND)
 }
 
 pub async fn get_graph_browse(

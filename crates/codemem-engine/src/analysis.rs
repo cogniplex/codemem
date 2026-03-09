@@ -91,7 +91,12 @@ impl CodememEngine {
         k: usize,
         namespace: Option<&str>,
     ) -> Result<Vec<ImpactResult>, CodememError> {
-        let results = self.recall(query, k, None, namespace, &[], None, None)?;
+        let results = self.recall(&crate::recall::RecallQuery {
+            query,
+            k,
+            namespace_filter: namespace,
+            ..crate::recall::RecallQuery::new(query, k)
+        })?;
 
         if results.is_empty() {
             return Ok(vec![]);
@@ -352,7 +357,7 @@ impl CodememEngine {
                 ];
                 mem.metadata = metadata;
                 mem.namespace = namespace.map(|s| s.to_string());
-                if self.storage.insert_memory(&mem).is_ok() {
+                if self.persist_memory_no_save(&mem).is_ok() {
                     stored_patterns += 1;
                 }
             }

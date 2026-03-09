@@ -6,7 +6,6 @@
 use super::args::parse_string_array;
 use super::types::ToolResult;
 use super::McpServer;
-use codemem_engine::IndexCache;
 use serde_json::{json, Value};
 
 impl McpServer {
@@ -85,15 +84,11 @@ impl McpServer {
 
         let days = args.get("days").and_then(|v| v.as_u64()).unwrap_or(90);
 
-        let mut summary = json!({});
-
-        // Step 1: Index
         let root = std::path::Path::new(path);
         if !root.exists() {
             return ToolResult::tool_error(format!("Path does not exist: {path}"));
         }
 
-        // Namespace: use explicit param, or derive basename from path
         let namespace = args
             .get("namespace")
             .and_then(|v| v.as_str())
@@ -105,66 +100,46 @@ impl McpServer {
                     .to_string()
             });
 
-        let mut indexer = codemem_engine::Indexer::new();
-        let resolved = match indexer.index_and_resolve(root) {
-            Ok(r) => r,
-            Err(e) => return ToolResult::tool_error(format!("Indexing failed: {e}")),
+        let options = codemem_engine::AnalyzeOptions {
+            path: root,
+            namespace: &namespace,
+            git_days: days,
+            change_detector: None,
+            progress: None,
         };
 
-        let persist_result = match self
-            .engine
-            .persist_index_results(&resolved, Some(&namespace))
-        {
-            Ok(r) => r,
-            Err(e) => return ToolResult::tool_error(format!("Persistence failed: {e}")),
-        };
-
-        // Cache results
-        {
-            if let Ok(mut cache) = self.lock_index_cache() {
-                *cache = Some(IndexCache {
-                    symbols: resolved.symbols,
-                    chunks: resolved.chunks,
-                    root_path: path.to_string(),
-                });
-            }
-        }
-
-        summary["index"] = json!({
-            "files_parsed": resolved.index.files_parsed,
-            "symbols": resolved.index.total_symbols,
-            "edges_resolved": persist_result.edges_resolved,
-            "chunks": persist_result.chunks_stored,
-        });
-
-        // Step 2: Enrich (all 14 analyses)
-        let ns_ref = Some(namespace.as_str());
-        let enrichment = self.engine.run_enrichments(path, &[], days, ns_ref, None);
-        summary["enrichment"] = enrichment.results;
-
-        // Step 3: PageRank (top 10)
-        if let Ok(ranked) = self.engine.find_important_nodes(10, 0.85) {
-            let top_nodes: Vec<Value> = ranked
-                .iter()
-                .map(|r| {
-                    json!({
-                        "id": r.id,
-                        "pagerank": format!("{:.6}", r.score),
-                        "kind": r.kind,
-                        "label": r.label,
+        match self.engine.analyze(options) {
+            Ok(result) => {
+                let top_nodes: Vec<Value> = result
+                    .top_nodes
+                    .iter()
+                    .map(|r| {
+                        json!({
+                            "id": r.id,
+                            "pagerank": format!("{:.6}", r.score),
+                            "kind": r.kind,
+                            "label": r.label,
+                        })
                     })
-                })
-                .collect();
-            summary["important_nodes"] = json!(top_nodes);
-        }
+                    .collect();
 
-        // Step 4: Clusters
-        if let Ok(communities) = self.engine.louvain_communities(1.0) {
-            summary["cluster_count"] = json!(communities.len());
-        }
+                let summary = json!({
+                    "index": {
+                        "files_parsed": result.files_parsed,
+                        "symbols": result.symbols_found,
+                        "edges_resolved": result.edges_resolved,
+                        "chunks": result.chunks_stored,
+                    },
+                    "enrichment": result.enrichment_results,
+                    "important_nodes": top_nodes,
+                    "cluster_count": result.community_count,
+                });
 
-        ToolResult::text(
-            serde_json::to_string_pretty(&summary).expect("JSON serialization of literal"),
-        )
+                ToolResult::text(
+                    serde_json::to_string_pretty(&summary).expect("JSON serialization of literal"),
+                )
+            }
+            Err(e) => ToolResult::tool_error(format!("Analysis failed: {e}")),
+        }
     }
 }

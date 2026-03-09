@@ -60,7 +60,7 @@ fn recall_camel_case_query() {
 
     // camelCase query
     let results = engine
-        .recall("processRequest", 5, None, None, &[], None, None)
+        .recall(&crate::recall::RecallQuery::new("processRequest", 5))
         .unwrap();
     assert!(
         !results.is_empty(),
@@ -70,7 +70,7 @@ fn recall_camel_case_query() {
 
     // snake_case query should also match (cross-convention)
     let results2 = engine
-        .recall("process_request", 5, None, None, &[], None, None)
+        .recall(&crate::recall::RecallQuery::new("process_request", 5))
         .unwrap();
     assert!(
         !results2.is_empty(),
@@ -141,7 +141,7 @@ fn betweenness_lazy_compute_on_recall() {
     engine.persist_memory(&mem).unwrap();
 
     let _results = engine
-        .recall("alpha function", 5, None, None, &[], None, None)
+        .recall(&crate::recall::RecallQuery::new("alpha function", 5))
         .unwrap();
 
     // After recall, betweenness should be populated for the bridge node

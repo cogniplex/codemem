@@ -148,15 +148,16 @@ impl McpServer {
             }
         } else {
             // Standard recall
-            match self.engine.recall(
+            let rq = codemem_engine::RecallQuery {
                 query,
                 k,
                 memory_type_filter,
                 namespace_filter,
-                &exclude_tags,
+                exclude_tags: &exclude_tags,
                 min_importance,
                 min_confidence,
-            ) {
+            };
+            match self.engine.recall(&rq) {
                 Ok(results) => format_recall_results(&results, None),
                 Err(e) => ToolResult::tool_error(format!("Recall error: {e}")),
             }

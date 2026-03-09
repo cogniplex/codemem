@@ -245,73 +245,84 @@ impl CodememEngine {
         Ok(())
     }
 
-    // ── A4: Combined Index + Enrich Pipeline ────────────────────────────
+    // ── A4: Unified Analyze Pipeline ────────────────────────────────────
 
-    /// Combined result from `index_and_enrich`.
-    /// Index a codebase and run all enrichment passes in one call.
-    pub fn index_and_enrich(
-        &self,
-        path: &str,
-        namespace: Option<&str>,
-        git_days: u64,
-    ) -> Result<IndexEnrichResult, CodememError> {
-        // 1. Index the codebase
-        let mut indexer = Indexer::new();
-        let index_results = indexer.index_and_resolve(Path::new(path))?;
-        let persist = self.persist_index_results(&index_results, namespace)?;
+    /// Full analysis pipeline: index → persist → enrich → recompute centrality.
+    ///
+    /// This is the single entry point for all callers (CLI, MCP, API).
+    /// Supports incremental indexing via `ChangeDetector`, progress callbacks,
+    /// and returns comprehensive results.
+    pub fn analyze(&self, options: AnalyzeOptions<'_>) -> Result<AnalyzeResult, CodememError> {
+        let root = options.path;
 
-        // 2. Run all enrichment passes, accumulating total insights
-        let root = Path::new(path);
-        let project_root = Some(root);
-        let mut total_insights = 0usize;
+        // 1. Index
+        let mut indexer = match options.change_detector {
+            Some(cd) => Indexer::with_change_detector(cd),
+            None => Indexer::new(),
+        };
+        let resolved = indexer.index_and_resolve(root)?;
 
-        macro_rules! run_enrich {
-            ($label:expr, $call:expr) => {
-                match $call {
-                    Ok(r) => total_insights += r.insights_stored,
-                    Err(e) => tracing::warn!(concat!($label, " enrichment failed: {}"), e),
-                }
-            };
+        // 2. Persist (with or without progress callback)
+        let persist = if let Some(ref on_progress) = options.progress {
+            self.persist_index_results_with_progress(
+                &resolved,
+                Some(options.namespace),
+                |done, total| {
+                    on_progress(AnalyzeProgress::Embedding { done, total });
+                },
+            )?
+        } else {
+            self.persist_index_results(&resolved, Some(options.namespace))?
+        };
+
+        // Cache results for structural queries
+        {
+            if let Ok(mut cache) = self.lock_index_cache() {
+                *cache = Some(crate::IndexCache {
+                    symbols: resolved.symbols,
+                    chunks: resolved.chunks,
+                    root_path: root.to_string_lossy().to_string(),
+                });
+            }
         }
 
-        run_enrich!(
-            "git_history",
-            self.enrich_git_history(path, git_days, namespace)
+        // 3. Enrich
+        let path_str = root.to_str().unwrap_or("");
+        let enrichment = self.run_enrichments(
+            path_str,
+            &[],
+            options.git_days,
+            Some(options.namespace),
+            None,
         );
-        run_enrich!("security", self.enrich_security(namespace));
-        run_enrich!("performance", self.enrich_performance(10, namespace));
-        run_enrich!(
-            "complexity",
-            self.enrich_complexity(namespace, project_root)
-        );
-        run_enrich!("architecture", self.enrich_architecture(namespace));
-        run_enrich!("test_mapping", self.enrich_test_mapping(namespace));
-        run_enrich!("api_surface", self.enrich_api_surface(namespace));
-        run_enrich!("doc_coverage", self.enrich_doc_coverage(namespace));
-        run_enrich!(
-            "code_smells",
-            self.enrich_code_smells(namespace, project_root)
-        );
-        run_enrich!("hot_complex", self.enrich_hot_complex(namespace));
-        run_enrich!("blame", self.enrich_blame(path, namespace));
-        run_enrich!(
-            "security_scan",
-            self.enrich_security_scan(namespace, project_root)
-        );
-        run_enrich!("quality", self.enrich_quality_stratification(namespace));
-        // change_impact is per-file, not included in run_all
 
-        // Recompute centrality after all changes
+        // 4. Recompute centrality
         self.lock_graph()?.recompute_centrality();
 
-        Ok(IndexEnrichResult {
-            files_indexed: persist.files_created,
-            symbols_stored: persist.symbols_stored,
-            chunks_stored: persist.chunks_stored,
+        // 5. Compute summary stats
+        let top_nodes = self.find_important_nodes(10, 0.85).unwrap_or_default();
+        let community_count = self.louvain_communities(1.0).map(|c| c.len()).unwrap_or(0);
+
+        // 6. Save indexes
+        self.save_index();
+
+        // Save incremental state
+        indexer.change_detector().save_to_storage(self.storage())?;
+
+        Ok(AnalyzeResult {
+            files_parsed: resolved.index.files_parsed,
+            files_skipped: resolved.index.files_skipped,
+            symbols_found: resolved.index.total_symbols,
             edges_resolved: persist.edges_resolved,
+            chunks_stored: persist.chunks_stored,
             symbols_embedded: persist.symbols_embedded,
             chunks_embedded: persist.chunks_embedded,
-            total_insights,
+            chunks_pruned: persist.chunks_pruned,
+            symbols_pruned: persist.symbols_pruned,
+            enrichment_results: enrichment.results,
+            total_insights: enrichment.total_insights,
+            top_nodes,
+            community_count,
         })
     }
 
@@ -377,16 +388,37 @@ impl CodememEngine {
 
 // ── Result Types ────────────────────────────────────────────────────────────
 
-/// Combined result from `index_and_enrich`.
+/// Options for the unified `analyze()` pipeline.
+pub struct AnalyzeOptions<'a> {
+    pub path: &'a Path,
+    pub namespace: &'a str,
+    pub git_days: u64,
+    pub change_detector: Option<index::incremental::ChangeDetector>,
+    pub progress: Option<Box<dyn Fn(AnalyzeProgress) + Send + 'a>>,
+}
+
+/// Progress events emitted during analysis.
+#[derive(Debug, Clone)]
+pub enum AnalyzeProgress {
+    Embedding { done: usize, total: usize },
+}
+
+/// Result of the unified `analyze()` pipeline.
 #[derive(Debug)]
-pub struct IndexEnrichResult {
-    pub files_indexed: usize,
-    pub symbols_stored: usize,
-    pub chunks_stored: usize,
+pub struct AnalyzeResult {
+    pub files_parsed: usize,
+    pub files_skipped: usize,
+    pub symbols_found: usize,
     pub edges_resolved: usize,
+    pub chunks_stored: usize,
     pub symbols_embedded: usize,
     pub chunks_embedded: usize,
+    pub chunks_pruned: usize,
+    pub symbols_pruned: usize,
+    pub enrichment_results: serde_json::Value,
     pub total_insights: usize,
+    pub top_nodes: Vec<crate::graph_ops::RankedNode>,
+    pub community_count: usize,
 }
 
 /// Session context synthesized at session start.

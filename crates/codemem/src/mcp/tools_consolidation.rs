@@ -331,16 +331,15 @@ impl McpServer {
     /// MCP tool: session_context -- returns recent memories, pending analyses, active patterns, focus areas.
     pub(crate) fn tool_session_context(&self, args: &Value) -> ToolResult {
         let namespace = args.get("namespace").and_then(|v| v.as_str());
-        let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
-        // Get recent memories
-        let recent_memories: Vec<Value> = self
-            .engine
-            .storage()
-            .list_memories_filtered(namespace, None)
-            .unwrap_or_default()
-            .into_iter()
-            .take(k)
+        let ctx = match self.engine.session_context(namespace) {
+            Ok(ctx) => ctx,
+            Err(e) => return ToolResult::tool_error(format!("Session context error: {e}")),
+        };
+
+        let recent_memories: Vec<Value> = ctx
+            .recent_memories
+            .iter()
             .map(|m| {
                 json!({
                     "id": m.id,
@@ -353,14 +352,9 @@ impl McpServer {
             })
             .collect();
 
-        // Get pending analyses (tagged with pending-analysis)
-        let pending: Vec<Value> = self
-            .engine
-            .storage()
-            .list_memories_filtered(namespace, None)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|m| m.tags.iter().any(|t| t == "pending-analysis"))
+        let pending: Vec<Value> = ctx
+            .pending_analyses
+            .iter()
             .map(|m| {
                 json!({
                     "id": m.id,
@@ -370,25 +364,18 @@ impl McpServer {
             })
             .collect();
 
-        // Get active patterns
-        let total_sessions = self.engine.storage().session_count(namespace).unwrap_or(10);
-        let patterns: Vec<Value> = codemem_engine::patterns::detect_patterns(
-            self.engine.storage(),
-            namespace,
-            2,
-            total_sessions,
-        )
-        .unwrap_or_default()
-        .into_iter()
-        .take(5)
-        .map(|p| {
-            json!({
-                "pattern_type": p.pattern_type.to_string(),
-                "description": p.description,
-                "confidence": p.confidence,
+        let patterns: Vec<Value> = ctx
+            .active_patterns
+            .iter()
+            .take(5)
+            .map(|p| {
+                json!({
+                    "pattern_type": p.pattern_type.to_string(),
+                    "description": p.description,
+                    "confidence": p.confidence,
+                })
             })
-        })
-        .collect();
+            .collect();
 
         ToolResult::text(
             serde_json::to_string_pretty(&json!({

@@ -125,7 +125,7 @@ fn consolidate_creative_creates_edges() {
     server.engine.storage().store_embedding(id1, &emb1).unwrap();
     server.engine.storage().store_embedding(id2, &emb2).unwrap();
     {
-        let mut vec = server.lock_vector().unwrap();
+        let mut vec = server.engine.lock_vector().unwrap();
         let _ = vec.insert(id1, &emb1);
         let _ = vec.insert(id2, &emb2);
     }

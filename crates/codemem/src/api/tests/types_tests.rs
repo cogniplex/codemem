@@ -328,7 +328,12 @@ fn namespace_stats_response_serialization() {
     let resp = NamespaceStatsResponse {
         namespace: "my-ns".to_string(),
         memory_count: 15,
+        avg_importance: 0.7,
+        avg_confidence: 0.9,
         type_distribution: type_dist,
+        tag_frequency: HashMap::new(),
+        oldest: None,
+        newest: None,
     };
 
     let json = serde_json::to_value(&resp).unwrap();
