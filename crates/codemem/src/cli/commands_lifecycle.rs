@@ -2,13 +2,11 @@
 
 use codemem_core::StorageBackend;
 
-/// Derive a short namespace from a working-directory path.
-/// Returns the directory basename (e.g. `/Users/me/project` → `"project"`).
+use super::namespace_from_path;
+
+/// Alias for backwards compatibility within this module.
 fn namespace_from_cwd(cwd: &str) -> &str {
-    std::path::Path::new(cwd)
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or(cwd)
+    namespace_from_path(cwd)
 }
 
 // ── Sessions Commands ─────────────────────────────────────────────────────

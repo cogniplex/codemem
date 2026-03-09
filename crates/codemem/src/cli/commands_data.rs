@@ -180,10 +180,10 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
                 (extracted.content.clone(), false)
             };
 
-        // Use current working directory as namespace
+        // Use directory basename as namespace (not full path)
         let namespace = std::env::current_dir()
             .ok()
-            .map(|p| p.to_string_lossy().to_string());
+            .map(|p| super::namespace_from_path(&p.to_string_lossy()).to_string());
 
         let mut memory = codemem_core::MemoryNode::new(content.clone(), extracted.memory_type);
         let id = memory.id.clone();
@@ -645,7 +645,7 @@ fn flush_batch(
     memory.importance = importance;
     memory.tags = tags;
     memory.metadata = metadata;
-    memory.namespace = Some(watch_dir.to_string_lossy().to_string());
+    memory.namespace = Some(super::namespace_from_path(&watch_dir.to_string_lossy()).to_string());
 
     match engine.persist_memory(&memory) {
         Ok(()) => {
