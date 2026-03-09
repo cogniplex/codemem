@@ -680,3 +680,309 @@ pub struct SessionContext {
     /// Summary text from the most recent session (if any).
     pub last_session_summary: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codemem_core::{Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
+    use std::collections::{HashMap, HashSet};
+
+    /// Create a test engine backed by a temporary database.
+    fn test_engine() -> CodememEngine {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        // Keep the tempdir alive by leaking it (tests are short-lived).
+        let _ = Box::leak(Box::new(dir));
+        CodememEngine::from_db_path(&db_path).unwrap()
+    }
+
+    fn graph_node(id: &str, kind: NodeKind, file_path: Option<&str>) -> GraphNode {
+        let mut payload = HashMap::new();
+        if let Some(fp) = file_path {
+            payload.insert(
+                "file_path".to_string(),
+                serde_json::Value::String(fp.to_string()),
+            );
+        }
+        GraphNode {
+            id: id.to_string(),
+            kind,
+            label: id.to_string(),
+            payload,
+            centrality: 0.0,
+            memory_id: None,
+            namespace: None,
+        }
+    }
+
+    fn edge(src: &str, dst: &str, rel: RelationshipType) -> Edge {
+        Edge {
+            id: format!("{rel}:{src}->{dst}"),
+            src: src.to_string(),
+            dst: dst.to_string(),
+            relationship: rel,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        }
+    }
+
+    // ── cleanup_stale_symbols tests ──────────────────────────────────────
+
+    #[test]
+    fn cleanup_stale_symbols_deletes_stale_nodes() {
+        let engine = test_engine();
+
+        // Set up: file with two symbols, one will become stale
+        let file = graph_node("file:src/a.rs", NodeKind::File, None);
+        let sym_keep = graph_node("sym:a::keep", NodeKind::Function, Some("src/a.rs"));
+        let sym_stale = graph_node("sym:a::stale", NodeKind::Function, Some("src/a.rs"));
+
+        {
+            let mut g = engine.lock_graph().unwrap();
+            g.add_node(file).unwrap();
+            g.add_node(sym_keep.clone()).unwrap();
+            g.add_node(sym_stale.clone()).unwrap();
+            g.add_edge(edge(
+                "file:src/a.rs",
+                "sym:a::keep",
+                RelationshipType::Contains,
+            ))
+            .unwrap();
+            g.add_edge(edge(
+                "file:src/a.rs",
+                "sym:a::stale",
+                RelationshipType::Contains,
+            ))
+            .unwrap();
+        }
+        // Also persist to storage so cleanup can find edges
+        let _ =
+            engine
+                .storage
+                .insert_graph_node(&graph_node("file:src/a.rs", NodeKind::File, None));
+        let _ = engine.storage.insert_graph_node(&sym_keep);
+        let _ = engine.storage.insert_graph_node(&sym_stale);
+        let _ = engine.storage.insert_graph_edge(&edge(
+            "file:src/a.rs",
+            "sym:a::keep",
+            RelationshipType::Contains,
+        ));
+        let _ = engine.storage.insert_graph_edge(&edge(
+            "file:src/a.rs",
+            "sym:a::stale",
+            RelationshipType::Contains,
+        ));
+
+        let old_ids: HashSet<String> = ["sym:a::keep", "sym:a::stale"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let new_ids: HashSet<String> = ["sym:a::keep"].iter().map(|s| s.to_string()).collect();
+
+        let cleaned = engine
+            .cleanup_stale_symbols("src/a.rs", &old_ids, &new_ids)
+            .unwrap();
+        assert_eq!(cleaned, 1);
+
+        // Stale node should be gone from in-memory graph
+        let g = engine.lock_graph().unwrap();
+        assert!(g.get_node("sym:a::stale").unwrap().is_none());
+        assert!(g.get_node("sym:a::keep").unwrap().is_some());
+    }
+
+    #[test]
+    fn cleanup_stale_symbols_redirects_memory_edges_to_graph() {
+        let engine = test_engine();
+
+        let file = graph_node("file:src/a.rs", NodeKind::File, None);
+        let sym_stale = graph_node("sym:a::old_fn", NodeKind::Function, Some("src/a.rs"));
+        let mem = graph_node("mem-uuid-123", NodeKind::Memory, None);
+
+        {
+            let mut g = engine.lock_graph().unwrap();
+            g.add_node(file.clone()).unwrap();
+            g.add_node(sym_stale.clone()).unwrap();
+            g.add_node(mem.clone()).unwrap();
+            g.add_edge(edge(
+                "file:src/a.rs",
+                "sym:a::old_fn",
+                RelationshipType::Contains,
+            ))
+            .unwrap();
+            g.add_edge(edge(
+                "mem-uuid-123",
+                "sym:a::old_fn",
+                RelationshipType::RelatesTo,
+            ))
+            .unwrap();
+        }
+        let _ = engine.storage.insert_graph_node(&file);
+        let _ = engine.storage.insert_graph_node(&sym_stale);
+        let _ = engine.storage.insert_graph_node(&mem);
+        let _ = engine.storage.insert_graph_edge(&edge(
+            "file:src/a.rs",
+            "sym:a::old_fn",
+            RelationshipType::Contains,
+        ));
+        let _ = engine.storage.insert_graph_edge(&edge(
+            "mem-uuid-123",
+            "sym:a::old_fn",
+            RelationshipType::RelatesTo,
+        ));
+
+        let old_ids: HashSet<String> = ["sym:a::old_fn"].iter().map(|s| s.to_string()).collect();
+        let new_ids: HashSet<String> = HashSet::new();
+
+        engine
+            .cleanup_stale_symbols("src/a.rs", &old_ids, &new_ids)
+            .unwrap();
+
+        // The redirected edge should be in the in-memory graph
+        let g = engine.lock_graph().unwrap();
+        let file_edges = g.get_edges("file:src/a.rs").unwrap();
+        let has_redirect = file_edges.iter().any(|e| {
+            (e.src == "mem-uuid-123" || e.dst == "mem-uuid-123") && e.id.contains("-redirected")
+        });
+        assert!(
+            has_redirect,
+            "redirected memory→file edge should be in the in-memory graph"
+        );
+    }
+
+    #[test]
+    fn cleanup_stale_symbols_deduplicates_redirects() {
+        let engine = test_engine();
+
+        let file = graph_node("file:src/a.rs", NodeKind::File, None);
+        let sym1 = graph_node("sym:a::fn1", NodeKind::Function, Some("src/a.rs"));
+        let sym2 = graph_node("sym:a::fn2", NodeKind::Function, Some("src/a.rs"));
+        let mem = graph_node("mem-uuid-456", NodeKind::Memory, None);
+
+        // Same memory linked to two symbols in the same file
+        let _ = engine.storage.insert_graph_node(&file);
+        let _ = engine.storage.insert_graph_node(&sym1);
+        let _ = engine.storage.insert_graph_node(&sym2);
+        let _ = engine.storage.insert_graph_node(&mem);
+        let _ = engine.storage.insert_graph_edge(&edge(
+            "mem-uuid-456",
+            "sym:a::fn1",
+            RelationshipType::RelatesTo,
+        ));
+        let _ = engine.storage.insert_graph_edge(&edge(
+            "mem-uuid-456",
+            "sym:a::fn2",
+            RelationshipType::RelatesTo,
+        ));
+
+        {
+            let mut g = engine.lock_graph().unwrap();
+            g.add_node(file).unwrap();
+            g.add_node(sym1).unwrap();
+            g.add_node(sym2).unwrap();
+            g.add_node(mem).unwrap();
+        }
+
+        let old_ids: HashSet<String> = ["sym:a::fn1", "sym:a::fn2"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let new_ids: HashSet<String> = HashSet::new();
+
+        engine
+            .cleanup_stale_symbols("src/a.rs", &old_ids, &new_ids)
+            .unwrap();
+
+        // Should have exactly one redirect edge, not two
+        let g = engine.lock_graph().unwrap();
+        let file_edges = g.get_edges("file:src/a.rs").unwrap();
+        let redirect_count = file_edges
+            .iter()
+            .filter(|e| e.id.contains("-redirected"))
+            .count();
+        assert_eq!(
+            redirect_count, 1,
+            "should have exactly 1 redirected edge, got {redirect_count}"
+        );
+    }
+
+    // ── detect_orphans tests ─────────────────────────────────────────────
+
+    #[test]
+    fn detect_orphans_skips_file_check_when_no_root() {
+        let engine = test_engine();
+
+        // Add a symbol node with a file path that definitely doesn't exist
+        let sym = graph_node(
+            "sym:nonexistent::fn",
+            NodeKind::Function,
+            Some("does/not/exist.rs"),
+        );
+        let _ = engine.storage.insert_graph_node(&sym);
+        {
+            let mut g = engine.lock_graph().unwrap();
+            g.add_node(sym).unwrap();
+        }
+
+        // With None, should NOT delete the node (skips file existence check)
+        let (symbols_cleaned, _) = engine.detect_orphans(None).unwrap();
+        assert_eq!(
+            symbols_cleaned, 0,
+            "detect_orphans(None) should not delete nodes based on file existence"
+        );
+    }
+
+    #[test]
+    fn detect_orphans_removes_missing_files_with_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let engine = CodememEngine::from_db_path(&db_path).unwrap();
+
+        // Add a symbol whose file doesn't exist under the project root
+        let sym = graph_node(
+            "sym:missing::fn",
+            NodeKind::Function,
+            Some("src/missing.rs"),
+        );
+        let _ = engine.storage.insert_graph_node(&sym);
+        {
+            let mut g = engine.lock_graph().unwrap();
+            g.add_node(sym).unwrap();
+        }
+
+        let (symbols_cleaned, _) = engine.detect_orphans(Some(dir.path())).unwrap();
+        assert_eq!(symbols_cleaned, 1);
+    }
+
+    #[test]
+    fn detect_orphans_keeps_existing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let engine = CodememEngine::from_db_path(&db_path).unwrap();
+
+        // Create the actual file so it won't be orphaned
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("exists.rs"), "fn main() {}").unwrap();
+
+        let sym = graph_node(
+            "sym:exists::main",
+            NodeKind::Function,
+            Some("src/exists.rs"),
+        );
+        let _ = engine.storage.insert_graph_node(&sym);
+        {
+            let mut g = engine.lock_graph().unwrap();
+            g.add_node(sym).unwrap();
+        }
+
+        let (symbols_cleaned, _) = engine.detect_orphans(Some(dir.path())).unwrap();
+        assert_eq!(symbols_cleaned, 0);
+    }
+
+    // Note: dangling edge cleanup in detect_orphans is a defensive no-op
+    // because graph_edges has ON DELETE CASCADE foreign keys on src/dst.
+    // Deleting a node automatically cascades to its edges in SQLite.
+}
