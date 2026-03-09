@@ -1,6 +1,6 @@
 [package]
 name = "codemem"
-version = "0.10.0"
+version = "0.10.1"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ homepage.workspace = true
 readme.workspace = true
 description = "Persistent memory engine for AI coding assistants"
 publish = true
-include = ["src/**", "Cargo.toml", "ui-dist/**"]
+include = ["src/**", "Cargo.toml", "ui-dist/**", "assets/**"]
 
 [features]
 default = []

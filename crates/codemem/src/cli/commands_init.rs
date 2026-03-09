@@ -264,35 +264,35 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         let agent_files: &[(&str, &str)] = &[
             (
                 "code-mapper.md",
-                include_str!("../../../../examples/agents/code-mapper/code-mapper.md"),
+                include_str!("../../assets/agents/code-mapper.md"),
             ),
             (
                 "baseline-scanner.md",
-                include_str!("../../../../examples/agents/code-mapper/baseline-scanner.md"),
+                include_str!("../../assets/agents/baseline-scanner.md"),
             ),
             (
                 "symbol-analyst.md",
-                include_str!("../../../../examples/agents/code-mapper/symbol-analyst.md"),
+                include_str!("../../assets/agents/symbol-analyst.md"),
             ),
             (
                 "api-mapper.md",
-                include_str!("../../../../examples/agents/code-mapper/api-mapper.md"),
+                include_str!("../../assets/agents/api-mapper.md"),
             ),
             (
                 "pattern-hunter.md",
-                include_str!("../../../../examples/agents/code-mapper/pattern-hunter.md"),
+                include_str!("../../assets/agents/pattern-hunter.md"),
             ),
             (
                 "architecture-reviewer.md",
-                include_str!("../../../../examples/agents/code-mapper/architecture-reviewer.md"),
+                include_str!("../../assets/agents/architecture-reviewer.md"),
             ),
             (
                 "security-reviewer.md",
-                include_str!("../../../../examples/agents/code-mapper/security-reviewer.md"),
+                include_str!("../../assets/agents/security-reviewer.md"),
             ),
             (
                 "test-mapper.md",
-                include_str!("../../../../examples/agents/code-mapper/test-mapper.md"),
+                include_str!("../../assets/agents/test-mapper.md"),
             ),
         ];
 
@@ -351,7 +351,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         if skill_path.exists() {
             println!("[skills] codemem skill already installed, skipped");
         } else {
-            let skill_content = include_str!("../../../../examples/skills/codemem/SKILL.md");
+            let skill_content = include_str!("../../assets/skills/SKILL.md");
             std::fs::write(&skill_path, skill_content)?;
             println!("[skills] Installed codemem tool guide → .claude/skills/codemem/SKILL.md");
             status_lines.push("Skill: /codemem tool reference installed".to_string());
