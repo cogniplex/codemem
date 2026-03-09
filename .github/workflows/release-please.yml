@@ -18,13 +18,21 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
-      tag_name: ${{ steps.release.outputs['crates/codemem--tag_name'] }}
+      tag_name: ${{ steps.tag.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      - name: Get latest tag
+        id: tag
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        run: |
+          TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' -R ${{ github.repository }})
+          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   build:
     name: Build (${{ matrix.name }})
