@@ -3,7 +3,7 @@ use codemem_core::{
     CodememError, Edge, GraphBackend, GraphNode, GraphStats, NodeKind, RelationshipType,
 };
 use petgraph::graph::NodeIndex;
-use petgraph::visit::{Bfs, EdgeRef};
+use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -145,27 +145,26 @@ impl GraphBackend for GraphEngine {
 
         let mut visited = HashSet::new();
         let mut result = Vec::new();
-        let mut bfs = Bfs::new(&self.graph, *start_idx);
-        let mut depth_map: HashMap<NodeIndex, usize> = HashMap::new();
-        depth_map.insert(*start_idx, 0);
+        let mut queue: VecDeque<(NodeIndex, usize)> = VecDeque::new();
+        queue.push_back((*start_idx, 0));
+        visited.insert(*start_idx);
 
-        while let Some(node_idx) = bfs.next(&self.graph) {
-            let depth = depth_map.get(&node_idx).copied().unwrap_or(0);
-            if depth > max_depth {
-                continue;
-            }
-
-            if visited.insert(node_idx) {
-                if let Some(node_id) = self.graph.node_weight(node_idx) {
-                    if let Some(node) = self.nodes.get(node_id) {
-                        result.push(node.clone());
-                    }
+        while let Some((node_idx, depth)) = queue.pop_front() {
+            if let Some(node_id) = self.graph.node_weight(node_idx) {
+                if let Some(node) = self.nodes.get(node_id) {
+                    result.push(node.clone());
                 }
             }
 
-            // Set depth for neighbors
-            for neighbor in self.graph.neighbors(node_idx) {
-                depth_map.entry(neighbor).or_insert(depth + 1);
+            if depth >= max_depth {
+                continue;
+            }
+
+            // Traverse edges in both directions so we find parents and children
+            for neighbor in self.graph.neighbors_undirected(node_idx) {
+                if visited.insert(neighbor) {
+                    queue.push_back((neighbor, depth + 1));
+                }
             }
         }
 
@@ -193,7 +192,7 @@ impl GraphBackend for GraphEngine {
                 }
             }
 
-            for neighbor in self.graph.neighbors(node_idx) {
+            for neighbor in self.graph.neighbors_undirected(node_idx) {
                 if !visited.contains(&neighbor) {
                     stack.push((neighbor, depth + 1));
                 }
