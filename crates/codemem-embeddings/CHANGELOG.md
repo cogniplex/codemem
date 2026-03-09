@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.9.1](https://github.com/cogniplex/codemem/compare/v0.9.0...v0.9.1) (2026-03-09)
+
+
+### Bug Fixes
+
+* **ci:** use explicit path+version for internal deps instead of workspace inheritance ([cc3f43c](https://github.com/cogniplex/codemem/commit/cc3f43c82b7eb8593e69b5f78baf5cf6fe5201bb))
+
+
+### Refactoring
+
+* tier 1 quick wins — dead code, wiring, visibility, dedup ([#13](https://github.com/cogniplex/codemem/issues/13)) ([56a469a](https://github.com/cogniplex/codemem/commit/56a469a25ad57a00cfeee6714b76e8c582f33ace))
+
+
+### Miscellaneous
+
+* release main ([#8](https://github.com/cogniplex/codemem/issues/8)) ([c4aad88](https://github.com/cogniplex/codemem/commit/c4aad88782e6c8a53353cd919f7f249331d0d8ed))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.10.0 to 0.10.1
+
 ## [0.9.0](https://github.com/cogniplex/codemem/compare/v0.8.1...v0.9.0) (2026-03-08)
 
 
