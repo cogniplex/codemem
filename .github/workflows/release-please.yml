@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      tag_name: ${{ steps.release.outputs['crates/codemem--tag_name'] }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
