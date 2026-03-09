@@ -218,9 +218,6 @@ impl CodememEngine {
         // Auto-link to code nodes mentioned in content
         self.auto_link_to_code_nodes(&memory.id, &memory.content, links);
 
-        // Persist vector index to disk
-        self.save_index();
-
         Ok(())
     }
 
