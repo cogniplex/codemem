@@ -90,8 +90,8 @@ pub async fn update_memory(
 ) -> Result<Json<MessageResponse>, (StatusCode, Json<MessageResponse>)> {
     let storage = state.server.storage();
 
-    // Check if memory exists
-    match storage.get_memory(&id) {
+    // Check if memory exists (no-touch to avoid bumping access_count on read-only check)
+    match storage.get_memory_no_touch(&id) {
         Ok(Some(_)) => {}
         Ok(None) => {
             return Err((

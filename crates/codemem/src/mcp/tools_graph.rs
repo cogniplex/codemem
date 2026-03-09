@@ -83,7 +83,7 @@ impl McpServer {
                 Err(e) => return ToolResult::tool_error(format!("Stats error: {e}")),
             };
 
-            let vector_stats = match self.lock_vector() {
+            let vector_stats = match self.engine.lock_vector() {
                 Ok(v) => v.stats(),
                 Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
             };
@@ -92,7 +92,7 @@ impl McpServer {
                 Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
             };
 
-            let cache_info = match self.lock_embeddings() {
+            let cache_info = match self.engine.lock_embeddings() {
                 Ok(Some(emb)) => {
                     let (size, cap) = emb.cache_stats();
                     Some(json!({"size": size, "capacity": cap}))
@@ -193,7 +193,7 @@ impl McpServer {
 
         // Cache results for structural queries
         {
-            match self.lock_index_cache() {
+            match self.engine.lock_index_cache() {
                 Ok(mut cache) => {
                     *cache = Some(IndexCache {
                         symbols: resolved.symbols,
@@ -575,7 +575,7 @@ impl McpServer {
         let scan_root = match path {
             Some(p) => std::path::PathBuf::from(p),
             None => {
-                let cache = match self.lock_index_cache() {
+                let cache = match self.engine.lock_index_cache() {
                     Ok(c) => c,
                     Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
                 };

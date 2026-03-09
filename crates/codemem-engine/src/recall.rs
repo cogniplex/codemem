@@ -536,24 +536,13 @@ impl CodememEngine {
         let mut bm25 = self.lock_bm25()?;
 
         for id in &ids {
-            // Delete memory from storage
-            if let Ok(true) = self.storage.delete_memory(id) {
+            // Use cascade delete: atomic transaction deleting memory + graph + embedding from SQLite
+            if let Ok(true) = self.storage.delete_memory_cascade(id) {
                 deleted += 1;
 
-                // Remove from vector index
+                // Remove from in-memory indexes
                 let _ = vector.remove(id);
-
-                // Remove from in-memory graph
                 let _ = graph.remove_node(id);
-
-                // Remove graph node and edges from SQLite
-                let _ = self.storage.delete_graph_edges_for_node(id);
-                let _ = self.storage.delete_graph_node(id);
-
-                // Remove embedding from SQLite
-                let _ = self.storage.delete_embedding(id);
-
-                // Remove from BM25 index
                 bm25.remove_document(id);
             }
         }

@@ -2,6 +2,30 @@ use crate::CodememEngine;
 use codemem_core::{GraphBackend, GraphNode, NodeKind, RelationshipType};
 use std::collections::{HashMap, HashSet};
 
+// ── Chunk compaction weights ────────────────────────────────────────────────
+// Normal weights (when memories exist):
+const CHUNK_W_CENTRALITY: f64 = 0.3;
+const CHUNK_W_PARENT: f64 = 0.2;
+const CHUNK_W_MEMORY: f64 = 0.3;
+const CHUNK_W_SIZE: f64 = 0.2;
+// Cold-start weights (no memories → redistribute memory weight):
+const CHUNK_COLD_W_CENTRALITY: f64 = 0.4;
+const CHUNK_COLD_W_PARENT: f64 = 0.3;
+const CHUNK_COLD_W_SIZE: f64 = 0.3;
+
+// ── Symbol compaction weights ───────────────────────────────────────────────
+// Normal weights:
+const SYM_W_CALLS: f64 = 0.30;
+const SYM_W_VISIBILITY: f64 = 0.20;
+const SYM_W_KIND: f64 = 0.15;
+const SYM_W_MEMORY: f64 = 0.20;
+const SYM_W_SIZE: f64 = 0.15;
+// Cold-start weights:
+const SYM_COLD_W_CALLS: f64 = 0.40;
+const SYM_COLD_W_VISIBILITY: f64 = 0.20;
+const SYM_COLD_W_KIND: f64 = 0.15;
+const SYM_COLD_W_SIZE: f64 = 0.25;
+
 /// Check whether a graph node has any edge linking it to a memory node
 /// (i.e. an edge whose other endpoint is not a code-structural ID).
 fn has_memory_link_edge(graph: &dyn GraphBackend, node_id: &str) -> bool {
@@ -70,10 +94,20 @@ impl CodememEngine {
             .map(|ids| !ids.is_empty())
             .unwrap_or(false);
         let (w_centrality, w_parent, w_memory, w_size) = if has_memories {
-            (0.3, 0.2, 0.3, 0.2)
+            (
+                CHUNK_W_CENTRALITY,
+                CHUNK_W_PARENT,
+                CHUNK_W_MEMORY,
+                CHUNK_W_SIZE,
+            )
         } else {
-            // Redistribute memory_link weight: centrality 0.4, parent 0.3, memory 0.0, size 0.3
-            (0.4, 0.3, 0.0, 0.3)
+            // Redistribute memory_link weight when no memories exist
+            (
+                CHUNK_COLD_W_CENTRALITY,
+                CHUNK_COLD_W_PARENT,
+                0.0,
+                CHUNK_COLD_W_SIZE,
+            )
         };
 
         let mut chunks_by_file: HashMap<String, Vec<(String, f64)>> = HashMap::new();
@@ -261,10 +295,22 @@ impl CodememEngine {
             .map(|ids| !ids.is_empty())
             .unwrap_or(false);
         let (w_calls, w_vis, w_kind, w_mem, w_size) = if has_memories {
-            (0.30, 0.20, 0.15, 0.20, 0.15)
+            (
+                SYM_W_CALLS,
+                SYM_W_VISIBILITY,
+                SYM_W_KIND,
+                SYM_W_MEMORY,
+                SYM_W_SIZE,
+            )
         } else {
             // Redistribute memory weight to calls and code size
-            (0.40, 0.20, 0.15, 0.0, 0.25)
+            (
+                SYM_COLD_W_CALLS,
+                SYM_COLD_W_VISIBILITY,
+                SYM_COLD_W_KIND,
+                0.0,
+                SYM_COLD_W_SIZE,
+            )
         };
 
         let sym_nodes: Vec<&GraphNode> = all_nodes

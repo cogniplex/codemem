@@ -5,6 +5,24 @@ use chrono::{DateTime, Utc};
 use codemem_core::{MemoryNode, ScoreBreakdown};
 use codemem_storage::graph::GraphEngine;
 
+// ── Code-graph sub-weights for `graph_strength_for_memory` ──────────────────
+
+/// Weight for PageRank in code-graph scoring.
+const CODE_GRAPH_W_PAGERANK: f64 = 0.4;
+/// Weight for betweenness centrality in code-graph scoring.
+const CODE_GRAPH_W_BETWEENNESS: f64 = 0.3;
+/// Weight for connectivity (degree / 5.0) in code-graph scoring.
+const CODE_GRAPH_W_CONNECTIVITY: f64 = 0.2;
+/// Weight for average edge weight in code-graph scoring.
+const CODE_GRAPH_W_EDGE_WEIGHT: f64 = 0.1;
+
+// ── Temporal decay constants ────────────────────────────────────────────────
+
+/// Half-life for temporal decay (hours). Updated-at age decays over 30 days.
+const TEMPORAL_DECAY_HOURS: f64 = 30.0 * 24.0;
+/// Half-life for recency decay (hours). Last-access age decays over 7 days.
+const RECENCY_DECAY_HOURS: f64 = 7.0 * 24.0;
+
 /// Compute graph strength for a memory node by combining raw graph metrics.
 ///
 /// Blends two signal sources:
@@ -24,10 +42,10 @@ pub fn graph_strength_for_memory(graph: &GraphEngine, memory_id: &str) -> f64 {
     let code_score = if metrics.code_neighbor_count > 0 {
         let connectivity = (metrics.code_neighbor_count as f64 / 5.0).min(1.0);
         let avg_edge_w = (metrics.total_edge_weight / metrics.code_neighbor_count as f64).min(1.0);
-        0.4 * metrics.max_pagerank
-            + 0.3 * metrics.max_betweenness
-            + 0.2 * connectivity
-            + 0.1 * avg_edge_w
+        CODE_GRAPH_W_PAGERANK * metrics.max_pagerank
+            + CODE_GRAPH_W_BETWEENNESS * metrics.max_betweenness
+            + CODE_GRAPH_W_CONNECTIVITY * connectivity
+            + CODE_GRAPH_W_EDGE_WEIGHT * avg_edge_w
     } else {
         0.0
     };
@@ -90,7 +108,7 @@ pub fn compute_score(
 
     // Temporal: how recently updated (exponential decay over 30 days)
     let age_hours = (now - memory.updated_at).num_hours().max(0) as f64;
-    let temporal = (-age_hours / (30.0 * 24.0)).exp();
+    let temporal = (-age_hours / TEMPORAL_DECAY_HOURS).exp();
 
     // Tag matching: fraction of query tokens found in tags.
     // Per-memory `tags.join().to_lowercase()` is O(tags) which is typically <10 strings,
@@ -108,7 +126,7 @@ pub fn compute_score(
 
     // Recency: based on last access time (decay over 7 days)
     let access_hours = (now - memory.last_accessed_at).num_hours().max(0) as f64;
-    let recency = (-access_hours / (7.0 * 24.0)).exp();
+    let recency = (-access_hours / RECENCY_DECAY_HOURS).exp();
 
     // Enhanced graph scoring: bridge memory UUIDs to code-graph centrality.
     // Memory nodes live in a separate ID space from code nodes (sym:, file:),

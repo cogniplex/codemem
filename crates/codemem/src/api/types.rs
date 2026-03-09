@@ -251,7 +251,14 @@ pub struct NamespaceItem {
 pub struct NamespaceStatsResponse {
     pub namespace: String,
     pub memory_count: usize,
+    pub avg_importance: f64,
+    pub avg_confidence: f64,
     pub type_distribution: HashMap<String, usize>,
+    pub tag_frequency: HashMap<String, usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub newest: Option<String>,
 }
 
 // ── Repos ───────────────────────────────────────────────────────────────────

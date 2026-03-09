@@ -7,7 +7,6 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use std::collections::HashMap;
 use std::sync::Arc;
 
 pub async fn list_namespaces(State(state): State<Arc<AppState>>) -> Json<Vec<NamespaceItem>> {
@@ -35,24 +34,21 @@ pub async fn get_namespace_stats(
     State(state): State<Arc<AppState>>,
     Path(ns): Path<String>,
 ) -> Result<Json<NamespaceStatsResponse>, StatusCode> {
-    let storage = state.server.storage();
-
-    let memories = storage
-        .list_memories_filtered(Some(&ns), None)
+    let stats = state
+        .server
+        .engine
+        .namespace_stats(&ns)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let memory_count = memories.len();
-    let mut type_distribution: HashMap<String, usize> = HashMap::new();
-    for m in &memories {
-        *type_distribution
-            .entry(m.memory_type.to_string())
-            .or_insert(0) += 1;
-    }
-
     Ok(Json(NamespaceStatsResponse {
-        namespace: ns,
-        memory_count,
-        type_distribution,
+        namespace: stats.namespace,
+        memory_count: stats.count,
+        avg_importance: stats.avg_importance,
+        avg_confidence: stats.avg_confidence,
+        type_distribution: stats.type_distribution,
+        tag_frequency: stats.tag_frequency,
+        oldest: stats.oldest.map(|d| d.to_rfc3339()),
+        newest: stats.newest.map(|d| d.to_rfc3339()),
     }))
 }
 

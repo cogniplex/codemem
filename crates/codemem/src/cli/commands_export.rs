@@ -23,7 +23,7 @@ pub(crate) fn cmd_export(
     let mut records: Vec<serde_json::Value> = Vec::new();
 
     for id in &ids {
-        if let Some(memory) = storage.get_memory(id)? {
+        if let Some(memory) = storage.get_memory_no_touch(id)? {
             if let Some(ref filter_type) = memory_type_filter {
                 if memory.memory_type != *filter_type {
                     continue;

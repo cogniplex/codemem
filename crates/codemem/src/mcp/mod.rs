@@ -17,12 +17,9 @@
 
 use codemem_core::{CodememError, MemoryType, StorageBackend};
 use codemem_engine::CodememEngine;
-use codemem_engine::GraphEngine;
-use codemem_engine::HnswIndex;
 use serde_json::{json, Value};
 use std::io::{self, BufRead};
 use std::path::Path;
-use std::sync::Mutex;
 
 pub(crate) mod args;
 mod definitions;
@@ -41,9 +38,7 @@ pub(crate) mod test_helpers;
 // Re-export public types for downstream consumers.
 pub use types::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, ToolContent, ToolResult};
 
-use codemem_engine::bm25;
 use codemem_engine::metrics;
-use codemem_engine::IndexCache;
 
 use scoring::write_response;
 
@@ -62,8 +57,8 @@ impl McpServer {
     /// Create a server with storage, vector, graph, and optional embeddings backends.
     pub fn new(
         storage: Box<dyn StorageBackend>,
-        vector: HnswIndex,
-        graph: GraphEngine,
+        vector: codemem_engine::HnswIndex,
+        graph: codemem_engine::GraphEngine,
         embeddings: Option<Box<dyn codemem_engine::EmbeddingProvider>>,
     ) -> Self {
         Self {
@@ -92,31 +87,7 @@ impl McpServer {
         }
     }
 
-    // ── Delegate Lock Helpers ────────────────────────────────────────────────
-    // Thin wrappers so tool modules can still call self.lock_graph() etc.
-
-    pub(crate) fn lock_vector(&self) -> Result<std::sync::MutexGuard<'_, HnswIndex>, CodememError> {
-        self.engine.lock_vector()
-    }
-
-    pub fn lock_graph(&self) -> Result<std::sync::MutexGuard<'_, GraphEngine>, CodememError> {
-        self.engine.lock_graph()
-    }
-
-    pub(crate) fn lock_embeddings(
-        &self,
-    ) -> Result<
-        Option<std::sync::MutexGuard<'_, Box<dyn codemem_engine::EmbeddingProvider>>>,
-        CodememError,
-    > {
-        self.engine.lock_embeddings()
-    }
-
-    pub(crate) fn lock_index_cache(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, Option<IndexCache>>, CodememError> {
-        self.engine.lock_index_cache()
-    }
+    // ── Delegate Accessors ─────────────────────────────────────────────────
 
     /// Core recall logic: delegates to `CodememEngine::recall()`.
     /// Used by the REST API layer and consolidation tools.
@@ -142,26 +113,8 @@ impl McpServer {
         )
     }
 
-    // ── Public Accessors (for REST API layer) ─────────────────────────────
-
     pub fn storage(&self) -> &dyn StorageBackend {
         self.engine.storage()
-    }
-
-    pub fn graph(&self) -> &Mutex<GraphEngine> {
-        self.engine.graph_mutex()
-    }
-
-    pub fn vector(&self) -> &Mutex<HnswIndex> {
-        self.engine.vector_mutex()
-    }
-
-    pub fn embeddings(&self) -> Option<&Mutex<Box<dyn codemem_engine::EmbeddingProvider>>> {
-        self.engine.embeddings_mutex()
-    }
-
-    pub fn bm25(&self) -> &Mutex<bm25::Bm25Index> {
-        self.engine.bm25_mutex()
     }
 
     pub fn reload_graph(&self) -> Result<(), CodememError> {

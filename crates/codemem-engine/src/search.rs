@@ -185,8 +185,8 @@ impl CodememEngine {
         }
 
         let mut output = Vec::new();
-        for (id, distance) in &raw_results {
-            let similarity = 1.0 - *distance as f64;
+        for (id, similarity_value) in &raw_results {
+            let similarity = *similarity_value as f64;
             if let Ok(Some(node)) = self.storage.get_graph_node(id) {
                 if id.starts_with("chunk:") {
                     output.push(CodeSearchResult {

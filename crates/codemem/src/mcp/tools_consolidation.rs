@@ -331,73 +331,60 @@ impl McpServer {
     /// MCP tool: session_context -- returns recent memories, pending analyses, active patterns, focus areas.
     pub(crate) fn tool_session_context(&self, args: &Value) -> ToolResult {
         let namespace = args.get("namespace").and_then(|v| v.as_str());
-        let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
-        // Get recent memories
-        let recent_memories: Vec<Value> = self
-            .engine
-            .storage()
-            .list_memories_filtered(namespace, None)
-            .unwrap_or_default()
-            .into_iter()
-            .take(k)
-            .map(|m| {
-                json!({
-                    "id": m.id,
-                    "content": m.content,
-                    "memory_type": m.memory_type.to_string(),
-                    "importance": m.importance,
-                    "tags": m.tags,
-                    "created_at": m.created_at.to_rfc3339(),
-                })
-            })
-            .collect();
+        match self.engine.session_context(namespace) {
+            Ok(ctx) => {
+                let recent_memories: Vec<Value> = ctx
+                    .recent_memories
+                    .iter()
+                    .map(|m| {
+                        json!({
+                            "id": m.id,
+                            "content": m.content,
+                            "memory_type": m.memory_type.to_string(),
+                            "importance": m.importance,
+                            "tags": m.tags,
+                            "created_at": m.created_at.to_rfc3339(),
+                        })
+                    })
+                    .collect();
 
-        // Get pending analyses (tagged with pending-analysis)
-        let pending: Vec<Value> = self
-            .engine
-            .storage()
-            .list_memories_filtered(namespace, None)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|m| m.tags.iter().any(|t| t == "pending-analysis"))
-            .map(|m| {
-                json!({
-                    "id": m.id,
-                    "content": m.content,
-                    "tags": m.tags,
-                })
-            })
-            .collect();
+                let pending: Vec<Value> = ctx
+                    .pending_analyses
+                    .iter()
+                    .map(|m| {
+                        json!({
+                            "id": m.id,
+                            "content": m.content,
+                            "tags": m.tags,
+                        })
+                    })
+                    .collect();
 
-        // Get active patterns
-        let total_sessions = self.engine.storage().session_count(namespace).unwrap_or(10);
-        let patterns: Vec<Value> = codemem_engine::patterns::detect_patterns(
-            self.engine.storage(),
-            namespace,
-            2,
-            total_sessions,
-        )
-        .unwrap_or_default()
-        .into_iter()
-        .take(5)
-        .map(|p| {
-            json!({
-                "pattern_type": p.pattern_type.to_string(),
-                "description": p.description,
-                "confidence": p.confidence,
-            })
-        })
-        .collect();
+                let patterns: Vec<Value> = ctx
+                    .active_patterns
+                    .iter()
+                    .take(5)
+                    .map(|p| {
+                        json!({
+                            "pattern_type": p.pattern_type.to_string(),
+                            "description": p.description,
+                            "confidence": p.confidence,
+                        })
+                    })
+                    .collect();
 
-        ToolResult::text(
-            serde_json::to_string_pretty(&json!({
-                "recent_memories": recent_memories,
-                "pending_analyses": pending,
-                "active_patterns": patterns,
-            }))
-            .expect("JSON serialization of literal"),
-        )
+                ToolResult::text(
+                    serde_json::to_string_pretty(&json!({
+                        "recent_memories": recent_memories,
+                        "pending_analyses": pending,
+                        "active_patterns": patterns,
+                    }))
+                    .expect("JSON serialization of literal"),
+                )
+            }
+            Err(e) => ToolResult::tool_error(format!("Session context error: {e}")),
+        }
     }
 }
 
