@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.4](https://github.com/cogniplex/codemem/compare/v0.10.3...v0.10.4) (2026-03-09)
+
+
+### Bug Fixes
+
+* use directory basename as namespace instead of full path ([#23](https://github.com/cogniplex/codemem/issues/23)) ([99cb532](https://github.com/cogniplex/codemem/commit/99cb53275d675f0f9edaea5ae708f900cb819355))
+
 ## [0.10.3](https://github.com/cogniplex/codemem/compare/v0.10.2...v0.10.3) (2026-03-09)
 
 
