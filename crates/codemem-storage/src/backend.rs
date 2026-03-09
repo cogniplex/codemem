@@ -641,7 +641,7 @@ impl StorageBackend for Storage {
         namespace: Option<&str>,
         limit: usize,
     ) -> Result<Vec<MemoryNode>, CodememError> {
-        self.list_memories_by_tag(tag, namespace, limit)
+        Storage::list_memories_by_tag(self, tag, namespace, limit)
     }
 
     fn list_memories_filtered(
@@ -728,19 +728,19 @@ impl StorageBackend for Storage {
     // ── Repository Management ────────────────────────────────────────
 
     fn list_repos(&self) -> Result<Vec<Repository>, CodememError> {
-        self.list_repos()
+        Storage::list_repos(self)
     }
 
     fn add_repo(&self, repo: &Repository) -> Result<(), CodememError> {
-        self.add_repo(repo)
+        Storage::add_repo(self, repo)
     }
 
     fn get_repo(&self, id: &str) -> Result<Option<Repository>, CodememError> {
-        self.get_repo(id)
+        Storage::get_repo(self, id)
     }
 
     fn remove_repo(&self, id: &str) -> Result<bool, CodememError> {
-        self.remove_repo(id)
+        Storage::remove_repo(self, id)
     }
 
     fn update_repo_status(
@@ -749,7 +749,7 @@ impl StorageBackend for Storage {
         status: &str,
         indexed_at: Option<&str>,
     ) -> Result<(), CodememError> {
-        self.update_repo_status(id, status, indexed_at)
+        Storage::update_repo_status(self, id, status, indexed_at)
     }
 }
 
