@@ -103,6 +103,10 @@ impl CodememEngine {
     ///
     /// `project_root` is used to relativize the absolute `path` so node IDs are
     /// portable. If `None`, the path is stored as-is (absolute).
+    ///
+    /// Uses SHA-256 hash dedup to skip re-indexing when content is unchanged.
+    /// This prevents duplicate work when both the PostToolUse hook and the
+    /// background file watcher fire for the same edit.
     fn index_single_file(
         &self,
         path: &Path,
@@ -119,6 +123,27 @@ impl CodememEngine {
         } else {
             path.to_string_lossy().to_string()
         };
+
+        // SHA-256 dedup: skip if content unchanged since last index.
+        // Uses cached ChangeDetector to avoid reloading all hashes from storage per file.
+        let hash = {
+            let mut cd_guard = self
+                .change_detector
+                .lock()
+                .map_err(|_| CodememError::LockPoisoned("change_detector".into()))?;
+            let cd = cd_guard.get_or_insert_with(|| {
+                let mut cd = index::incremental::ChangeDetector::new();
+                cd.load_from_storage(&*self.storage);
+                cd
+            });
+            let (changed, hash) = cd.check_changed(&path_str, &content);
+            if !changed {
+                tracing::debug!("Skipping unchanged file: {path_str}");
+                return Ok(());
+            }
+            hash
+        };
+
         let parser = index::CodeParser::new();
 
         let parse_result = match parser.parse_file(&path_str, &content) {
@@ -155,7 +180,119 @@ impl CodememEngine {
         };
 
         self.persist_index_results(&results, namespace)?;
+
+        // Record new hash in the cached detector after successful persist
+        if let Ok(mut cd_guard) = self.change_detector.lock() {
+            if let Some(cd) = cd_guard.as_mut() {
+                cd.record_hash(&path_str, hash);
+                if let Err(e) = cd.save_to_storage(&*self.storage) {
+                    tracing::warn!("Failed to save file hash for {path_str}: {e}");
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    // ── A2b: Symbol-Level Diff on Re-index ────────────────────────────
+
+    /// Remove symbols that existed for a file before re-indexing but are no
+    /// longer present in the new parse results. Returns count of cleaned symbols.
+    ///
+    /// For code→code edges (CALLS, IMPORTS, etc.), performs a hard delete.
+    /// For memory→symbol edges, creates a live redirected edge pointing to the
+    /// parent file node, preserving the memory→file connection so recall can
+    /// still traverse it. The original edge is then deleted along with the
+    /// stale symbol node.
+    ///
+    /// `old_symbol_ids` should be the set of symbol IDs that existed for this
+    /// file before re-indexing (collected from the in-memory graph by the caller
+    /// in a single pass across all files).
+    pub fn cleanup_stale_symbols(
+        &self,
+        file_path: &str,
+        old_symbol_ids: &HashSet<String>,
+        new_symbol_ids: &HashSet<String>,
+    ) -> Result<usize, CodememError> {
+        // Compute stale set: symbols that existed before but are not in the new parse
+        let stale_ids: Vec<&String> = old_symbol_ids
+            .iter()
+            .filter(|id| !new_symbol_ids.contains(*id))
+            .collect();
+
+        if stale_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let count = stale_ids.len();
+        tracing::info!(
+            "Cleaning up {count} stale symbols for {file_path}: {:?}",
+            stale_ids
+        );
+
+        let file_node_id = format!("file:{file_path}");
+        for sym_id in &stale_ids {
+            // Before deleting the symbol, redirect memory→symbol edges to the
+            // parent file node with valid_to set, preserving historical context.
+            // Memory node IDs are UUIDs (no known prefix like sym:/file:/chunk:).
+            let edges = self.storage.get_edges_for_node(sym_id.as_str())?;
+            for edge in &edges {
+                let other = if edge.src.as_str() == sym_id.as_str() {
+                    &edge.dst
+                } else {
+                    &edge.src
+                };
+                let is_code_node = other.starts_with("sym:")
+                    || other.starts_with("file:")
+                    || other.starts_with("chunk:")
+                    || other.starts_with("pkg:");
+                if !is_code_node {
+                    let mut redirected = edge.clone();
+                    if redirected.src.as_str() == sym_id.as_str() {
+                        redirected.src = file_node_id.clone();
+                    } else {
+                        redirected.dst = file_node_id.clone();
+                    }
+                    // Don't set valid_to — the redirect should be a live,
+                    // queryable edge so recall can still traverse memory→file.
+                    redirected.id = format!("{}-redirected", edge.id);
+                    if let Err(e) = self.storage.insert_graph_edge(&redirected) {
+                        tracing::warn!("Failed to redirect memory edge {}: {e}", edge.id);
+                    }
+                }
+            }
+
+            // Delete all edges and the node itself
+            if let Err(e) = self.storage.delete_graph_edges_for_node(sym_id) {
+                tracing::warn!("Failed to delete edges for stale symbol {sym_id}: {e}");
+            }
+            if let Err(e) = self.storage.delete_graph_node(sym_id) {
+                tracing::warn!("Failed to delete stale symbol node {sym_id}: {e}");
+            }
+            if let Err(e) = self.storage.delete_embedding(sym_id) {
+                tracing::warn!("Failed to delete embedding for stale symbol {sym_id}: {e}");
+            }
+        }
+
+        // Clean up in-memory graph and vector index
+        {
+            let mut graph = self.lock_graph()?;
+            for sym_id in &stale_ids {
+                if let Err(e) = graph.remove_node(sym_id.as_str()) {
+                    tracing::warn!("Failed to remove stale {sym_id} from in-memory graph: {e}");
+                }
+            }
+        }
+        {
+            let mut vec = self.lock_vector()?;
+            for sym_id in &stale_ids {
+                if let Err(e) = vec.remove(sym_id.as_str()) {
+                    tracing::warn!("Failed to remove stale {sym_id} from vector index: {e}");
+                }
+            }
+        }
+
+        Ok(count)
     }
 
     // ── A3: File Deletion Cleanup ───────────────────────────────────────
@@ -243,6 +380,97 @@ impl CodememEngine {
 
         self.save_index();
         Ok(())
+    }
+
+    // ── A3b: Orphan Detection ─────────────────────────────────────────
+
+    /// Scan for orphaned symbol/chunk nodes whose files no longer exist on disk.
+    /// Also cleans up dangling edges (src or dst node doesn't exist).
+    /// Returns `(symbols_cleaned, edges_cleaned)`.
+    pub fn detect_orphans(
+        &self,
+        project_root: Option<&Path>,
+    ) -> Result<(usize, usize), CodememError> {
+        // Use storage for both nodes and edges to avoid in-memory/storage sync races.
+        let all_nodes = self.storage.all_graph_nodes()?;
+        let node_ids: HashSet<String> = all_nodes.iter().map(|n| n.id.clone()).collect();
+
+        let mut orphan_sym_ids: Vec<String> = Vec::new();
+
+        for node in &all_nodes {
+            if !node.id.starts_with("sym:") && !node.id.starts_with("chunk:") {
+                continue;
+            }
+            let file_path = match node.payload.get("file_path").and_then(|v| v.as_str()) {
+                Some(fp) => fp,
+                None => continue,
+            };
+            let abs_path = match project_root {
+                Some(root) => root.join(file_path),
+                None => std::path::PathBuf::from(file_path),
+            };
+            if !abs_path.exists() {
+                orphan_sym_ids.push(node.id.clone());
+            }
+        }
+
+        // Also find dangling edges (src or dst doesn't exist in graph)
+        let all_edges = self.storage.all_graph_edges()?;
+        let mut dangling_edge_ids: Vec<String> = Vec::new();
+        for edge in &all_edges {
+            if !node_ids.contains(&edge.src) || !node_ids.contains(&edge.dst) {
+                dangling_edge_ids.push(edge.id.clone());
+            }
+        }
+
+        let symbols_cleaned = orphan_sym_ids.len();
+
+        // Clean up orphan nodes
+        for sym_id in &orphan_sym_ids {
+            if let Err(e) = self.storage.delete_graph_edges_for_node(sym_id) {
+                tracing::warn!("Orphan cleanup: failed to delete edges for {sym_id}: {e}");
+            }
+            if let Err(e) = self.storage.delete_graph_node(sym_id) {
+                tracing::warn!("Orphan cleanup: failed to delete node {sym_id}: {e}");
+            }
+            if let Err(e) = self.storage.delete_embedding(sym_id) {
+                tracing::warn!("Orphan cleanup: failed to delete embedding {sym_id}: {e}");
+            }
+        }
+
+        // Clean up orphan nodes from in-memory graph + vector
+        if !orphan_sym_ids.is_empty() {
+            if let Ok(mut graph) = self.lock_graph() {
+                for sym_id in &orphan_sym_ids {
+                    let _ = graph.remove_node(sym_id);
+                }
+            }
+            if let Ok(mut vec) = self.lock_vector() {
+                for sym_id in &orphan_sym_ids {
+                    let _ = vec.remove(sym_id);
+                }
+            }
+        }
+
+        // Delete dangling edges that weren't already removed by node cleanup
+        let mut edges_cleaned = 0usize;
+        for edge_id in &dangling_edge_ids {
+            match self.storage.delete_graph_edge(edge_id) {
+                Ok(true) => edges_cleaned += 1,
+                Ok(false) => {} // Already deleted by node cleanup above
+                Err(e) => {
+                    tracing::warn!("Orphan cleanup: failed to delete dangling edge {edge_id}: {e}");
+                }
+            }
+        }
+
+        if symbols_cleaned > 0 || edges_cleaned > 0 {
+            tracing::info!(
+                "Orphan scan: cleaned {symbols_cleaned} symbol/chunk nodes, {edges_cleaned} dangling edges"
+            );
+        }
+
+        Ok((symbols_cleaned, edges_cleaned))
     }
 
     // ── A4: Unified Analyze Pipeline ────────────────────────────────────

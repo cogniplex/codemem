@@ -169,9 +169,9 @@ impl StorageBackend for Storage {
     delegate_storage!(insert_graph_edge(&self, edge: &Edge) -> Result<(), CodememError>);
     delegate_storage!(get_edges_for_node(&self, node_id: &str) -> Result<Vec<Edge>, CodememError>);
     delegate_storage!(all_graph_edges(&self) -> Result<Vec<Edge>, CodememError>);
+    delegate_storage!(delete_graph_edge(&self, edge_id: &str) -> Result<bool, CodememError>);
     delegate_storage!(delete_graph_edges_for_node(&self, node_id: &str) -> Result<usize, CodememError>);
     delegate_storage!(delete_graph_nodes_by_prefix(&self, prefix: &str) -> Result<usize, CodememError>);
-
     // ── Sessions (delegated where possible) ───────────────────────────
 
     delegate_storage!(start_session(&self, id: &str, namespace: Option<&str>) -> Result<(), CodememError>);

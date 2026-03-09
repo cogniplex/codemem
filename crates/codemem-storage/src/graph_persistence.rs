@@ -322,6 +322,15 @@ impl Storage {
         Ok(edges)
     }
 
+    /// Delete a single graph edge by its ID. Returns true if a row was deleted.
+    pub fn delete_graph_edge(&self, edge_id: &str) -> Result<bool, CodememError> {
+        let conn = self.conn()?;
+        let rows = conn
+            .execute("DELETE FROM graph_edges WHERE id = ?1", params![edge_id])
+            .storage_err()?;
+        Ok(rows > 0)
+    }
+
     /// Delete all graph edges connected to a node (as src or dst).
     pub fn delete_graph_edges_for_node(&self, node_id: &str) -> Result<usize, CodememError> {
         let conn = self.conn()?;

@@ -161,6 +161,17 @@ impl McpServer {
                     }
                 }
 
+                // Run orphan detection
+                match self.engine.detect_orphans(None) {
+                    Ok((sym, edges)) => {
+                        results["orphans"] =
+                            json!({"symbols_cleaned": sym, "edges_cleaned": edges});
+                    }
+                    Err(e) => {
+                        results["orphans"] = json!({"error": format!("{e}")});
+                    }
+                }
+
                 // Include status
                 let mut status_json = json!({});
                 for entry in &status {

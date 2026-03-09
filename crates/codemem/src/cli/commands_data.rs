@@ -264,6 +264,31 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
                     }
                 }
 
+                // After memory persistence, if this was an Edit/Write, re-index the file.
+                // The file_path from the hook payload may be relative (e.g. "src/lib.rs")
+                // or absolute. Resolve it against CWD, then verify it's under the project.
+                if matches!(tool_name.as_str(), "Edit" | "Write") {
+                    if let Some(fp) = file_path_owned.as_deref() {
+                        if let Ok(project_root) = std::env::current_dir() {
+                            let abs_path = if std::path::Path::new(fp).is_absolute() {
+                                std::path::PathBuf::from(fp)
+                            } else {
+                                project_root.join(fp)
+                            };
+                            if abs_path.starts_with(&project_root) && abs_path.exists() {
+                                let event =
+                                    codemem_engine::watch::WatchEvent::FileChanged(abs_path);
+                                let ns = namespace.as_deref();
+                                if let Err(e) =
+                                    engine.process_watch_event(&event, ns, Some(&project_root))
+                                {
+                                    tracing::warn!("Post-hook index failed for {fp}: {e}");
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Store graph node if present (e.g., file nodes from hooks)
                 if let Some(ref node) = extracted.graph_node {
                     let _ = engine.storage().insert_graph_node(node);
@@ -359,6 +384,7 @@ pub(crate) fn run_watcher_loop(
 
     let receiver = watcher.receiver();
     let mut changes_since_save = 0usize;
+    let mut last_orphan_scan = std::time::Instant::now();
     let mut batch: Vec<FileChange> = Vec::new();
 
     loop {
@@ -441,6 +467,14 @@ pub(crate) fn run_watcher_loop(
         if changes_since_save >= 10 {
             engine.save_index();
             changes_since_save = 0;
+        }
+
+        // Periodically run orphan detection (every 10 minutes)
+        if last_orphan_scan.elapsed() >= std::time::Duration::from_secs(600) {
+            if let Err(e) = engine.detect_orphans(Some(watch_dir)) {
+                tracing::warn!("Periodic orphan scan failed: {e}");
+            }
+            last_orphan_scan = std::time::Instant::now();
         }
     }
 
@@ -647,7 +681,7 @@ fn flush_batch(
     memory.metadata = metadata;
     memory.namespace = Some(super::namespace_from_path(&watch_dir.to_string_lossy()).to_string());
 
-    match engine.persist_memory(&memory) {
+    let stored = match engine.persist_memory(&memory) {
         Ok(()) => {
             if quiet {
                 tracing::info!(
@@ -669,7 +703,30 @@ fn flush_batch(
             tracing::warn!("Failed to store watch batch memory: {e}");
             0
         }
+    };
+
+    // Trigger incremental graph update for each changed/created/deleted file
+    let watch_dir_str = watch_dir.to_string_lossy();
+    let namespace = super::namespace_from_path(&watch_dir_str);
+    for change in batch {
+        let event = match change.event_type {
+            "modified" => codemem_engine::watch::WatchEvent::FileChanged(
+                watch_dir.join(&change.relative_path),
+            ),
+            "created" => codemem_engine::watch::WatchEvent::FileCreated(
+                watch_dir.join(&change.relative_path),
+            ),
+            "deleted" => codemem_engine::watch::WatchEvent::FileDeleted(
+                watch_dir.join(&change.relative_path),
+            ),
+            _ => continue,
+        };
+        if let Err(e) = engine.process_watch_event(&event, Some(namespace), Some(watch_dir)) {
+            tracing::warn!("Incremental index failed for {}: {e}", change.relative_path);
+        }
     }
+
+    stored
 }
 
 #[cfg(test)]

@@ -155,6 +155,9 @@ pub struct CodememEngine {
     dirty: AtomicBool,
     /// Active session ID for auto-populating `session_id` on persisted memories.
     active_session_id: RwLock<Option<String>>,
+    /// Cached change detector for incremental single-file indexing.
+    /// Loaded lazily from storage on first use.
+    change_detector: Mutex<Option<index::incremental::ChangeDetector>>,
 }
 
 impl CodememEngine {
@@ -190,6 +193,7 @@ impl CodememEngine {
             metrics: Arc::new(InMemoryMetrics::new()),
             dirty: AtomicBool::new(false),
             active_session_id: RwLock::new(None),
+            change_detector: Mutex::new(None),
         }
     }
 
@@ -331,6 +335,7 @@ impl CodememEngine {
             metrics: Arc::new(InMemoryMetrics::new()),
             dirty: AtomicBool::new(false),
             active_session_id: RwLock::new(None),
+            change_detector: Mutex::new(None),
         }
     }
 
