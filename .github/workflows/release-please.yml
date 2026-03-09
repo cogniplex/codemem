@@ -29,7 +29,7 @@ jobs:
   build:
     name: Build (${{ matrix.name }})
     needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    if: ${{ needs.release-please.outputs.releases_created }}
     strategy:
       matrix:
         include:
@@ -104,7 +104,7 @@ jobs:
   upload-release-artifacts:
     name: Upload Release Artifacts
     needs: [release-please, build]
-    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    if: ${{ needs.release-please.outputs.releases_created }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -122,7 +122,7 @@ jobs:
   publish:
     name: Publish to crates.io
     needs: [release-please, build]
-    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    if: ${{ needs.release-please.outputs.releases_created }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -175,7 +175,7 @@ jobs:
   homebrew:
     name: Update Homebrew Tap
     needs: [release-please, upload-release-artifacts]
-    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    if: ${{ needs.release-please.outputs.releases_created }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
