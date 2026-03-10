@@ -12,8 +12,7 @@ import { FocusToolbar } from './FocusToolbar'
 
 const ALL_KINDS = new Set([
   'function', 'method', 'class', 'file', 'module', 'package',
-  'variable', 'type', 'interface', 'trait', 'struct', 'enum',
-  'memory', 'constant', 'endpoint', 'test',
+  'type', 'interface', 'memory', 'constant', 'endpoint', 'test', 'chunk',
 ])
 
 export function GraphExplorer() {
@@ -31,7 +30,6 @@ export function GraphExplorer() {
   const [activeRelationships, setActiveRelationships] = useState<Set<string>>(() => {
     const defaults = new Set(ALL_RELATIONSHIPS)
     defaults.delete('CO_CHANGED')
-    defaults.delete('CALLS')
     return defaults
   })
   const [focusMode, setFocusMode] = useState<{ nodeId: string; depth: number } | null>(null)

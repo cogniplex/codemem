@@ -3,8 +3,7 @@ import { KIND_COLORS } from './constants'
 
 const NODE_KINDS = [
   'function', 'method', 'class', 'file', 'module', 'package',
-  'variable', 'type', 'interface', 'trait', 'struct', 'enum',
-  'memory', 'constant', 'endpoint', 'test',
+  'type', 'interface', 'memory', 'constant', 'endpoint', 'test', 'chunk',
 ]
 
 interface Props {
@@ -93,7 +92,7 @@ export function GraphControls({
       {/* Kind filters */}
       <div>
         <p className="mb-1.5 text-xs font-medium text-zinc-400">Node kinds</p>
-        <div className="flex max-h-44 flex-col gap-1 overflow-y-auto">
+        <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
           {NODE_KINDS.map((kind) => (
             <label
               key={kind}

@@ -551,6 +551,272 @@ fn subgraph_top_n_edges_only_between_top() {
     }
 }
 
+// ── Subgraph Expansion Tests ─────────────────────────────────────────
+
+fn typed_edge(src: &str, dst: &str, rel: RelationshipType) -> Edge {
+    Edge {
+        id: format!("{rel}:{src}->{dst}"),
+        src: src.to_string(),
+        dst: dst.to_string(),
+        relationship: rel,
+        weight: 1.0,
+        properties: HashMap::new(),
+        created_at: chrono::Utc::now(),
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+#[test]
+fn subgraph_top_n_expands_calls_targets() {
+    // Build a graph where sym_target is only reachable via a CALLS edge
+    // from a high-centrality hub, so it wouldn't make top-N alone.
+    // hub <--CONTAINS-- file_a, hub <--CONTAINS-- file_b (hub has high centrality)
+    // hub --CALLS--> sym_target (sym_target is a leaf with low centrality)
+    let mut graph = GraphEngine::new();
+    graph.add_node(file_node("file_a", "a.rs")).unwrap();
+    graph.add_node(file_node("file_b", "b.rs")).unwrap();
+    graph
+        .add_node(namespaced_node("hub", "hub_fn", None, NodeKind::Function))
+        .unwrap();
+    graph
+        .add_node(namespaced_node(
+            "sym_target",
+            "target_fn",
+            None,
+            NodeKind::Function,
+        ))
+        .unwrap();
+    // Two CONTAINS edges into hub → high centrality
+    graph
+        .add_edge(typed_edge("file_a", "hub", RelationshipType::Contains))
+        .unwrap();
+    graph
+        .add_edge(typed_edge("file_b", "hub", RelationshipType::Contains))
+        .unwrap();
+    // CALLS edge from hub to target
+    graph
+        .add_edge(typed_edge("hub", "sym_target", RelationshipType::Calls))
+        .unwrap();
+    graph.compute_centrality();
+
+    // Top 3 by centrality: file_a, file_b, hub (sym_target has lowest).
+    // Expansion should pull sym_target in via the CALLS edge.
+    let (nodes, edges) = graph.subgraph_top_n(3, None, None);
+
+    let node_ids: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    assert!(
+        node_ids.contains("sym_target"),
+        "sym_target should be pulled in by CALLS expansion, got: {:?}",
+        node_ids
+    );
+
+    let has_calls = edges
+        .iter()
+        .any(|e| e.relationship == RelationshipType::Calls);
+    assert!(has_calls, "CALLS edge should be in the result");
+}
+
+#[test]
+fn subgraph_top_n_expands_imports_targets() {
+    // Build a graph with enough nodes that sym_target is clearly lowest centrality.
+    // hub is a high-centrality connector; sym_target is an isolated leaf.
+    let mut graph = GraphEngine::new();
+    for i in 0..4 {
+        graph
+            .add_node(file_node(&format!("file_{i}"), &format!("{i}.rs")))
+            .unwrap();
+    }
+    graph
+        .add_node(namespaced_node("hub", "hub_mod", None, NodeKind::Module))
+        .unwrap();
+    graph
+        .add_node(namespaced_node(
+            "sym_target",
+            "imported_mod",
+            None,
+            NodeKind::Module,
+        ))
+        .unwrap();
+    // All files point to hub → hub has highest centrality
+    for i in 0..4 {
+        graph
+            .add_edge(typed_edge(
+                &format!("file_{i}"),
+                "hub",
+                RelationshipType::Contains,
+            ))
+            .unwrap();
+    }
+    // Also connect files to each other to boost their centrality above sym_target
+    graph
+        .add_edge(typed_edge("file_0", "file_1", RelationshipType::Contains))
+        .unwrap();
+    graph
+        .add_edge(typed_edge("file_2", "file_3", RelationshipType::Contains))
+        .unwrap();
+    // hub --IMPORTS--> sym_target (only one incoming edge for sym_target)
+    graph
+        .add_edge(typed_edge("hub", "sym_target", RelationshipType::Imports))
+        .unwrap();
+    graph.compute_centrality();
+
+    // Take top 5 (all files + hub). sym_target should be excluded from top-N
+    // but pulled in via expansion.
+    let (nodes, edges) = graph.subgraph_top_n(5, None, None);
+    let node_ids: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    assert!(
+        node_ids.contains("sym_target"),
+        "sym_target should be pulled in by IMPORTS expansion, got: {:?}",
+        node_ids
+    );
+    assert!(
+        edges
+            .iter()
+            .any(|e| e.relationship == RelationshipType::Imports),
+        "IMPORTS edge should be in the result"
+    );
+}
+
+#[test]
+fn subgraph_top_n_expansion_respects_kind_filter() {
+    // sym_a --CALLS--> sym_b (Function), sym_a --CALLS--> cls_c (Class)
+    // With kind filter [Function], expansion should pull sym_b but NOT cls_c.
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(namespaced_node("sym_a", "fn_a", None, NodeKind::Function))
+        .unwrap();
+    graph
+        .add_node(namespaced_node("sym_b", "fn_b", None, NodeKind::Function))
+        .unwrap();
+    graph
+        .add_node(namespaced_node("cls_c", "MyClass", None, NodeKind::Class))
+        .unwrap();
+    graph
+        .add_edge(typed_edge("sym_a", "sym_b", RelationshipType::Calls))
+        .unwrap();
+    graph
+        .add_edge(typed_edge("sym_a", "cls_c", RelationshipType::Calls))
+        .unwrap();
+    graph.compute_centrality();
+
+    let (nodes, _edges) = graph.subgraph_top_n(1, None, Some(&[NodeKind::Function]));
+    let node_ids: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    assert!(
+        !node_ids.contains("cls_c"),
+        "Class node should NOT be pulled in when kind filter is [Function]"
+    );
+}
+
+#[test]
+fn subgraph_top_n_expansion_respects_namespace_filter() {
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(namespaced_node(
+            "sym_a",
+            "fn_a",
+            Some("proj1"),
+            NodeKind::Function,
+        ))
+        .unwrap();
+    graph
+        .add_node(namespaced_node(
+            "sym_b",
+            "fn_b",
+            Some("proj1"),
+            NodeKind::Function,
+        ))
+        .unwrap();
+    graph
+        .add_node(namespaced_node(
+            "sym_c",
+            "fn_c",
+            Some("proj2"),
+            NodeKind::Function,
+        ))
+        .unwrap();
+    // a calls both b (proj1) and c (proj2)
+    graph
+        .add_edge(typed_edge("sym_a", "sym_b", RelationshipType::Calls))
+        .unwrap();
+    graph
+        .add_edge(typed_edge("sym_a", "sym_c", RelationshipType::Calls))
+        .unwrap();
+    graph.compute_centrality();
+
+    // Take top 2 from proj1 namespace — should get sym_a + sym_b (both proj1),
+    // but NOT sym_c (proj2) even though sym_a calls it.
+    let (nodes, _edges) = graph.subgraph_top_n(2, Some("proj1"), None);
+    let node_ids: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    assert!(
+        !node_ids.contains("sym_c"),
+        "proj2 node should NOT be pulled in when namespace filter is proj1"
+    );
+    // Both proj1 nodes should be present (either via top-N or expansion)
+    assert!(node_ids.contains("sym_a"), "sym_a should be in result");
+    assert!(node_ids.contains("sym_b"), "sym_b should be in result");
+}
+
+#[test]
+fn subgraph_top_n_expansion_skips_contains() {
+    // Expansion should NOT pull in nodes via CONTAINS edges (structural).
+    // Build: file_a --CONTAINS--> sym_a, file_a --CONTAINS--> sym_b
+    // Top-1 has the highest centrality node. Whichever is NOT in top-1
+    // should NOT be pulled in via expansion (CONTAINS is skipped).
+    let mut graph = GraphEngine::new();
+    graph.add_node(file_node("file_a", "a.rs")).unwrap();
+    graph
+        .add_node(namespaced_node("sym_a", "fn_a", None, NodeKind::Function))
+        .unwrap();
+    graph
+        .add_node(namespaced_node("sym_b", "fn_b", None, NodeKind::Function))
+        .unwrap();
+    graph
+        .add_edge(typed_edge("file_a", "sym_a", RelationshipType::Contains))
+        .unwrap();
+    graph
+        .add_edge(typed_edge("file_a", "sym_b", RelationshipType::Contains))
+        .unwrap();
+    graph.compute_centrality();
+
+    // Top 1 = file_a (has 2 outgoing CONTAINS edges, highest degree).
+    // Neither sym_a nor sym_b should be expanded since CONTAINS is structural.
+    let (nodes, _edges) = graph.subgraph_top_n(1, None, None);
+    assert_eq!(
+        nodes.len(),
+        1,
+        "only 1 node from top-N, no expansion via CONTAINS"
+    );
+}
+
+#[test]
+fn subgraph_top_n_expansion_budget_bounded() {
+    // Create a hub node with many CALLS targets — should not exceed 20% budget.
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(namespaced_node("hub", "hub_fn", None, NodeKind::Function))
+        .unwrap();
+    // n=5, budget = 5/5 = 1
+    for i in 0..10 {
+        let id = format!("target_{i}");
+        graph
+            .add_node(namespaced_node(&id, &id, None, NodeKind::Function))
+            .unwrap();
+        graph
+            .add_edge(typed_edge("hub", &id, RelationshipType::Calls))
+            .unwrap();
+    }
+    graph.compute_centrality();
+
+    let (nodes, _edges) = graph.subgraph_top_n(5, None, None);
+    // 5 from top-N + at most 1 from expansion (budget = 5/5 = 1)
+    assert!(
+        nodes.len() <= 6,
+        "expansion should respect 20% budget, got {} nodes",
+        nodes.len()
+    );
+}
+
 // ── Louvain With Assignment Tests ─────────────────────────────────────
 
 #[test]

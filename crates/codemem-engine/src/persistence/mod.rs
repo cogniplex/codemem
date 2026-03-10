@@ -153,6 +153,47 @@ impl super::CodememEngine {
         // ── Symbol nodes + file→symbol edges
         let (sym_nodes, sym_edges) =
             Self::build_symbol_nodes(all_symbols, &ns_string, contains_weight, now);
+
+        // Clean up stale symbols: single pass over in-memory graph to collect
+        // existing symbols grouped by file, then diff against new parse results.
+        //
+        // Lock protocol: We collect old symbols while holding the graph lock,
+        // then drop it so `cleanup_stale_symbols` can acquire graph + vector
+        // locks internally. The re-acquire below is safe: cleanup only removes
+        // stale nodes that won't conflict with the inserts that follow.
+        let mut old_syms_by_file: HashMap<String, HashSet<String>> = HashMap::new();
+        for node in graph.get_all_nodes() {
+            if !node.id.starts_with("sym:") {
+                continue;
+            }
+            let Some(fp) = node.payload.get("file_path").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if !seen_files.contains(fp) {
+                continue;
+            }
+            old_syms_by_file
+                .entry(fp.to_string())
+                .or_default()
+                .insert(node.id);
+        }
+        drop(graph);
+        for file_path in seen_files {
+            let new_sym_ids: HashSet<String> = sym_nodes
+                .iter()
+                .filter(|n| {
+                    n.payload.get("file_path").and_then(|v| v.as_str()) == Some(file_path.as_str())
+                })
+                .map(|n| n.id.clone())
+                .collect();
+            let empty = HashSet::new();
+            let old_sym_ids = old_syms_by_file.get(file_path).unwrap_or(&empty);
+            if let Err(e) = self.cleanup_stale_symbols(file_path, old_sym_ids, &new_sym_ids) {
+                tracing::warn!("Failed to cleanup stale symbols for {file_path}: {e}");
+            }
+        }
+        let mut graph = self.lock_graph()?; // Re-acquire lock
+
         self.persist_nodes_to_storage_and_graph(&sym_nodes, &mut graph);
         self.persist_edges_to_storage_and_graph(&sym_edges, &mut graph);
 
@@ -258,7 +299,7 @@ impl super::CodememEngine {
                     dst: pkg_id.clone(),
                     relationship: RelationshipType::Contains,
                     weight: contains_weight,
-                    valid_from: None,
+                    valid_from: Some(now),
                     valid_to: None,
                     properties: HashMap::new(),
                     created_at: now,
@@ -274,7 +315,7 @@ impl super::CodememEngine {
                     dst: file_node_id,
                     relationship: RelationshipType::Contains,
                     weight: contains_weight,
-                    valid_from: None,
+                    valid_from: Some(now),
                     valid_to: None,
                     properties: HashMap::new(),
                     created_at: now,
@@ -318,7 +359,7 @@ impl super::CodememEngine {
                 dst: sym_node_id,
                 relationship: RelationshipType::Contains,
                 weight: contains_weight,
-                valid_from: None,
+                valid_from: Some(now),
                 valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
@@ -417,7 +458,7 @@ impl super::CodememEngine {
                 dst: format!("sym:{}", edge.target_qualified_name),
                 relationship: edge.relationship,
                 weight: edge_weight_for(&edge.relationship, graph_config),
-                valid_from: None,
+                valid_from: Some(now),
                 valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
@@ -483,7 +524,7 @@ impl super::CodememEngine {
                 dst: chunk_id.clone(),
                 relationship: RelationshipType::Contains,
                 weight: contains_weight,
-                valid_from: None,
+                valid_from: Some(now),
                 valid_to: None,
                 properties: HashMap::new(),
                 created_at: now,
@@ -497,7 +538,7 @@ impl super::CodememEngine {
                     dst: chunk_id,
                     relationship: RelationshipType::Contains,
                     weight: contains_weight,
-                    valid_from: None,
+                    valid_from: Some(now),
                     valid_to: None,
                     properties: HashMap::new(),
                     created_at: now,

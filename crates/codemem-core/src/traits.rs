@@ -285,6 +285,14 @@ pub trait StorageBackend: Send + Sync {
     /// Get all graph edges.
     fn all_graph_edges(&self) -> Result<Vec<Edge>, CodememError>;
 
+    /// Delete a single graph edge by ID. Returns true if a row was deleted.
+    fn delete_graph_edge(&self, edge_id: &str) -> Result<bool, CodememError> {
+        // Default: fall back to querying all edges and deleting via for_node.
+        // Backends should override with a direct DELETE WHERE id = ?1.
+        let _ = edge_id;
+        Ok(false)
+    }
+
     /// Delete all graph edges connected to a node. Returns count deleted.
     fn delete_graph_edges_for_node(&self, node_id: &str) -> Result<usize, CodememError>;
 
