@@ -14,36 +14,41 @@ impl CodememEngine {
     /// Always clears the dirty flag so `flush_if_dirty()` won't double-save.
     pub fn save_index(&self) {
         if let Some(ref db_path) = self.db_path {
-            let idx_path = db_path.with_extension("idx");
-            if let Ok(mut vi) = self.lock_vector() {
-                // Compact HNSW if ghost entries exceed threshold
-                if vi.needs_compaction() {
-                    let ghost = vi.ghost_count();
-                    let live = vi.stats().count;
-                    tracing::info!(
-                        "HNSW ghost compaction: {ghost} ghosts / {live} live entries, rebuilding..."
-                    );
-                    if let Ok(embeddings) = self.storage.list_all_embeddings() {
-                        if let Err(e) = vi.rebuild_from_entries(&embeddings) {
-                            tracing::warn!("HNSW compaction failed: {e}");
+            // Only save vector index if it has been lazily initialized.
+            if self.vector_ready() {
+                let idx_path = db_path.with_extension("idx");
+                if let Ok(mut vi) = self.lock_vector() {
+                    // Compact HNSW if ghost entries exceed threshold
+                    if vi.needs_compaction() {
+                        let ghost = vi.ghost_count();
+                        let live = vi.stats().count;
+                        tracing::info!(
+                            "HNSW ghost compaction: {ghost} ghosts / {live} live entries, rebuilding..."
+                        );
+                        if let Ok(embeddings) = self.storage.list_all_embeddings() {
+                            if let Err(e) = vi.rebuild_from_entries(&embeddings) {
+                                tracing::warn!("HNSW compaction failed: {e}");
+                            }
                         }
                     }
-                }
-                if let Err(e) = vi.save(&idx_path) {
-                    tracing::warn!("Failed to save vector index: {e}");
+                    if let Err(e) = vi.save(&idx_path) {
+                        tracing::warn!("Failed to save vector index: {e}");
+                    }
                 }
             }
 
-            // Persist BM25 index alongside the vector index
-            let bm25_path = db_path.with_extension("bm25");
-            if let Ok(bm25) = self.lock_bm25() {
-                if bm25.needs_save() {
-                    let data = bm25.serialize();
-                    let tmp_path = db_path.with_extension("bm25.tmp");
-                    if let Err(e) = std::fs::write(&tmp_path, &data)
-                        .and_then(|_| std::fs::rename(&tmp_path, &bm25_path))
-                    {
-                        tracing::warn!("Failed to save BM25 index: {e}");
+            // Only save BM25 index if it has been lazily initialized.
+            if self.bm25_ready() {
+                let bm25_path = db_path.with_extension("bm25");
+                if let Ok(bm25) = self.lock_bm25() {
+                    if bm25.needs_save() {
+                        let data = bm25.serialize();
+                        let tmp_path = db_path.with_extension("bm25.tmp");
+                        if let Err(e) = std::fs::write(&tmp_path, &data)
+                            .and_then(|_| std::fs::rename(&tmp_path, &bm25_path))
+                        {
+                            tracing::warn!("Failed to save BM25 index: {e}");
+                        }
                     }
                 }
             }
@@ -501,6 +506,12 @@ impl CodememEngine {
     /// and returns comprehensive results.
     pub fn analyze(&self, options: AnalyzeOptions<'_>) -> Result<AnalyzeResult, CodememError> {
         let root = options.path;
+
+        // Eagerly initialize embeddings/vector/BM25 for the full analysis pipeline.
+        // This triggers lazy init so that embed_and_persist() finds them ready.
+        drop(self.lock_embeddings());
+        drop(self.lock_vector());
+        drop(self.lock_bm25());
 
         // 1. Index
         let mut indexer = match options.change_detector {

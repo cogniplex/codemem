@@ -607,7 +607,7 @@ impl GraphEngine {
         // Expand: for non-structural edges from top-N nodes, pull in the
         // other endpoint so CALLS/IMPORTS/etc. edges appear in the result.
         // Budget: allow up to 20% extra nodes to keep the response bounded.
-        let budget = n / 5;
+        let budget = (n / 5).max(1);
         let mut extra_ids: Vec<&str> = Vec::new();
         for edge in self.edges.values() {
             if extra_ids.len() >= budget {

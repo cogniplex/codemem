@@ -167,7 +167,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                 "PostToolUse",
                 "codemem ingest",
                 serde_json::json!([{
-                    "matcher": "Read|Glob|Grep|Edit|Write|MultiEdit",
+                    "matcher": "Edit|Write|MultiEdit",
                     "hooks": [{
                         "type": "command",
                         "command": "codemem ingest",
