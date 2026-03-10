@@ -79,32 +79,37 @@ pub(crate) fn cmd_sessions_end(
     Ok(())
 }
 
-// ── Lifecycle Hooks (SessionStart, UserPromptSubmit, Stop) ─────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────
 
-/// SessionStart hook: query recent memories and inject context into the new session.
-///
-/// Reads JSON `{session_id, cwd}` from stdin.
-/// Outputs JSON `{hookSpecificOutput: {additionalContext: "..."}}` to stdout.
-pub(crate) fn cmd_context(storage: &dyn StorageBackend) -> anyhow::Result<()> {
+/// Read a single-line JSON payload from stdin. Returns an empty object on
+/// failure or empty input.
+fn read_hook_payload() -> serde_json::Value {
     use std::io::BufRead;
 
-    // Read a single line — hook payloads are one JSON object per line.
-    // Using read_line instead of read_to_string avoids hanging when the
-    // hook runner doesn't close stdin after writing the payload.
     let mut input = String::new();
     let stdin = std::io::stdin();
     if let Err(e) = stdin.lock().read_line(&mut input) {
         tracing::warn!("Failed to read hook payload from stdin: {e}");
     }
 
-    let payload: serde_json::Value = if input.trim().is_empty() {
+    if input.trim().is_empty() {
         serde_json::json!({})
     } else {
         serde_json::from_str(&input).unwrap_or(serde_json::json!({}))
-    };
+    }
+}
 
+/// Common fields extracted from every hook payload.
+struct HookContext<'a> {
+    session_id: &'a str,
+    namespace: Option<&'a str>,
+}
+
+/// Extract the common session_id / cwd / namespace fields from a payload.
+/// The returned references borrow from `payload`.
+fn extract_hook_context(payload: &serde_json::Value) -> HookContext<'_> {
     let cwd_raw = payload.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
-    let cwd_ns = if cwd_raw.is_empty() {
+    let namespace = if cwd_raw.is_empty() {
         None
     } else {
         Some(namespace_from_cwd(cwd_raw))
@@ -113,15 +118,52 @@ pub(crate) fn cmd_context(storage: &dyn StorageBackend) -> anyhow::Result<()> {
         .get("session_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    HookContext {
+        session_id,
+        namespace,
+    }
+}
+
+// ── Lifecycle Hooks ──────────────────────────────────────────────────────
+
+/// SessionStart hook: query recent memories and inject context into the new session.
+///
+/// Handles `source` field: "startup" (full context), "resume" (brief note),
+/// "compact" (checkpoint + full context), "clear" (treated like startup).
+pub(crate) fn cmd_context(storage: &dyn StorageBackend) -> anyhow::Result<()> {
+    let payload = read_hook_payload();
+    let ctx = extract_hook_context(&payload);
+    let source = payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("startup");
 
     // Auto-start a session for this project
-    if !session_id.is_empty() {
-        if let Err(e) = storage.start_session(session_id, cwd_ns) {
-            tracing::warn!("Failed to start session {session_id}: {e}");
+    if !ctx.session_id.is_empty() {
+        if let Err(e) = storage.start_session(ctx.session_id, ctx.namespace) {
+            tracing::warn!("Failed to start session {}: {e}", ctx.session_id);
         }
     }
 
-    let namespace = cwd_ns;
+    // On "resume", skip heavy context — the session is continuing with context intact
+    if source == "resume" {
+        let context = "<codemem-context>\nSession resumed. Prior context still available. \
+                        Use `recall_memory` and `search_code` MCP tools as needed.\n</codemem-context>";
+        let output = serde_json::json!({
+            "hookSpecificOutput": {
+                "additionalContext": context
+            }
+        });
+        println!("{}", serde_json::to_string(&output)?);
+        return Ok(());
+    }
+
+    // On "compact", save a checkpoint before context is lost
+    if source == "compact" {
+        save_compact_checkpoint(storage, ctx.session_id, ctx.namespace);
+    }
+
+    let namespace = ctx.namespace;
 
     // Gather context from multiple sources
     let mut sections: Vec<String> = Vec::new();
@@ -321,31 +363,17 @@ pub(crate) fn cmd_context(storage: &dyn StorageBackend) -> anyhow::Result<()> {
 }
 
 /// UserPromptSubmit hook: record the user's prompt as a Context memory.
-///
-/// Reads JSON `{session_id, cwd, prompt}` from stdin.
-/// Outputs JSON `{continue: true}` to stdout.
 pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
-    use std::io::BufRead;
-
-    let mut input = String::new();
-    let stdin = std::io::stdin();
-    if let Err(e) = stdin.lock().read_line(&mut input) {
-        tracing::warn!("Failed to read prompt payload from stdin: {e}");
-    }
-
-    if input.trim().is_empty() {
-        println!("{{}}");
-        return Ok(());
-    }
-
-    let payload: serde_json::Value = serde_json::from_str(&input).unwrap_or(serde_json::json!({}));
+    let payload = read_hook_payload();
+    let ctx = extract_hook_context(&payload);
 
     let prompt = payload.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-    let session_id = payload.get("session_id").and_then(|v| v.as_str());
-    let cwd = payload
-        .get("cwd")
-        .and_then(|v| v.as_str())
-        .map(namespace_from_cwd);
+    let session_id = if ctx.session_id.is_empty() {
+        None
+    } else {
+        Some(ctx.session_id)
+    };
+    let cwd = ctx.namespace;
 
     // Skip empty or very short prompts
     if prompt.len() < 5 {
@@ -428,38 +456,38 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
 
 /// Stop hook: build a session summary from captured memories and store it.
 ///
-/// Reads JSON `{session_id, cwd}` from stdin.
-/// Outputs JSON `{continue: true}` to stdout.
+/// Handles `stop_hook_active` (skip if true to avoid loops) and
+/// `last_assistant_message` (included in summary for richer context).
 pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
-    use std::io::BufRead;
+    let payload = read_hook_payload();
 
-    let mut input = String::new();
-    let stdin = std::io::stdin();
-    if let Err(e) = stdin.lock().read_line(&mut input) {
-        tracing::warn!("Failed to read summarize payload from stdin: {e}");
-    }
-
-    if input.trim().is_empty() {
-        println!("{{}}");
+    // If stop_hook_active is true, we're in a stop-hook loop — bail to avoid recursion
+    if payload
+        .get("stop_hook_active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({"continue": true}))?
+        );
         return Ok(());
     }
 
-    let payload: serde_json::Value = serde_json::from_str(&input).unwrap_or(serde_json::json!({}));
-
-    let session_id = payload
-        .get("session_id")
+    let ctx = extract_hook_context(&payload);
+    let last_message = payload
+        .get("last_assistant_message")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let cwd = payload
-        .get("cwd")
-        .and_then(|v| v.as_str())
-        .map(namespace_from_cwd);
 
-    if session_id.is_empty() {
+    if ctx.session_id.is_empty() {
         let output = serde_json::json!({"continue": true});
         println!("{}", serde_json::to_string(&output)?);
         return Ok(());
     }
+
+    let session_id = ctx.session_id;
+    let namespace = ctx.namespace;
 
     let db_path = super::codemem_db_path();
     let storage = match codemem_engine::Storage::open_without_migrations(&db_path) {
@@ -471,11 +499,10 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
         }
     };
 
-    let namespace = cwd;
-
-    // Look up session start time to filter memories by creation time
-    let session_start = storage
-        .list_sessions(namespace)
+    // Look up session start time to filter memories by creation time.
+    // Use UFCS to call the trait method (2-arg) instead of the concrete 1-arg
+    // convenience method, so this code would survive a refactor to &dyn StorageBackend.
+    let session_start = StorageBackend::list_sessions(&storage, namespace, usize::MAX)
         .unwrap_or_default()
         .into_iter()
         .find(|s| s.id == session_id)
@@ -503,12 +530,18 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
 
     let cat = categorize_memories(&session_memories);
     let summary_text = {
-        let s = build_session_summary(&cat);
+        let mut s = build_session_summary(&cat);
         if s.is_empty() {
-            format!("{} memories captured.", session_memories.len())
-        } else {
-            s
+            s = format!("{} memories captured.", session_memories.len());
         }
+        // Append a truncated excerpt of Claude's final response for richer context
+        if !last_message.is_empty() {
+            let excerpt = crate::truncate_str(last_message, 200);
+            // Avoid double period if summary already ends with one
+            let sep = if s.ends_with('.') { "" } else { "." };
+            s.push_str(&format!("{sep} Final response: {excerpt}"));
+        }
+        s
     };
     let has_substance = has_substance(&cat);
 
@@ -614,6 +647,326 @@ pub(crate) fn cmd_summarize() -> anyhow::Result<()> {
     println!("{}", serde_json::to_string(&output)?);
 
     Ok(())
+}
+
+// ── New Lifecycle Hooks ───────────────────────────────────────────────────
+
+/// SubagentStop hook: capture subagent findings from `last_assistant_message`.
+pub(crate) fn cmd_agent_result() -> anyhow::Result<()> {
+    let payload = read_hook_payload();
+    let ctx = extract_hook_context(&payload);
+
+    // Skip if stop_hook_active (avoid loops)
+    if payload
+        .get("stop_hook_active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        println!("{}", serde_json::to_string(&serde_json::json!({}))?);
+        return Ok(());
+    }
+
+    let agent_type = payload
+        .get("agent_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let agent_id = payload
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let last_message = payload
+        .get("last_assistant_message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // Skip if no meaningful content
+    if last_message.len() < 20 {
+        println!("{}", serde_json::to_string(&serde_json::json!({}))?);
+        return Ok(());
+    }
+
+    let db_path = super::codemem_db_path();
+    let storage = match codemem_engine::Storage::open_without_migrations(&db_path) {
+        Ok(s) => s,
+        Err(_) => {
+            println!("{}", serde_json::to_string(&serde_json::json!({}))?);
+            return Ok(());
+        }
+    };
+
+    let content = format!(
+        "Agent {} result: {}",
+        agent_type,
+        crate::truncate_str(last_message, 2000)
+    );
+
+    let mut memory = codemem_core::MemoryNode::new(content, codemem_core::MemoryType::Insight);
+    memory.importance = 0.5;
+    memory.tags = vec!["agent-result".to_string(), format!("agent:{agent_type}")];
+    memory.metadata = {
+        let mut m = std::collections::HashMap::new();
+        m.insert("source".into(), serde_json::json!("SubagentStop"));
+        m.insert("agent_type".into(), serde_json::json!(agent_type));
+        if !agent_id.is_empty() {
+            m.insert("agent_id".into(), serde_json::json!(agent_id));
+        }
+        if !ctx.session_id.is_empty() {
+            m.insert("session_id".into(), serde_json::json!(ctx.session_id));
+        }
+        m
+    };
+    memory.namespace = ctx.namespace.map(|s| s.to_string());
+
+    if let Err(e) = storage.insert_memory(&memory) {
+        tracing::warn!("Failed to persist agent result: {e}");
+    }
+
+    println!("{}", serde_json::to_string(&serde_json::json!({}))?);
+    Ok(())
+}
+
+/// SubagentStart hook: log agent spawn without storing a memory.
+///
+/// Agent spawns are transient operational events — storing each one as a
+/// MemoryNode at importance 0.2 would clutter recall. We just log it and
+/// let SubagentStop capture the valuable output.
+pub(crate) fn cmd_agent_start() -> anyhow::Result<()> {
+    let payload = read_hook_payload();
+
+    let agent_type = payload
+        .get("agent_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let agent_id = payload
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    tracing::info!("Subagent started: {agent_type} ({agent_id})");
+
+    println!("{{}}");
+    Ok(())
+}
+
+/// PostToolUseFailure hook: capture tool error patterns.
+pub(crate) fn cmd_tool_error() -> anyhow::Result<()> {
+    let payload = read_hook_payload();
+    let ctx = extract_hook_context(&payload);
+
+    // Skip user interrupts — not a real error
+    if payload
+        .get("is_interrupt")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        println!("{}", serde_json::to_string(&serde_json::json!({}))?);
+        return Ok(());
+    }
+
+    let tool_name = payload
+        .get("tool_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let error = payload.get("error").and_then(|v| v.as_str()).unwrap_or("");
+
+    if error.is_empty() {
+        println!("{}", serde_json::to_string(&serde_json::json!({}))?);
+        return Ok(());
+    }
+
+    let db_path = super::codemem_db_path();
+    let storage = match codemem_engine::Storage::open_without_migrations(&db_path) {
+        Ok(s) => s,
+        Err(_) => {
+            println!("{}", serde_json::to_string(&serde_json::json!({}))?);
+            return Ok(());
+        }
+    };
+
+    // Extract relevant tool_input info for context
+    let tool_input = &payload["tool_input"];
+    let input_context = tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .or_else(|| tool_input.get("command").and_then(|v| v.as_str()))
+        .or_else(|| tool_input.get("pattern").and_then(|v| v.as_str()))
+        .unwrap_or("");
+
+    let content = if input_context.is_empty() {
+        format!(
+            "Tool error ({tool_name}): {}",
+            crate::truncate_str(error, 1000)
+        )
+    } else {
+        format!(
+            "Tool error ({tool_name} on {input_context}): {}",
+            crate::truncate_str(error, 1000)
+        )
+    };
+
+    let mut memory = codemem_core::MemoryNode::new(content, codemem_core::MemoryType::Context);
+    memory.importance = 0.4;
+    memory.tags = vec![
+        "error".to_string(),
+        "tool-failure".to_string(),
+        format!("tool:{tool_name}"),
+    ];
+    memory.metadata = {
+        let mut m = std::collections::HashMap::new();
+        m.insert("source".into(), serde_json::json!("PostToolUseFailure"));
+        m.insert("tool_name".into(), serde_json::json!(tool_name));
+        m.insert(
+            "error".into(),
+            serde_json::json!(crate::truncate_str(error, 500)),
+        );
+        if !ctx.session_id.is_empty() {
+            m.insert("session_id".into(), serde_json::json!(ctx.session_id));
+        }
+        m
+    };
+    memory.namespace = ctx.namespace.map(|s| s.to_string());
+
+    if let Err(e) = storage.insert_memory(&memory) {
+        tracing::warn!("Failed to persist tool error: {e}");
+    }
+
+    println!("{}", serde_json::to_string(&serde_json::json!({}))?);
+    Ok(())
+}
+
+/// SessionEnd hook: cleanly close the session with the termination reason.
+pub(crate) fn cmd_session_close() -> anyhow::Result<()> {
+    let payload = read_hook_payload();
+    let ctx = extract_hook_context(&payload);
+
+    let reason = payload
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("other");
+
+    if ctx.session_id.is_empty() {
+        println!("{{}}");
+        return Ok(());
+    }
+
+    let db_path = super::codemem_db_path();
+    let storage = match codemem_engine::Storage::open_without_migrations(&db_path) {
+        Ok(s) => s,
+        Err(_) => {
+            println!("{{}}");
+            return Ok(());
+        }
+    };
+
+    // Check if the Stop hook already ended this session with a rich summary.
+    // If so, skip to avoid overwriting it with a terse "Session ended: {reason}".
+    let already_ended = StorageBackend::list_sessions(&storage, ctx.namespace, usize::MAX)
+        .unwrap_or_default()
+        .iter()
+        .any(|s| s.id == ctx.session_id && s.ended_at.is_some());
+
+    if !already_ended {
+        let summary = format!("Session ended: {reason}");
+        if let Err(e) = storage.end_session(ctx.session_id, Some(&summary)) {
+            tracing::warn!("Failed to end session {}: {e}", ctx.session_id);
+        }
+    }
+
+    println!("{{}}");
+    Ok(())
+}
+
+/// PreCompact hook: save a checkpoint memory before context compaction.
+pub(crate) fn cmd_checkpoint() -> anyhow::Result<()> {
+    let payload = read_hook_payload();
+    let ctx = extract_hook_context(&payload);
+
+    let db_path = super::codemem_db_path();
+    let storage = match codemem_engine::Storage::open_without_migrations(&db_path) {
+        Ok(s) => s,
+        Err(_) => {
+            println!("{{}}");
+            return Ok(());
+        }
+    };
+
+    save_compact_checkpoint(&storage, ctx.session_id, ctx.namespace);
+
+    println!("{{}}");
+    Ok(())
+}
+
+/// Save a compact checkpoint memory summarizing recent session state.
+/// Used by both PreCompact hook and SessionStart(compact).
+fn save_compact_checkpoint(
+    storage: &dyn StorageBackend,
+    session_id: &str,
+    namespace: Option<&str>,
+) {
+    // Gather recent memories to build a brief state summary
+    let memory_ids = if let Some(ns) = namespace {
+        storage
+            .list_memory_ids_for_namespace(ns)
+            .unwrap_or_default()
+    } else {
+        storage.list_memory_ids().unwrap_or_default()
+    };
+
+    // Batch-fetch recent memories in a single DB roundtrip.
+    // We only need 5 Decision/Insight/Pattern items; ~1/3 of memories are
+    // high-signal in a typical session, so 15 is sufficient headroom.
+    let batch_ids: Vec<&str> = memory_ids
+        .iter()
+        .rev()
+        .take(15)
+        .map(|s| s.as_str())
+        .collect();
+    let batch = storage.get_memories_batch(&batch_ids).unwrap_or_default();
+
+    let mut recent_items: Vec<String> = Vec::new();
+    for m in &batch {
+        if matches!(
+            m.memory_type,
+            codemem_core::MemoryType::Decision
+                | codemem_core::MemoryType::Insight
+                | codemem_core::MemoryType::Pattern
+        ) {
+            recent_items.push(crate::truncate_str(&m.content.replace('\n', " "), 100).to_string());
+            if recent_items.len() >= 5 {
+                break;
+            }
+        }
+    }
+
+    let summary = if recent_items.is_empty() {
+        "Pre-compact checkpoint: no key memories in recent context.".to_string()
+    } else {
+        format!(
+            "Pre-compact checkpoint. Key context: {}",
+            recent_items.join("; ")
+        )
+    };
+
+    let mut memory = codemem_core::MemoryNode::new(summary, codemem_core::MemoryType::Context);
+    memory.importance = 0.5;
+    memory.tags = vec!["pre-compact".to_string(), "checkpoint".to_string()];
+    memory.metadata = {
+        let mut m = std::collections::HashMap::new();
+        m.insert("source".into(), serde_json::json!("PreCompact"));
+        if !session_id.is_empty() {
+            m.insert("session_id".into(), serde_json::json!(session_id));
+        }
+        m.insert(
+            "timestamp".into(),
+            serde_json::json!(chrono::Utc::now().to_rfc3339()),
+        );
+        m
+    };
+    memory.namespace = namespace.map(|s| s.to_string());
+
+    if let Err(e) = storage.insert_memory(&memory) {
+        tracing::warn!("Failed to persist compact checkpoint: {e}");
+    }
 }
 
 /// Categorized session activity extracted from memories.

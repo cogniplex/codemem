@@ -44,9 +44,13 @@ fn build_file_extraction_relativizes_with_cwd() {
     let payload = HookPayload {
         tool_name: "Read".to_string(),
         tool_input: serde_json::json!({"file_path": "/home/user/project/src/lib.rs"}),
-        tool_response: "fn foo() {}".to_string(),
+        tool_response: serde_json::Value::String("fn foo() {}".to_string()),
         session_id: None,
         cwd: Some("/home/user/project".to_string()),
+        hook_event_name: None,
+        transcript_path: None,
+        permission_mode: None,
+        tool_use_id: None,
     };
 
     let extracted = build_file_extraction(
@@ -74,9 +78,13 @@ fn build_file_extraction_no_cwd_keeps_absolute() {
     let payload = HookPayload {
         tool_name: "Read".to_string(),
         tool_input: serde_json::json!({"file_path": "/home/user/project/src/lib.rs"}),
-        tool_response: "fn foo() {}".to_string(),
+        tool_response: serde_json::Value::String("fn foo() {}".to_string()),
         session_id: None,
         cwd: None,
+        hook_event_name: None,
+        transcript_path: None,
+        permission_mode: None,
+        tool_use_id: None,
     };
 
     let extracted = build_file_extraction(
@@ -322,4 +330,117 @@ fn materialize_edges_explicit_src_dst() {
 fn materialize_edges_empty_pending() {
     let edges = materialize_edges(&[], "memory-789");
     assert!(edges.is_empty());
+}
+
+// ── Object-valued tool_response (issue #27) ────────────────────────────────
+
+#[test]
+fn parse_write_payload_with_object_tool_response() {
+    let json = r#"{
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/path/to/file.txt", "content": "hello"},
+        "tool_response": {"filePath": "/path/to/file.txt", "success": true}
+    }"#;
+
+    let payload = parse_payload(json).unwrap();
+    assert_eq!(payload.tool_name, "Write");
+    assert!(payload.tool_response.is_object());
+    // No known content field → falls back to JSON serialization
+    let text = payload.tool_response_text();
+    assert!(text.contains("filePath"));
+    assert!(text.contains("success"));
+
+    let extracted = extract(&payload).unwrap().unwrap();
+    assert_eq!(extracted.memory_type, MemoryType::Decision);
+    assert!(extracted.content.contains("File written:"));
+}
+
+#[test]
+fn parse_read_payload_with_object_tool_response() {
+    let json = r#"{
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/path/to/file.rs"},
+        "tool_response": {"type": "text", "file": {"filePath": "/path/to/file.rs", "content": "fn main() {}", "numLines": 1, "startLine": 1, "totalLines": 1}}
+    }"#;
+
+    let payload = parse_payload(json).unwrap();
+    assert!(payload.tool_response.is_object());
+    // tool_response_text() extracts file.content for Read responses
+    let text = payload.tool_response_text();
+    assert_eq!(text, "fn main() {}");
+
+    let extracted = extract(&payload).unwrap().unwrap();
+    assert_eq!(extracted.memory_type, MemoryType::Context);
+    assert!(extracted.content.contains("File read:"));
+    assert!(extracted.content.contains("fn main()"));
+}
+
+#[test]
+fn tool_response_text_extracts_text_field() {
+    let json = r#"{
+        "tool_name": "Bash",
+        "tool_input": {"command": "echo hello"},
+        "tool_response": {"text": "hello\n"}
+    }"#;
+
+    let payload = parse_payload(json).unwrap();
+    assert_eq!(payload.tool_response_text(), "hello\n");
+}
+
+#[test]
+fn tool_response_text_extracts_stdout_field() {
+    let json = r#"{
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls"},
+        "tool_response": {"stdout": "file1.rs\nfile2.rs", "exitCode": 0}
+    }"#;
+
+    let payload = parse_payload(json).unwrap();
+    assert_eq!(payload.tool_response_text(), "file1.rs\nfile2.rs");
+}
+
+#[test]
+fn tool_response_text_returns_inner_string_for_string_value() {
+    let json = r#"{
+        "tool_name": "Read",
+        "tool_input": {"file_path": "test.rs"},
+        "tool_response": "plain text response"
+    }"#;
+
+    let payload = parse_payload(json).unwrap();
+    assert_eq!(payload.tool_response_text(), "plain text response");
+}
+
+#[test]
+fn tool_response_text_returns_empty_for_null() {
+    let json = r#"{
+        "tool_name": "Read",
+        "tool_input": {"file_path": "test.rs"},
+        "tool_response": null
+    }"#;
+
+    let payload = parse_payload(json).unwrap();
+    assert_eq!(payload.tool_response_text(), "");
+}
+
+#[test]
+fn payload_with_extra_hook_fields_parses() {
+    let json = r#"{
+        "tool_name": "Read",
+        "tool_input": {"file_path": "test.rs"},
+        "tool_response": "content",
+        "hook_event_name": "PostToolUse",
+        "transcript_path": "/tmp/transcript.json",
+        "permission_mode": "default",
+        "tool_use_id": "toolu_abc123"
+    }"#;
+
+    let payload = parse_payload(json).unwrap();
+    assert_eq!(payload.hook_event_name.as_deref(), Some("PostToolUse"));
+    assert_eq!(
+        payload.transcript_path.as_deref(),
+        Some("/tmp/transcript.json")
+    );
+    assert_eq!(payload.permission_mode.as_deref(), Some("default"));
+    assert_eq!(payload.tool_use_id.as_deref(), Some("toolu_abc123"));
 }
