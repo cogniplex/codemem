@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 pub mod analysis;
 pub mod bm25;
@@ -134,18 +134,19 @@ pub struct IndexCache {
 /// alternative implementations, but the engine itself benefits from static dispatch.
 pub struct CodememEngine {
     pub(crate) storage: Box<dyn StorageBackend>,
-    pub(crate) vector: Mutex<HnswIndex>,
+    /// Lazily initialized HNSW vector index. Loaded on first `lock_vector()` call.
+    pub(crate) vector: OnceLock<Mutex<HnswIndex>>,
     pub(crate) graph: Mutex<GraphEngine>,
-    /// Optional embedding provider (None if not configured).
-    pub(crate) embeddings: Option<Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>>,
+    /// Lazily initialized embedding provider. Loaded on first `lock_embeddings()` call.
+    pub(crate) embeddings: OnceLock<Option<Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>>>,
     /// Path to the database file, used to derive the index save path.
     pub(crate) db_path: Option<PathBuf>,
     /// Cached index results for structural queries.
     pub(crate) index_cache: Mutex<Option<IndexCache>>,
     /// Configurable scoring weights for the 9-component hybrid scoring system.
     pub(crate) scoring_weights: RwLock<ScoringWeights>,
-    /// BM25 index for code-aware token overlap scoring.
-    pub(crate) bm25_index: Mutex<Bm25Index>,
+    /// Lazily initialized BM25 index. Loaded on first `lock_bm25()` call.
+    pub(crate) bm25_index: OnceLock<Mutex<Bm25Index>>,
     /// Loaded configuration.
     pub(crate) config: CodememConfig,
     /// Operational metrics collector.
@@ -180,15 +181,21 @@ impl CodememEngine {
         embeddings: Option<Box<dyn codemem_embeddings::EmbeddingProvider>>,
         config: CodememConfig,
     ) -> Self {
+        let vector_lock = OnceLock::new();
+        let _ = vector_lock.set(Mutex::new(vector));
+        let embeddings_lock = OnceLock::new();
+        let _ = embeddings_lock.set(embeddings.map(Mutex::new));
+        let bm25_lock = OnceLock::new();
+        let _ = bm25_lock.set(Mutex::new(Bm25Index::new()));
         Self {
             storage,
-            vector: Mutex::new(vector),
+            vector: vector_lock,
             graph: Mutex::new(graph),
-            embeddings: embeddings.map(Mutex::new),
+            embeddings: embeddings_lock,
             db_path: None,
             index_cache: Mutex::new(None),
             scoring_weights: RwLock::new(config.scoring.clone()),
-            bm25_index: Mutex::new(Bm25Index::new()),
+            bm25_index: bm25_lock,
             config,
             metrics: Arc::new(InMemoryMetrics::new()),
             dirty: AtomicBool::new(false),
@@ -197,7 +204,13 @@ impl CodememEngine {
         }
     }
 
-    /// Create an engine from a database path, loading all backends.
+    /// Create an engine from a database path.
+    ///
+    /// Only loads SQLite storage and the in-memory graph eagerly. The vector index,
+    /// BM25 index, and embedding provider are lazily initialized on first access
+    /// via `lock_vector()`, `lock_bm25()`, and `lock_embeddings()`. This makes
+    /// lightweight callers (lifecycle hooks) fast (~200ms) while full operations
+    /// (recall, search, analyze) pay the init cost once on first use.
     pub fn from_db_path(db_path: &Path) -> Result<Self, CodememError> {
         // Ensure parent directory exists (e.g. ~/.codemem/)
         if let Some(parent) = db_path.parent() {
@@ -219,54 +232,25 @@ impl CodememEngine {
             Some(config.storage.cache_size_mb),
             Some(config.storage.busy_timeout_secs),
         )?;
-        let vector_config = VectorConfig {
-            dimensions: config.vector.dimensions,
-            ..VectorConfig::default()
-        };
-        let mut vector = HnswIndex::new(vector_config.clone())?;
 
-        // Load existing vector index if it exists
-        let index_path = db_path.with_extension("idx");
-        if index_path.exists() {
-            if let Err(e) = vector.load(&index_path) {
-                tracing::warn!("Stale or corrupt vector index, will rebuild: {e}");
-            }
-        }
-
-        // C6: Vector index consistency check — compare vector index count vs DB embedding count.
-        // If they mismatch, rebuild the vector index from SQLite embeddings.
-        let vector_count = vector.stats().count;
-        let db_stats = storage.stats()?;
-        let db_embed_count = db_stats.embedding_count;
-        if vector_count != db_embed_count {
-            tracing::warn!(
-                "Vector index ({vector_count}) out of sync with DB ({db_embed_count}), rebuilding..."
-            );
-            // Rebuild: create a fresh index and re-insert all embeddings from DB
-            let mut fresh_vector = HnswIndex::new(vector_config)?;
-            if let Ok(embeddings) = storage.list_all_embeddings() {
-                for (id, embedding) in &embeddings {
-                    if let Err(e) = fresh_vector.insert(id, embedding) {
-                        tracing::warn!("Failed to re-insert embedding {id}: {e}");
-                    }
-                }
-            }
-            vector = fresh_vector;
-            // Save the rebuilt index
-            if let Err(e) = vector.save(&index_path) {
-                tracing::warn!("Failed to save rebuilt vector index: {e}");
-            }
-        }
-
-        // Load graph from storage
+        // Load graph from storage (needed for centrality and graph queries)
         let graph = GraphEngine::from_storage(&storage)?;
 
-        // Wire EmbeddingConfig into from_env as fallback
-        let embeddings = codemem_embeddings::from_env(Some(&config.embedding)).ok();
-
-        let mut engine =
-            Self::new_with_config(Box::new(storage), vector, graph, embeddings, config);
-        engine.db_path = Some(db_path.to_path_buf());
+        let engine = Self {
+            storage: Box::new(storage),
+            vector: OnceLock::new(),
+            graph: Mutex::new(graph),
+            embeddings: OnceLock::new(),
+            db_path: Some(db_path.to_path_buf()),
+            index_cache: Mutex::new(None),
+            scoring_weights: RwLock::new(config.scoring.clone()),
+            bm25_index: OnceLock::new(),
+            config,
+            metrics: Arc::new(InMemoryMetrics::new()),
+            dirty: AtomicBool::new(false),
+            active_session_id: RwLock::new(None),
+            change_detector: Mutex::new(None),
+        };
 
         // H7: Only compute PageRank at startup; betweenness is computed lazily
         // via `ensure_betweenness_computed()` when first needed.
@@ -274,63 +258,29 @@ impl CodememEngine {
             .lock_graph()?
             .recompute_centrality_with_options(false);
 
-        // Try loading persisted BM25 index; fall back to rebuilding from memories.
-        let bm25_path = db_path.with_extension("bm25");
-        let mut bm25_loaded = false;
-        if bm25_path.exists() {
-            match std::fs::read(&bm25_path) {
-                Ok(data) => match Bm25Index::deserialize(&data) {
-                    Ok(index) => {
-                        let mut bm25 = engine.lock_bm25()?;
-                        *bm25 = index;
-                        bm25_loaded = true;
-                        tracing::info!(
-                            "Loaded BM25 index from disk ({} documents)",
-                            bm25.doc_count
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to deserialize BM25 index, rebuilding: {e}");
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!("Failed to read BM25 index file, rebuilding: {e}");
-                }
-            }
-        }
-
-        if !bm25_loaded {
-            // Rebuild BM25 index from all existing memories (batch load)
-            if let Ok(ids) = engine.storage.list_memory_ids() {
-                let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
-                if let Ok(memories) = engine.storage.get_memories_batch(&id_refs) {
-                    let mut bm25 = engine.lock_bm25()?;
-                    for memory in &memories {
-                        bm25.add_document(&memory.id, &memory.content);
-                    }
-                    tracing::info!("Rebuilt BM25 index from {} memories", bm25.doc_count);
-                }
-            }
-        }
-
         Ok(engine)
     }
 
     /// Create a minimal engine for testing.
     pub fn for_testing() -> Self {
         let storage = Storage::open_in_memory().unwrap();
-        let vector = HnswIndex::with_defaults().unwrap();
         let graph = GraphEngine::new();
         let config = CodememConfig::default();
+        let vector_lock = OnceLock::new();
+        let _ = vector_lock.set(Mutex::new(HnswIndex::with_defaults().unwrap()));
+        let embeddings_lock = OnceLock::new();
+        let _ = embeddings_lock.set(None);
+        let bm25_lock = OnceLock::new();
+        let _ = bm25_lock.set(Mutex::new(Bm25Index::new()));
         Self {
             storage: Box::new(storage),
-            vector: Mutex::new(vector),
+            vector: vector_lock,
             graph: Mutex::new(graph),
-            embeddings: None,
+            embeddings: embeddings_lock,
             db_path: None,
             index_cache: Mutex::new(None),
             scoring_weights: RwLock::new(config.scoring.clone()),
-            bm25_index: Mutex::new(Bm25Index::new()),
+            bm25_index: bm25_lock,
             config,
             metrics: Arc::new(InMemoryMetrics::new()),
             dirty: AtomicBool::new(false),
@@ -343,6 +293,7 @@ impl CodememEngine {
 
     pub fn lock_vector(&self) -> Result<std::sync::MutexGuard<'_, HnswIndex>, CodememError> {
         self.vector
+            .get_or_init(|| self.init_vector())
             .lock()
             .map_err(|e| CodememError::LockPoisoned(format!("vector: {e}")))
     }
@@ -355,22 +306,41 @@ impl CodememEngine {
 
     pub fn lock_bm25(&self) -> Result<std::sync::MutexGuard<'_, Bm25Index>, CodememError> {
         self.bm25_index
+            .get_or_init(|| self.init_bm25())
             .lock()
             .map_err(|e| CodememError::LockPoisoned(format!("bm25: {e}")))
     }
 
+    /// Lock the embedding provider, lazily initializing it on first access.
+    ///
+    /// Returns `Ok(None)` if no provider is configured (e.g. `from_env()` fails).
     pub fn lock_embeddings(
         &self,
     ) -> Result<
         Option<std::sync::MutexGuard<'_, Box<dyn codemem_embeddings::EmbeddingProvider>>>,
         CodememError,
     > {
-        match &self.embeddings {
+        match self.embeddings.get_or_init(|| self.init_embeddings()) {
             Some(m) => Ok(Some(m.lock().map_err(|e| {
                 CodememError::LockPoisoned(format!("embeddings: {e}"))
             })?)),
             None => Ok(None),
         }
+    }
+
+    /// Check if embeddings are already initialized (without triggering lazy init).
+    fn embeddings_ready(&self) -> bool {
+        self.embeddings.get().is_some_and(|opt| opt.is_some())
+    }
+
+    /// Check if the vector index is already initialized (without triggering lazy init).
+    fn vector_ready(&self) -> bool {
+        self.vector.get().is_some()
+    }
+
+    /// Check if the BM25 index is already initialized (without triggering lazy init).
+    fn bm25_ready(&self) -> bool {
+        self.bm25_index.get().is_some()
     }
 
     pub fn lock_index_cache(
@@ -395,6 +365,159 @@ impl CodememEngine {
         self.scoring_weights
             .write()
             .map_err(|e| CodememError::LockPoisoned(format!("scoring_weights write: {e}")))
+    }
+
+    // ── Lazy Initialization ────────────────────────────────────────────
+
+    /// Initialize the HNSW vector index: load from disk, run consistency check.
+    fn init_vector(&self) -> Mutex<HnswIndex> {
+        let vector_config = VectorConfig {
+            dimensions: self.config.vector.dimensions,
+            ..VectorConfig::default()
+        };
+        let mut vector = HnswIndex::new(vector_config.clone())
+            .unwrap_or_else(|_| HnswIndex::with_defaults().expect("default vector index"));
+
+        if let Some(ref db_path) = self.db_path {
+            let index_path = db_path.with_extension("idx");
+            if index_path.exists() {
+                if let Err(e) = vector.load(&index_path) {
+                    tracing::warn!("Stale or corrupt vector index, will rebuild: {e}");
+                }
+            }
+
+            // C6: Consistency check — rebuild if count mismatches DB embedding count.
+            let vector_count = vector.stats().count;
+            if let Ok(db_stats) = self.storage.stats() {
+                let db_embed_count = db_stats.embedding_count;
+                if vector_count != db_embed_count {
+                    tracing::warn!(
+                        "Vector index ({vector_count}) out of sync with DB ({db_embed_count}), rebuilding..."
+                    );
+                    if let Ok(mut fresh) = HnswIndex::new(vector_config) {
+                        if let Ok(embeddings) = self.storage.list_all_embeddings() {
+                            for (id, emb) in &embeddings {
+                                if let Err(e) = fresh.insert(id, emb) {
+                                    tracing::warn!("Failed to re-insert embedding {id}: {e}");
+                                }
+                            }
+                        }
+                        vector = fresh;
+                        if let Err(e) = vector.save(&index_path) {
+                            tracing::warn!("Failed to save rebuilt vector index: {e}");
+                        }
+                    }
+                }
+            }
+        }
+
+        Mutex::new(vector)
+    }
+
+    /// Initialize the BM25 index: load from disk or rebuild from memories.
+    fn init_bm25(&self) -> Mutex<Bm25Index> {
+        let mut bm25 = Bm25Index::new();
+
+        if let Some(ref db_path) = self.db_path {
+            let bm25_path = db_path.with_extension("bm25");
+            let mut loaded = false;
+            if bm25_path.exists() {
+                if let Ok(data) = std::fs::read(&bm25_path) {
+                    if let Ok(index) = Bm25Index::deserialize(&data) {
+                        tracing::info!(
+                            "Loaded BM25 index from disk ({} documents)",
+                            index.doc_count
+                        );
+                        bm25 = index;
+                        loaded = true;
+                    }
+                }
+            }
+            if !loaded {
+                if let Ok(ids) = self.storage.list_memory_ids() {
+                    let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+                    if let Ok(memories) = self.storage.get_memories_batch(&id_refs) {
+                        for m in &memories {
+                            bm25.add_document(&m.id, &m.content);
+                        }
+                        tracing::info!("Rebuilt BM25 index from {} memories", bm25.doc_count);
+                    }
+                }
+            }
+        }
+
+        Mutex::new(bm25)
+    }
+
+    /// Initialize the embedding provider from environment/config.
+    ///
+    /// Also backfills embeddings for any memories that were stored without them
+    /// (e.g. by lifecycle hooks that skipped embedding for speed).
+    fn init_embeddings(&self) -> Option<Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>> {
+        let provider = match codemem_embeddings::from_env(Some(&self.config.embedding)) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("Failed to initialize embedding provider: {e}");
+                return None;
+            }
+        };
+
+        // Backfill un-embedded memories (from hooks that skipped embedding)
+        self.backfill_embeddings(&*provider);
+
+        Some(Mutex::new(provider))
+    }
+
+    /// Embed any memories that lack embeddings in SQLite.
+    ///
+    /// This runs during lazy init of the embedding provider to pick up memories
+    /// stored by lightweight hooks without embedding.
+    fn backfill_embeddings(&self, provider: &dyn codemem_embeddings::EmbeddingProvider) {
+        let ids = match self.storage.list_memory_ids() {
+            Ok(ids) => ids,
+            Err(_) => return,
+        };
+
+        let mut to_embed: Vec<(String, String)> = Vec::new();
+        for id in &ids {
+            if self.storage.get_embedding(id).ok().flatten().is_none() {
+                if let Ok(Some(mem)) = self.storage.get_memory_no_touch(id) {
+                    let text = self.enrich_memory_text(
+                        &mem.content,
+                        mem.memory_type,
+                        &mem.tags,
+                        mem.namespace.as_deref(),
+                        Some(&mem.id),
+                    );
+                    to_embed.push((id.clone(), text));
+                }
+            }
+        }
+
+        if to_embed.is_empty() {
+            return;
+        }
+
+        tracing::info!("Backfilling {} un-embedded memories", to_embed.len());
+        let text_refs: Vec<&str> = to_embed.iter().map(|(_, t)| t.as_str()).collect();
+        match provider.embed_batch(&text_refs) {
+            Ok(embeddings) => {
+                for ((id, _), emb) in to_embed.iter().zip(embeddings.iter()) {
+                    let _ = self.storage.store_embedding(id, emb);
+                    // Insert into vector index if already loaded
+                    if let Some(vi_mutex) = self.vector.get() {
+                        if let Ok(mut vi) = vi_mutex.lock().map_err(|e| {
+                            tracing::warn!("Vector lock failed during backfill: {e}");
+                            e
+                        }) {
+                            let _ = vi.insert(id, emb);
+                        }
+                    }
+                }
+                tracing::info!("Backfilled {} embeddings", to_embed.len());
+            }
+            Err(e) => tracing::warn!("Backfill embedding failed: {e}"),
+        }
     }
 
     // ── Active Session ───────────────────────────────────────────────────
@@ -423,8 +546,14 @@ impl CodememEngine {
     }
 
     /// Whether an embedding provider is configured.
+    ///
+    /// Returns `true` if embeddings are already loaded, or if the config suggests
+    /// a provider is available (without triggering lazy init).
     pub fn has_embeddings(&self) -> bool {
-        self.embeddings.is_some()
+        match self.embeddings.get() {
+            Some(opt) => opt.is_some(),
+            None => !self.config.embedding.provider.is_empty(),
+        }
     }
 
     /// Access the database path (if backed by a file).

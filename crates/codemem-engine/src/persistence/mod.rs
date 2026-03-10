@@ -565,9 +565,9 @@ impl super::CodememEngine {
         let mut symbols_embedded = 0usize;
         let mut chunks_embedded = 0usize;
 
-        // Quick check: skip expensive text enrichment if no embedding provider.
-        let has_embeddings = self.lock_embeddings()?.is_some();
-        if !has_embeddings {
+        // Quick check: skip expensive text enrichment if embedding provider isn't loaded.
+        // This avoids triggering lazy init during lightweight operations (hooks).
+        if !self.embeddings_ready() {
             return Ok((0, 0));
         }
 

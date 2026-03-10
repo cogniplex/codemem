@@ -43,27 +43,31 @@ impl CodememEngine {
         };
         let memory = memory.as_ref();
 
-        // H3: Step 1 — Acquire embeddings lock first, embed, save result, drop lock.
-        // This prevents holding the embeddings lock while acquiring vector/graph locks.
-        // Embedding is computed before the transaction since it doesn't touch SQLite.
-        let embedding_result = match self.lock_embeddings() {
-            Ok(Some(emb)) => {
-                let enriched = self.enrich_memory_text(
-                    &memory.content,
-                    memory.memory_type,
-                    &memory.tags,
-                    memory.namespace.as_deref(),
-                    Some(&memory.id),
-                );
-                let result = emb.embed(&enriched).ok();
-                drop(emb);
-                result
+        // H3: Step 1 — Embed if the provider is already loaded (don't trigger lazy init).
+        // Lifecycle hooks skip embedding for speed; the provider gets initialized on
+        // first recall/search, and backfill_embeddings() picks up any gaps.
+        let embedding_result = if self.embeddings_ready() {
+            match self.lock_embeddings() {
+                Ok(Some(emb)) => {
+                    let enriched = self.enrich_memory_text(
+                        &memory.content,
+                        memory.memory_type,
+                        &memory.tags,
+                        memory.namespace.as_deref(),
+                        Some(&memory.id),
+                    );
+                    let result = emb.embed(&enriched).ok();
+                    drop(emb);
+                    result
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::warn!("Embeddings lock failed during persist: {e}");
+                    None
+                }
             }
-            Ok(None) => None,
-            Err(e) => {
-                tracing::warn!("Embeddings lock failed during persist: {e}");
-                None
-            }
+        } else {
+            None
         };
 
         // 2F: Wrap all SQLite mutations in a single transaction so that the
@@ -87,12 +91,15 @@ impl CodememEngine {
             }
         }
 
-        // 2. Update BM25 index (in-memory, not SQLite)
-        match self.lock_bm25() {
-            Ok(mut bm25) => {
-                bm25.add_document(&memory.id, &memory.content);
+        // 2. Update BM25 index if already loaded (don't trigger lazy init).
+        // The BM25 index rebuilds from all memories on first access anyway.
+        if self.bm25_ready() {
+            match self.lock_bm25() {
+                Ok(mut bm25) => {
+                    bm25.add_document(&memory.id, &memory.content);
+                }
+                Err(e) => tracing::warn!("BM25 lock failed during persist: {e}"),
             }
-            Err(e) => tracing::warn!("BM25 lock failed during persist: {e}"),
         }
 
         // 3. Add memory node to in-memory graph (already persisted to SQLite above)
@@ -120,11 +127,13 @@ impl CodememEngine {
         // 3b. Auto-link to memories with shared tags (session co-membership, topic overlap)
         self.auto_link_by_tags(memory);
 
-        // H3: Step 4 — Insert embedding into HNSW vector index (separate from SQLite).
+        // H3: Step 4 — Insert embedding into HNSW vector index if already loaded.
         if let Some(vec) = &embedding_result {
-            if let Ok(mut vi) = self.lock_vector() {
-                if let Err(e) = vi.insert(&memory.id, vec) {
-                    tracing::warn!("Failed to insert into vector index for {}: {e}", memory.id);
+            if self.vector_ready() {
+                if let Ok(mut vi) = self.lock_vector() {
+                    if let Err(e) = vi.insert(&memory.id, vec) {
+                        tracing::warn!("Failed to insert into vector index for {}: {e}", memory.id);
+                    }
                 }
             }
         }
