@@ -137,9 +137,8 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
             *hooks = serde_json::json!({});
         }
 
-        // Define all 4 codemem hooks
-        // matcher is a regex string filtering tool names (PostToolUse) or session type (SessionStart)
-        // UserPromptSubmit and Stop don't support matchers — omit the field
+        // Define all codemem lifecycle hooks covering the Claude Code hooks spec.
+        // matcher is a regex filtering tool names or session source. Omitted = fires for all.
         let hook_defs: Vec<(&str, &str, serde_json::Value)> = vec![
             (
                 "SessionStart",
@@ -176,6 +175,17 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                 }]),
             ),
             (
+                "PostToolUseFailure",
+                "codemem tool-error",
+                serde_json::json!([{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "codemem tool-error",
+                        "timeout": 5000
+                    }]
+                }]),
+            ),
+            (
                 "Stop",
                 "codemem summarize",
                 serde_json::json!([{
@@ -183,6 +193,50 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                         "type": "command",
                         "command": "codemem summarize",
                         "timeout": 10000
+                    }]
+                }]),
+            ),
+            (
+                "SubagentStop",
+                "codemem agent-result",
+                serde_json::json!([{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "codemem agent-result",
+                        "timeout": 5000
+                    }]
+                }]),
+            ),
+            (
+                "SubagentStart",
+                "codemem agent-start",
+                serde_json::json!([{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "codemem agent-start",
+                        "timeout": 5000
+                    }]
+                }]),
+            ),
+            (
+                "SessionEnd",
+                "codemem session-close",
+                serde_json::json!([{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "codemem session-close",
+                        "timeout": 5000
+                    }]
+                }]),
+            ),
+            (
+                "PreCompact",
+                "codemem checkpoint",
+                serde_json::json!([{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "codemem checkpoint",
+                        "timeout": 5000
                     }]
                 }]),
             ),

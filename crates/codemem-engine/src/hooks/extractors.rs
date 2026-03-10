@@ -63,7 +63,10 @@ pub(super) fn build_file_extraction(
 }
 
 /// Extract memory from a Read tool use.
-pub(super) fn extract_read(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
+pub(super) fn extract_read(
+    payload: &HookPayload,
+    response_text: &str,
+) -> Result<Option<ExtractedMemory>, CodememError> {
     let file_path = payload
         .tool_input
         .get("file_path")
@@ -73,7 +76,7 @@ pub(super) fn extract_read(payload: &HookPayload) -> Result<Option<ExtractedMemo
     let content = format!(
         "File read: {}\n\n{}",
         file_path,
-        truncate(&payload.tool_response, 2000)
+        truncate(response_text, 2000)
     );
 
     Ok(Some(build_file_extraction(
@@ -86,7 +89,10 @@ pub(super) fn extract_read(payload: &HookPayload) -> Result<Option<ExtractedMemo
 }
 
 /// Extract memory from a Glob tool use.
-pub(super) fn extract_glob(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
+pub(super) fn extract_glob(
+    payload: &HookPayload,
+    response_text: &str,
+) -> Result<Option<ExtractedMemory>, CodememError> {
     let pattern = payload
         .tool_input
         .get("pattern")
@@ -96,7 +102,7 @@ pub(super) fn extract_glob(payload: &HookPayload) -> Result<Option<ExtractedMemo
     let content = format!(
         "Glob search: {}\nResults:\n{}",
         pattern,
-        truncate(&payload.tool_response, 2000)
+        truncate(response_text, 2000)
     );
 
     let tags = vec![format!("glob:{pattern}"), "discovery".to_string()];
@@ -124,7 +130,10 @@ pub(super) fn extract_glob(payload: &HookPayload) -> Result<Option<ExtractedMemo
 }
 
 /// Extract memory from a Grep tool use.
-pub(super) fn extract_grep(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
+pub(super) fn extract_grep(
+    payload: &HookPayload,
+    response_text: &str,
+) -> Result<Option<ExtractedMemory>, CodememError> {
     let pattern = payload
         .tool_input
         .get("pattern")
@@ -134,7 +143,7 @@ pub(super) fn extract_grep(payload: &HookPayload) -> Result<Option<ExtractedMemo
     let content = format!(
         "Grep search: {}\nMatches:\n{}",
         pattern,
-        truncate(&payload.tool_response, 2000)
+        truncate(response_text, 2000)
     );
 
     let tags = vec![format!("pattern:{pattern}"), "search".to_string()];
@@ -217,6 +226,7 @@ pub(super) fn extract_edit(payload: &HookPayload) -> Result<Option<ExtractedMemo
 /// Extract memory from a Write tool use.
 pub(super) fn extract_write(
     payload: &HookPayload,
+    response_text: &str,
 ) -> Result<Option<ExtractedMemory>, CodememError> {
     let file_path = payload
         .tool_input
@@ -227,7 +237,7 @@ pub(super) fn extract_write(
     let content = format!(
         "File written: {}\n\n{}",
         file_path,
-        truncate(&payload.tool_response, 2000)
+        truncate(response_text, 2000)
     );
 
     Ok(Some(build_file_extraction(
@@ -240,7 +250,10 @@ pub(super) fn extract_write(
 }
 
 /// Extract memory from a Bash tool use.
-pub(super) fn extract_bash(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
+pub(super) fn extract_bash(
+    payload: &HookPayload,
+    response_text: &str,
+) -> Result<Option<ExtractedMemory>, CodememError> {
     let command = payload
         .tool_input
         .get("command")
@@ -248,7 +261,7 @@ pub(super) fn extract_bash(payload: &HookPayload) -> Result<Option<ExtractedMemo
         .unwrap_or("");
 
     let first_word = command.split_whitespace().next().unwrap_or("unknown");
-    let response = truncate(&payload.tool_response, 2000);
+    let response = truncate(response_text, 2000);
 
     let content = format!("Bash command: {}\nOutput:\n{}", command, response);
 
@@ -262,7 +275,7 @@ pub(super) fn extract_bash(payload: &HookPayload) -> Result<Option<ExtractedMemo
     }
 
     // Detect error indicators
-    let response_lower = payload.tool_response.to_lowercase();
+    let response_lower = response_text.to_lowercase();
     if response_lower.contains("error:")
         || response_lower.contains("failed")
         || payload
@@ -330,7 +343,10 @@ fn extract_file_path_from_command(command: &str) -> Option<&str> {
 }
 
 /// Extract memory from a WebFetch/WebSearch tool use.
-pub(super) fn extract_web(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
+pub(super) fn extract_web(
+    payload: &HookPayload,
+    response_text: &str,
+) -> Result<Option<ExtractedMemory>, CodememError> {
     let url = payload
         .tool_input
         .get("url")
@@ -343,7 +359,7 @@ pub(super) fn extract_web(payload: &HookPayload) -> Result<Option<ExtractedMemor
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let response = truncate(&payload.tool_response, 2000);
+    let response = truncate(response_text, 2000);
 
     let content = if !url.is_empty() {
         format!("Web fetch: {url}\nResponse:\n{response}")
@@ -410,8 +426,9 @@ fn extract_domain(url: &str) -> Option<&str> {
 /// Extract memory from Agent/SendMessage tool uses.
 pub(super) fn extract_agent_communication(
     payload: &HookPayload,
+    response_text: &str,
 ) -> Result<Option<ExtractedMemory>, CodememError> {
-    let response = truncate(&payload.tool_response, 2000);
+    let response = truncate(response_text, 2000);
 
     let content = format!("Agent communication ({}): {}", payload.tool_name, response);
 
@@ -435,6 +452,7 @@ pub(super) fn extract_agent_communication(
 /// Extract memory from ListFiles/ListDir tool uses.
 pub(super) fn extract_list_dir(
     payload: &HookPayload,
+    response_text: &str,
 ) -> Result<Option<ExtractedMemory>, CodememError> {
     let directory = payload
         .tool_input
@@ -443,7 +461,7 @@ pub(super) fn extract_list_dir(
         .and_then(|v| v.as_str())
         .unwrap_or(".");
 
-    let response = truncate(&payload.tool_response, 2000);
+    let response = truncate(response_text, 2000);
     let content = format!("Listed directory: {directory}\n{response}");
 
     let mut tags = vec!["discovery".to_string()];

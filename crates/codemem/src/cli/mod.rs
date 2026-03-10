@@ -177,6 +177,21 @@ enum Commands {
 
     /// Stop hook: generate session summary (reads JSON from stdin)
     Summarize,
+
+    /// SubagentStop hook: capture subagent findings (reads JSON from stdin)
+    AgentResult,
+
+    /// SubagentStart hook: note agent spawn (reads JSON from stdin)
+    AgentStart,
+
+    /// PostToolUseFailure hook: capture tool errors (reads JSON from stdin)
+    ToolError,
+
+    /// SessionEnd hook: clean session close (reads JSON from stdin)
+    SessionClose,
+
+    /// PreCompact hook: checkpoint before context compaction (reads JSON from stdin)
+    Checkpoint,
 }
 
 #[derive(Subcommand)]
@@ -364,6 +379,21 @@ pub fn run() -> anyhow::Result<()> {
         }
         Commands::Summarize => {
             commands_lifecycle::cmd_summarize()?;
+        }
+        Commands::AgentResult => {
+            commands_lifecycle::cmd_agent_result()?;
+        }
+        Commands::AgentStart => {
+            commands_lifecycle::cmd_agent_start()?;
+        }
+        Commands::ToolError => {
+            commands_lifecycle::cmd_tool_error()?;
+        }
+        Commands::SessionClose => {
+            commands_lifecycle::cmd_session_close()?;
+        }
+        Commands::Checkpoint => {
+            commands_lifecycle::cmd_checkpoint()?;
         }
     }
 

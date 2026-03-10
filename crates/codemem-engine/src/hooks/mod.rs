@@ -22,13 +22,66 @@ use extractors::{
 const MAX_CONTENT_SIZE: usize = 100 * 1024;
 
 /// PostToolUse hook payload from an AI coding assistant.
+///
+/// `tool_response` is `serde_json::Value` because Claude Code sends it as a
+/// JSON object (not a plain string). String-valued responses still deserialize
+/// correctly into `Value::String`.
 #[derive(Debug, Deserialize)]
 pub struct HookPayload {
     pub tool_name: String,
     pub tool_input: serde_json::Value,
-    pub tool_response: String,
+    pub tool_response: serde_json::Value,
     pub session_id: Option<String>,
     pub cwd: Option<String>,
+    /// Name of the hook event (e.g. "PostToolUse").
+    pub hook_event_name: Option<String>,
+    /// Path to the conversation transcript file.
+    pub transcript_path: Option<String>,
+    /// Permission mode the assistant is running in.
+    pub permission_mode: Option<String>,
+    /// Unique ID of the tool use that triggered this hook.
+    pub tool_use_id: Option<String>,
+}
+
+impl HookPayload {
+    /// Extract meaningful text content from the tool response.
+    ///
+    /// Handles known Claude Code response shapes before falling back to
+    /// raw JSON serialization:
+    ///
+    /// - `Value::String` → inner text (legacy / simple tools)
+    /// - Read tool: `{file: {content: "..."}}` → the file content
+    /// - Text-bearing: `{text: "..."}` → the text value
+    /// - Stdout-bearing: `{stdout: "..."}` → stdout value
+    /// - `Value::Null` → empty string
+    /// - anything else → compact JSON serialization
+    pub fn tool_response_text(&self) -> String {
+        match &self.tool_response {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Null => String::new(),
+            serde_json::Value::Object(obj) => {
+                // Read tool: {file: {content: "..."}}
+                if let Some(content) = obj
+                    .get("file")
+                    .and_then(|f| f.get("content"))
+                    .and_then(|c| c.as_str())
+                {
+                    return content.to_string();
+                }
+                // Text-bearing responses: {text: "..."}
+                if let Some(text) = obj.get("text").and_then(|t| t.as_str()) {
+                    return text.to_string();
+                }
+                // Stdout-bearing responses: {stdout: "..."}
+                if let Some(stdout) = obj.get("stdout").and_then(|s| s.as_str()) {
+                    return stdout.to_string();
+                }
+                // Fallback: compact JSON
+                serde_json::to_string(&self.tool_response).unwrap_or_default()
+            }
+            other => other.to_string(),
+        }
+    }
 }
 
 /// Extracted memory from a hook payload.
@@ -59,25 +112,25 @@ pub fn parse_payload(json: &str) -> Result<HookPayload, CodememError> {
 
 /// Extract memory from a hook payload.
 pub fn extract(payload: &HookPayload) -> Result<Option<ExtractedMemory>, CodememError> {
-    // Skip large responses
-    if payload.tool_response.len() > MAX_CONTENT_SIZE {
-        tracing::debug!(
-            "Skipping large response ({} bytes)",
-            payload.tool_response.len()
-        );
+    // Check response size to skip very large payloads.
+    // For strings, check directly. For objects, check the extracted text content
+    // since that's what we actually store (avoids double-serialization).
+    let response_text = payload.tool_response_text();
+    if response_text.len() > MAX_CONTENT_SIZE {
+        tracing::debug!("Skipping large response ({} bytes)", response_text.len());
         return Ok(None);
     }
 
     match payload.tool_name.as_str() {
-        "Read" => extract_read(payload),
-        "Glob" => extract_glob(payload),
-        "Grep" => extract_grep(payload),
+        "Read" => extract_read(payload, &response_text),
+        "Glob" => extract_glob(payload, &response_text),
+        "Grep" => extract_grep(payload, &response_text),
         "Edit" | "MultiEdit" => extract_edit(payload),
-        "Write" => extract_write(payload),
-        "Bash" => extract_bash(payload),
-        "WebFetch" | "WebSearch" => extract_web(payload),
-        "Agent" | "SendMessage" => extract_agent_communication(payload),
-        "ListFiles" | "ListDir" => extract_list_dir(payload),
+        "Write" => extract_write(payload, &response_text),
+        "Bash" => extract_bash(payload, &response_text),
+        "WebFetch" | "WebSearch" => extract_web(payload, &response_text),
+        "Agent" | "SendMessage" => extract_agent_communication(payload, &response_text),
+        "ListFiles" | "ListDir" => extract_list_dir(payload, &response_text),
         _ => {
             tracing::debug!("Unknown tool: {}", payload.tool_name);
             Ok(None)
