@@ -2,124 +2,82 @@
 
 This file provides guidance to Claude Code when working with this repository.
 
-## Project Overview
-
-Codemem is a standalone Rust memory engine for AI coding assistants — a single binary that stores code exploration findings so repos don't need re-exploring across sessions. It uses a graph-vector hybrid architecture with contextual embeddings, BM25 scoring, 32 MCP tools, 9 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, PostToolUseFailure, Stop, SubagentStart, SubagentStop, SessionEnd, PreCompact), 14 enrichment types, optional LLM observation compression, real-time file watching, cross-session pattern detection, a REST/SSE API, and a React web UI.
-
-## Workspace Structure (6 crates)
-
-| Crate | Purpose |
-|-------|---------|
-| codemem-core | Shared types (`types.rs`), traits (`traits.rs`), errors (`error.rs`), config (`config.rs`): MemoryNode, Edge, Session, DetectedPattern, CodememConfig, ChunkingConfig, EnrichmentConfig, 7 MemoryTypes, 24 RelationshipTypes, 13 NodeKinds, ScoringWeights, VectorBackend/GraphBackend/StorageBackend traits |
-| codemem-storage | rusqlite (bundled) WAL mode + usearch HNSW vector index + petgraph graph engine. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl), `migrations.rs` (schema versioning), `vector.rs` (HNSW 768-dim cosine, M=16), `graph/` (traversal with BFS/DFS/kind-aware filtering, algorithms: PageRank, Louvain, SCC, betweenness, topological, cached centrality, graph compaction, package nodes) |
-| codemem-embeddings | Pluggable via `from_env()`: Candle (local BERT, default), Ollama, OpenAI-compatible. `CachedProvider` wrapper, BAAI/bge-base-en-v1.5 (768-dim), LRU cache 10K. Safe concurrency via `LockPoisoned` error handling |
-| codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing for Cargo.toml/package.json/go.mod/pyproject.toml), `hooks/` (lifecycle hook handlers for 9 tool types: Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/ListDir, trigger-based auto-insights, `extractors.rs` + `triggers.rs`), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `enrichment/` (14 enrichment types, one file per analysis + `run_enrichments()` pipeline), `consolidation/` (5 cycles: decay, creative, cluster, forget, summarize + union-find), `persistence/` (index persistence + compaction), `analysis.rs` (decision chains, session checkpoints, impact analysis), `search.rs` (semantic/text/hybrid code search), `recall.rs` (unified recall with temporal edge filtering), `bm25.rs` (Okapi BM25 scoring with serialization), `scoring.rs` (hybrid scoring helpers), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `metrics.rs` (operational metrics) |
-| codemem | Unified binary + library crate with three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 32 MCP tools, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 24 commands, lifecycle hooks, config management) |
-| codemem-bench | Criterion benchmarks, 20% regression threshold |
-
-## Web UI (`ui/`)
-
-React 19 + Vite + TailwindCSS v4 dashboard with three-tab GraphView: Graph (Sigma.js force-directed with relationship filters, focus mode, ego-graph), Explorer (paginated node browser with kind filters, mini ego-graph detail), Vector Space (3D PCA point cloud via React Three Fiber + Three.js). Key stack: Zustand (state), React Router, React Query, Sigma.js (graph visualization), @react-three/fiber + drei + three (3D point cloud), Recharts. Tests via Playwright. Uses Bun as package manager.
-
-```bash
-cd ui && bun install            # Install UI dependencies
-cd ui && bun run dev            # Dev server (Vite)
-cd ui && bun run build          # Production build → ui/dist/
-cd ui && bun run tsc --noEmit   # TypeScript check
-cd ui && bun run eslint .       # Lint check
-cd ui && npx playwright test    # E2E tests
-```
-
-## Agent Definitions (`.claude/agents/`)
-
-Multi-agent team for codebase analysis, installed by `codemem init`:
-
-| Agent | Role | Wave |
-|-------|------|------|
-| `code-mapper.md` | Team lead — orchestrates phases, spawns agents, consolidates | — |
-| `baseline-scanner.md` | File/package baseline summaries (150 chars each) | 1 |
-| `symbol-analyst.md` | Deep analysis of critical/important symbols | 2 |
-| `api-mapper.md` | API endpoint documentation | 2 |
-| `pattern-hunter.md` | Cross-file pattern discovery within Louvain clusters | 2 |
-| `architecture-reviewer.md` | Module boundaries, dependency patterns, layering | 3 |
-| `security-reviewer.md` | Auth, validation, trust boundaries | 3 |
-| `test-mapper.md` | Testing patterns, coverage, organization | 3 |
-
-The team lead has all 32 codemem tools + team orchestration. Specialized agents have a restricted subset (memory + graph tools, no Agent/TeamCreate/TaskCreate). Multiple instances of each role are spawned based on repo size (2-10 baseline scanners, 1-20 deep analysts, 0-3 cross-cutting reviewers).
-
-## Key Design Decisions
-
-- **Embedding engine**: Pluggable via `CODEMEM_EMBED_PROVIDER` env var — Candle (default, pure Rust ML), Ollama (local server), OpenAI (API-compatible, works with Voyage AI/Together/Azure). `from_env()` factory in codemem-embeddings selects provider at runtime. All providers wrapped with LRU cache (10K).
-- **Contextual embeddings**: Text enriched with metadata + graph context before embedding
-- **7 memory types**: Decision, Pattern, Preference, Style, Habit, Insight, Context
-- **24 relationship types**: RELATES_TO, LEADS_TO, PART_OF, REINFORCES, CONTRADICTS, EVOLVED_INTO, DERIVED_FROM, INVALIDATED_BY, DEPENDS_ON, IMPORTS, EXTENDS, CALLS, CONTAINS, SUPERSEDES, BLOCKS, IMPLEMENTS, INHERITS, SIMILAR_TO, PRECEDED_BY, EXEMPLIFIES, EXPLAINS, SHARES_THEME, SUMMARIZES, CO_CHANGED
-- **8-component hybrid scoring**: vector_similarity 25%, graph_strength 20% (PageRank 40% + betweenness 30% + degree 20% + cluster 10%), token_overlap 15%, temporal 10%, importance 10%, confidence 10%, tag_matching 5%, recency 5%
-- **BM25 scoring**: Okapi BM25 (k1=1.2, b=0.75) with code-aware tokenizer (camelCase/snake_case splitting)
-- **9 lifecycle hooks**: SessionStart (context injection + pending analysis, handles `source`: startup/resume/compact/clear), UserPromptSubmit (prompt capture via full persist pipeline), PostToolUse (observation capture from 9 tool types with 5 auto-insight triggers), PostToolUseFailure (tool error pattern capture), Stop (session summary + change tracking via full persist pipeline, `stop_hook_active` guard, `last_assistant_message` excerpt), SubagentStart (agent spawn logging), SubagentStop (agent findings capture from `last_assistant_message`), SessionEnd (clean session close with termination reason), PreCompact (checkpoint memory before context compaction)
-- **Change batching**: Stop hook stores `pending-analysis` tagged memories with edited file lists; SessionStart surfaces these for code-mapper agent analysis
-- **Static analysis tagging**: All enrichment pipeline outputs tagged `static-analysis` so agents can find, review, refine, or delete them
-- **Observation compression**: Optional LLM-powered compression via Ollama/OpenAI/Anthropic, configured via env vars
-- **Impact-aware recall**: Cached PageRank + betweenness centrality wired into scoring, unified `recall` tool with `include_impact=true` returns graph impact data. Temporal edge filtering (valid_to < now) applied during graph expansion
-- **Cross-session patterns**: Detects repeated searches, file hotspots, decision chains, tool preferences across sessions
-- **Diff-aware memory**: Computes semantic diff summaries (function additions/removals, import changes, type definitions)
-- **File watching**: Real-time notify-based watcher (<50ms debounce) with auto-indexing
-- **Session continuity**: Session tracking with start/end/list, auto-started by lifecycle hooks. `session_id` field on `MemoryNode` auto-populated from `CodememEngine::active_session_id`. `memory_count` computed via correlated subquery. MCP activity recording for all tools. Checkpoint persistence with rich metadata (session_id, memory_count, action counts, patterns, hot directories)
-- **Consolidation**: 5 cycles — Decay (power-law, daily), Creative/REM (vector KNN O(n log n), weekly), Cluster (semantic cosine + union-find, monthly), Summarize (LLM-powered, on-demand), Forget (optional)
-- **Self-editing memory**: refine_memory (EVOLVED_INTO provenance), split_memory (PART_OF edges), merge_memories (SUMMARIZES edges) — all with full store pipeline and temporal edge tracking
-- **Temporal edges**: Edges have `valid_from`/`valid_to` fields for tracking when relationships are active
-- **Pattern confidence**: Log-scaled confidence based on `ln(frequency)/ln(total_sessions)` instead of linear `count/N`
-- **Storage**: Single database at ~/.codemem/codemem.db + ~/.codemem/codemem.idx, namespace-scoped queries. Multi-row INSERT batching (SQLite 999-param limit aware), transaction wrapping (`begin/commit/rollback_transaction` on StorageBackend with `AtomicBool` guard), batch cascade deletes for consolidation
-- **13 node kinds**: File, Package, Function, Method, Class, Interface, Type, Constant, Module, Memory, Endpoint, Test, Chunk
-- **Graph compaction**: Two-pass pruning after indexing — chunks scored by centrality + structural parent + memory link + content density, symbols scored by call connectivity + visibility + kind + memory link + code size. Cold-start-aware: when no memories exist, memory_link weight is redistributed to other factors. Configurable via `ChunkingConfig`
-- **14 enrichment types**: git history, security, performance, complexity (cyclomatic/cognitive), architecture inference, test mapping, API surface, doc coverage, change impact, code smells, hot+complex correlation, blame/ownership, advanced security scanning, quality stratification. All produce Insight memories tagged `static-analysis`
-- **Enhanced symbol model**: Symbols now carry `parameters`, `return_type`, `is_async`, `attributes`, `throws`, `generic_params`, `is_abstract` metadata. 6 new symbol kinds: Field, Property, Constructor, EnumVariant, Macro, Decorator
-- **Manifest parsing**: Cargo.toml, package.json, go.mod, pyproject.toml (PEP 621 + Poetry)
-- **Chunking improvements**: O(log n) parent resolution via SymbolIntervalIndex, configurable overlap_lines, merged chunks preserve comma-separated node_kind labels
-- **Reference improvements**: Rust grouped import decomposition (`std::{HashMap, HashSet}`), reference deduplication by (source, target, kind), AST reuse (parse once for both symbols and references)
-- **BM25 persistence**: Index serializable via JSON for fast startup without re-indexing
-- **MCP tool consolidation**: 32 tools. Key merges: `recall` (unified recall/expansion/impact), `consolidate` (unified 6 modes), `codemem_status` (unified stats/health/metrics), `search_code` (unified semantic/text/hybrid), `get_symbol_graph` (unified deps/impact)
-- **Auto-linking**: `store_memory` auto-detects code references (CamelCase, backticks, qualified paths, file paths) in content and links to matching graph nodes
-- **Enrichment config**: `EnrichmentConfig` with tunable thresholds for git history, performance analysis, insight confidence, and semantic dedup (cosine > 0.90)
-- **Persistent config**: TOML config at `~/.codemem/config.toml` with scoring weights, vector/graph tuning, embedding provider, chunking, enrichment, and storage settings. Loaded at startup; partial configs merge with defaults
-- **Schema migrations**: Versioned, idempotent SQL migrations tracked in a `schema_version` table. Schema extracted into `.sql` files
-- **Safe concurrency**: Zero `.unwrap()` on lock acquisitions; all mutexes/rwlocks use typed lock helpers returning `CodememError::LockPoisoned`. `UnsafeCell` replaced with `RwLock` for scoring weights
-
-## Key Dependencies
-
-candle-core/nn/transformers (ML inference), usearch (HNSW), rusqlite (bundled SQLite), petgraph (graph), tokenizers (HuggingFace), ast-grep-core/ast-grep-language (code parsing via tree-sitter), clap (CLI), serde/serde_json, serde_yaml (rule definitions), hf-hub (model download), lru (cache), sha2 (dedup), similar (diffs), notify/notify-debouncer-mini (file watching), reqwest (HTTP for embedding providers + LLM compression), criterion (benchmarks), toml (config persistence), ignore (gitignore parsing), tempfile (test fixtures), axum/tower-http (REST API), tokio (async runtime), ndarray (PCA)
-
 ## Build & Test
 
 ```bash
 cargo build                    # Build all crates
 cargo test --workspace         # Run all tests
 cargo bench                    # Run benchmarks
-cargo build --release          # Optimized release binary
-cargo install --path crates/codemem      # Install CLI binary
 cargo fmt --all -- --check     # Check formatting
 cargo clippy --workspace --all-targets -- -D warnings  # Lint check
 ```
 
-## CI Pipeline (`.github/workflows/ci.yml`)
+UI (uses Bun, not npm):
+```bash
+cd ui && bun install && bun run dev       # Dev server
+cd ui && bun run build                    # Production build → ui/dist/
+cd ui && bun run tsc --noEmit             # Type check
+cd ui && bun run eslint .                 # Lint
+cd ui && npx playwright test              # E2E tests
+```
 
-All checks must pass on push to main:
+**CI uses `RUSTFLAGS: -D warnings`** — all warnings are errors. Always run clippy before pushing.
 
-| Job | What it checks |
-|-----|---------------|
-| Format | `cargo fmt --all -- --check` |
-| Clippy | `cargo clippy --workspace --all-targets -- -D warnings` |
-| Test | `cargo test --workspace` (ubuntu + macos) |
-| Coverage | `cargo llvm-cov` → Codecov |
-| UI Lint | `bun run tsc --noEmit` + `bun run eslint .` |
-| UI E2E | Build UI, embed in codemem crate, Playwright tests |
-| Benchmarks | `cargo bench --workspace --no-run` |
+## Workspace Layout
 
-**Important**: CI uses `RUSTFLAGS: -D warnings` — all warnings are errors. Run `cargo clippy --workspace --all-targets -- -D warnings` locally before pushing.
+6 crates: `codemem-core` (types/traits/errors/config) → `codemem-storage` (SQLite + HNSW + petgraph) + `codemem-embeddings` (Candle/Ollama/OpenAI) → `codemem-engine` (domain logic) → `codemem` (binary: CLI + MCP + REST API). Plus `codemem-bench` for benchmarks.
+
+## Development Quirks & Conventions
+
+### Storage method shadowing
+`Storage` has concrete methods like `list_sessions(namespace)` (1-arg shorthand) AND `StorageBackend` trait methods like `list_sessions(namespace, limit)` (2-arg). Rust resolves concrete methods first. Be careful when code takes `&dyn StorageBackend` vs concrete `Storage` — the available method signatures differ.
+
+### Lock safety
+Zero `.unwrap()` on mutex/rwlock acquisitions — all use typed lock helpers returning `CodememError::LockPoisoned`. Follow this pattern for any new lock usage.
+
+### Hook payload: `tool_response` is `serde_json::Value`
+Claude Code sends `tool_response` as a JSON object (not a plain string). The `HookPayload::tool_response_text()` method extracts meaningful text: `file.content` for Read, `stdout` for Bash, `text` for text-bearing responses, with JSON fallback. All extractors in `hooks/extractors.rs` must call this method.
+
+### Lifecycle hooks registered by `codemem init`
+The init command registers hooks in `.claude/settings.json`. Hook commands read a single-line JSON payload from stdin and write JSON to stdout. The shared helpers `read_hook_payload()` and `extract_hook_context()` in `commands_lifecycle.rs` handle common stdin/cwd/session_id extraction.
+
+### Embedding provider selection
+Configured via `CODEMEM_EMBED_PROVIDER` env var. `from_env()` factory in codemem-embeddings. Default is Candle (pure Rust, downloads ~440MB model on first use). All providers wrapped with LRU cache (10K entries).
+
+### SQLite batching
+Multi-row INSERT respects SQLite's 999-parameter limit. `StorageBackend` has `begin/commit/rollback_transaction` with `AtomicBool` guard. Batch cascade deletes for consolidation.
+
+### Graph compaction is cold-start-aware
+When no memories exist, the memory_link scoring weight is redistributed to other factors. Don't assume memory-linked nodes always exist.
+
+### Enrichment outputs
+All enrichment pipeline outputs are tagged `static-analysis`. Agents find, review, refine, or delete these. Semantic dedup (cosine > 0.90) prevents bloat from repeated analysis runs.
+
+### BM25 index
+Okapi BM25 with code-aware tokenizer that splits camelCase and snake_case. Index is JSON-serializable for persistence. Lazy-initialized alongside vector index and embeddings provider.
+
+### CodememEngine lazy init
+Vector index, BM25, and embeddings provider are initialized on first use (not at construction). This means `from_db_path()` is cheap. Don't assume these are available immediately after construction — they initialize on first `persist_memory`, `recall`, or `search_code` call.
+
+### Test fixtures
+Use `tempfile` for test DBs. Storage tests open ephemeral databases. Hook tests construct `HookPayload` structs directly with all fields (including the newer optional ones like `hook_event_name`, `tool_use_id`, etc.).
+
+### Schema migrations
+Versioned, idempotent SQL in `.sql` files. `open()` runs migrations; `open_without_migrations()` skips them (used by hook commands for speed). Always use `open_without_migrations` in hook handlers to avoid blocking the assistant.
+
+### Agent definitions
+`.claude/agents/` contains agent prompts installed by `codemem init`. The code-mapper is the team lead; specialized agents have restricted tool subsets. Don't give specialized agents `Agent`/`TeamCreate`/`TaskCreate` tools.
+
+### Namespace convention
+Namespace = directory basename (not full path). `namespace_from_path()` / `namespace_from_cwd()` in `cli/mod.rs`.
+
+### Config persistence
+TOML at `~/.codemem/config.toml`. Partial configs merge with defaults at startup. Scoring weights, vector/graph tuning, embedding provider, chunking, enrichment settings.
 
 ## Documentation
 
 - [Architecture](docs/architecture.md) — System design with Mermaid diagrams
-- [Index & Enrich Pipeline](docs/pipeline.md) — Step-by-step data flow from source files to annotated graph
-- [MCP Tools](docs/mcp-tools.md) — All 32 tools reference
-- [CLI Reference](docs/cli-reference.md) — All 24 commands
+- [Index & Enrich Pipeline](docs/pipeline.md) — Data flow from source files to annotated graph
+- [MCP Tools](docs/mcp-tools.md) — All MCP tools reference
+- [CLI Reference](docs/cli-reference.md) — All CLI commands
 - [Comparison](docs/comparison.md) — vs claude-mem, AgentDB, AutoMem, and more
