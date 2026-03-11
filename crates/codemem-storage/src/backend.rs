@@ -367,14 +367,14 @@ impl StorageBackend for Storage {
         Ok(())
     }
 
-    fn load_file_hashes(&self) -> Result<HashMap<String, String>, CodememError> {
+    fn load_file_hashes(&self, namespace: &str) -> Result<HashMap<String, String>, CodememError> {
         let conn = self.conn()?;
         let mut stmt = conn
-            .prepare("SELECT file_path, content_hash FROM file_hashes")
+            .prepare("SELECT file_path, content_hash FROM file_hashes WHERE namespace = ?1")
             .storage_err()?;
 
         let rows = stmt
-            .query_map([], |row| {
+            .query_map(params![namespace], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
             .storage_err()?
@@ -384,16 +384,24 @@ impl StorageBackend for Storage {
         Ok(rows.into_iter().collect())
     }
 
-    fn save_file_hashes(&self, hashes: &HashMap<String, String>) -> Result<(), CodememError> {
+    fn save_file_hashes(
+        &self,
+        namespace: &str,
+        hashes: &HashMap<String, String>,
+    ) -> Result<(), CodememError> {
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction().storage_err()?;
 
-        tx.execute("DELETE FROM file_hashes", []).storage_err()?;
+        tx.execute(
+            "DELETE FROM file_hashes WHERE namespace = ?1",
+            params![namespace],
+        )
+        .storage_err()?;
 
         for (path, hash) in hashes {
             tx.execute(
-                "INSERT INTO file_hashes (file_path, content_hash) VALUES (?1, ?2)",
-                params![path, hash],
+                "INSERT INTO file_hashes (namespace, file_path, content_hash) VALUES (?1, ?2, ?3)",
+                params![namespace, path, hash],
             )
             .storage_err()?;
         }

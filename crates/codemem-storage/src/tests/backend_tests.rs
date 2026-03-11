@@ -54,8 +54,8 @@ fn file_hashes_roundtrip() {
     hashes.insert("src/main.rs".to_string(), "abc123".to_string());
     hashes.insert("src/lib.rs".to_string(), "def456".to_string());
 
-    backend.save_file_hashes(&hashes).unwrap();
-    let loaded = backend.load_file_hashes().unwrap();
+    backend.save_file_hashes("test-ns", &hashes).unwrap();
+    let loaded = backend.load_file_hashes("test-ns").unwrap();
     assert_eq!(loaded.len(), 2);
     assert_eq!(loaded.get("src/main.rs"), Some(&"abc123".to_string()));
 }

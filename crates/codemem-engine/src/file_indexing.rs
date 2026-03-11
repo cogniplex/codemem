@@ -136,9 +136,10 @@ impl CodememEngine {
                 .change_detector
                 .lock()
                 .map_err(|_| CodememError::LockPoisoned("change_detector".into()))?;
+            let ns = namespace.unwrap_or("");
             let cd = cd_guard.get_or_insert_with(|| {
                 let mut cd = index::incremental::ChangeDetector::new();
-                cd.load_from_storage(&*self.storage);
+                cd.load_from_storage(&*self.storage, ns);
                 cd
             });
             let (changed, hash) = cd.check_changed(&path_str, &content);
@@ -191,7 +192,7 @@ impl CodememEngine {
         if let Ok(mut cd_guard) = self.change_detector.lock() {
             if let Some(cd) = cd_guard.as_mut() {
                 cd.record_hash(&path_str, hash);
-                if let Err(e) = cd.save_to_storage(&*self.storage) {
+                if let Err(e) = cd.save_to_storage(&*self.storage, namespace.unwrap_or("")) {
                     tracing::warn!("Failed to save file hash for {path_str}: {e}");
                 }
             }
@@ -566,7 +567,9 @@ impl CodememEngine {
         self.save_index();
 
         // Save incremental state
-        indexer.change_detector().save_to_storage(self.storage())?;
+        indexer
+            .change_detector()
+            .save_to_storage(self.storage(), options.namespace)?;
 
         Ok(AnalyzeResult {
             files_parsed: resolved.index.files_parsed,
