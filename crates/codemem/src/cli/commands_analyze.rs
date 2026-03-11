@@ -2,7 +2,13 @@ use std::path::Path;
 
 /// Full analysis pipeline: index → enrich → PageRank → clusters.
 /// Uses the unified `engine.analyze()` method.
-pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> anyhow::Result<()> {
+pub(crate) fn cmd_analyze(
+    root: &Path,
+    namespace: Option<&str>,
+    days: u64,
+    force: bool,
+    no_embed: bool,
+) -> anyhow::Result<()> {
     let db_path = super::codemem_db_path();
     let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
 
@@ -17,6 +23,13 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
             .unwrap_or(path_str)
     });
 
+    // --force: clear file hashes so all files get re-parsed
+    if force {
+        let empty = std::collections::HashMap::new();
+        engine.storage().save_file_hashes(ns, &empty)?;
+        println!("Cleared file hashes for namespace '{ns}' (forcing full re-index)");
+    }
+
     // Load incremental state
     let mut change_detector = codemem_engine::index::incremental::ChangeDetector::new();
     change_detector.load_from_storage(engine.storage(), ns);
@@ -27,6 +40,7 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
         path: root,
         namespace: ns,
         git_days: days,
+        no_embed,
         change_detector: Some(change_detector),
         progress: Some(Box::new(|progress| {
             let codemem_engine::AnalyzeProgress::Embedding { done, total } = progress;
@@ -58,6 +72,43 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
             "  Compacted:        {} chunks, {} symbols pruned",
             result.chunks_pruned, result.symbols_pruned
         );
+    }
+
+    // Step 1b: Cross-repo linking + LSP
+    let xr = &result.cross_repo;
+    let xr_total = xr.packages_registered
+        + xr.forward_edges_created
+        + xr.backward_edges_created
+        + xr.endpoints_detected
+        + xr.client_calls_detected
+        + xr.lsp_edges_upgraded
+        + xr.lsp_ext_nodes_created;
+    if xr_total > 0 {
+        println!("\nStep 1b: Cross-repo & LSP");
+        if xr.packages_registered > 0 {
+            println!("  Packages:         {}", xr.packages_registered);
+        }
+        if xr.unresolved_refs_stored > 0 {
+            println!("  Unresolved refs:  {}", xr.unresolved_refs_stored);
+        }
+        if xr.forward_edges_created + xr.backward_edges_created > 0 {
+            println!(
+                "  Cross-repo edges: {} forward, {} backward",
+                xr.forward_edges_created, xr.backward_edges_created
+            );
+        }
+        if xr.endpoints_detected > 0 {
+            println!("  API endpoints:    {}", xr.endpoints_detected);
+        }
+        if xr.client_calls_detected > 0 {
+            println!("  Client calls:     {}", xr.client_calls_detected);
+        }
+        if xr.lsp_edges_upgraded > 0 || xr.lsp_ext_nodes_created > 0 {
+            println!(
+                "  LSP:              {} edges upgraded, {} ext nodes, {} type annotations",
+                xr.lsp_edges_upgraded, xr.lsp_ext_nodes_created, xr.lsp_type_annotations
+            );
+        }
     }
 
     // Step 2: Enrichment summary

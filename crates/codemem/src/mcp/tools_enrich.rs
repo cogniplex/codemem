@@ -106,6 +106,7 @@ impl McpServer {
             git_days: days,
             change_detector: None,
             progress: None,
+            no_embed: false,
         };
 
         match self.engine.analyze(options) {

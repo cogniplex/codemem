@@ -511,9 +511,12 @@ impl CodememEngine {
 
         // Eagerly initialize embeddings/vector/BM25 for the full analysis pipeline.
         // This triggers lazy init so that embed_and_persist() finds them ready.
-        drop(self.lock_embeddings());
-        drop(self.lock_vector());
-        drop(self.lock_bm25());
+        // Skip when --no-embed is set (avoids loading the ~440MB model).
+        if !options.no_embed {
+            drop(self.lock_embeddings());
+            drop(self.lock_vector());
+            drop(self.lock_bm25());
+        }
 
         // 1. Index
         let mut indexer = match options.change_detector {
@@ -522,8 +525,10 @@ impl CodememEngine {
         };
         let resolved = indexer.index_and_resolve(root)?;
 
-        // 2. Persist (with or without progress callback)
-        let persist = if let Some(ref on_progress) = options.progress {
+        // 2. Persist (with or without progress callback; optionally skip embedding)
+        let persist = if options.no_embed {
+            self.persist_index_results_no_embed(&resolved, Some(options.namespace))?
+        } else if let Some(ref on_progress) = options.progress {
             self.persist_index_results_with_progress(
                 &resolved,
                 Some(options.namespace),
@@ -534,6 +539,19 @@ impl CodememEngine {
         } else {
             self.persist_index_results(&resolved, Some(options.namespace))?
         };
+
+        // 2b. Cross-repo linking + LSP enrichment + API surface detection
+        let manifests = index::manifest::scan_manifests(root);
+        let cross_repo_result = self
+            .persist_cross_repo_data(
+                &manifests,
+                &resolved.unresolved,
+                &resolved.symbols,
+                &resolved.references,
+                options.namespace,
+                Some(root),
+            )
+            .unwrap_or_default();
 
         // Cache results for structural queries
         {
@@ -585,6 +603,7 @@ impl CodememEngine {
             total_insights: enrichment.total_insights,
             top_nodes,
             community_count,
+            cross_repo: cross_repo_result,
         })
     }
 
@@ -657,6 +676,8 @@ pub struct AnalyzeOptions<'a> {
     pub git_days: u64,
     pub change_detector: Option<index::incremental::ChangeDetector>,
     pub progress: Option<Box<dyn Fn(AnalyzeProgress) + Send + 'a>>,
+    /// Skip embedding phase (graph nodes/edges still persisted, existing embeddings kept).
+    pub no_embed: bool,
 }
 
 /// Progress events emitted during analysis.
@@ -681,6 +702,7 @@ pub struct AnalyzeResult {
     pub total_insights: usize,
     pub top_nodes: Vec<crate::graph_ops::RankedNode>,
     pub community_count: usize,
+    pub cross_repo: crate::persistence::CrossRepoPersistResult,
 }
 
 /// Session context synthesized at session start.

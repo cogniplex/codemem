@@ -116,6 +116,14 @@ enum Commands {
         /// Days of git history to analyze
         #[arg(long, default_value = "90")]
         days: u64,
+
+        /// Force full re-index by clearing file hashes for this namespace
+        #[arg(long)]
+        force: bool,
+
+        /// Skip embedding phase (use existing embeddings)
+        #[arg(long)]
+        no_embed: bool,
     },
 
     /// Export memories to JSONL, JSON, CSV, or Markdown format
@@ -292,12 +300,20 @@ pub fn run() -> anyhow::Result<()> {
             path,
             namespace,
             days,
+            force,
+            no_embed,
         } => {
             let project_dir = match path {
                 Some(p) => p,
                 None => std::env::current_dir()?,
             };
-            commands_analyze::cmd_analyze(&project_dir, namespace.as_deref(), days)?;
+            commands_analyze::cmd_analyze(
+                &project_dir,
+                namespace.as_deref(),
+                days,
+                force,
+                no_embed,
+            )?;
         }
         Commands::Export {
             namespace,

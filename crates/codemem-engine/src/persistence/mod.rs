@@ -85,18 +85,42 @@ impl super::CodememEngine {
         namespace: Option<&str>,
         on_progress: impl Fn(usize, usize),
     ) -> Result<IndexPersistResult, CodememError> {
+        self.persist_index_results_inner(results, namespace, false, on_progress)
+    }
+
+    /// Like `persist_index_results`, but skips the embedding phase.
+    /// Graph nodes, edges, and compaction still run.
+    pub fn persist_index_results_no_embed(
+        &self,
+        results: &IndexAndResolveResult,
+        namespace: Option<&str>,
+    ) -> Result<IndexPersistResult, CodememError> {
+        self.persist_index_results_inner(results, namespace, true, |_, _| {})
+    }
+
+    fn persist_index_results_inner(
+        &self,
+        results: &IndexAndResolveResult,
+        namespace: Option<&str>,
+        skip_embed: bool,
+        on_progress: impl Fn(usize, usize),
+    ) -> Result<IndexPersistResult, CodememError> {
         let seen_files = &results.file_paths;
 
         // 1. Persist all graph nodes and edges
         let graph_counts = self.persist_graph_nodes(results, namespace)?;
 
-        // 2. Embed symbols and chunks
-        let (symbols_embedded, chunks_embedded) = self.embed_and_persist(
-            &results.symbols,
-            &results.chunks,
-            &results.edges,
-            on_progress,
-        )?;
+        // 2. Embed symbols and chunks (unless skipped)
+        let (symbols_embedded, chunks_embedded) = if skip_embed {
+            (0, 0)
+        } else {
+            self.embed_and_persist(
+                &results.symbols,
+                &results.chunks,
+                &results.edges,
+                on_progress,
+            )?
+        };
 
         // 3. Auto-compact
         let (chunks_pruned, symbols_pruned) = if self.config.chunking.auto_compact {
