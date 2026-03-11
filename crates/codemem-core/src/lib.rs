@@ -21,8 +21,8 @@ pub use metrics::{LatencyStats, Metrics, MetricsSnapshot, NoopMetrics};
 
 // ── traits ──────────────────────────────────────────────────────────────────
 pub use traits::{
-    ConsolidationLogEntry, EmbeddingProvider, GraphBackend, GraphStats, StorageBackend,
-    StorageStats, VectorBackend, VectorStats,
+    ConsolidationLogEntry, EmbeddingProvider, GraphBackend, GraphStats, PendingUnresolvedRef,
+    StorageBackend, StorageStats, VectorBackend, VectorStats,
 };
 
 // ── types ───────────────────────────────────────────────────────────────────
@@ -30,5 +30,5 @@ pub use types::{
     content_hash, DetectedPattern, DistanceMetric, Edge, GraphConfig, GraphNode, MemoryNode,
     MemoryType, NodeCoverageEntry, NodeKind, NodeMemoryResult, PatternType, RawGraphMetrics,
     RelationshipType, Repository, ScoreBreakdown, ScoringWeights, SearchResult, Session,
-    SessionActivitySummary, VectorConfig, ENRICHMENT_ANALYSES,
+    SessionActivitySummary, UnresolvedRefData, VectorConfig, ENRICHMENT_ANALYSES,
 };

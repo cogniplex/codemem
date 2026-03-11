@@ -49,6 +49,16 @@ const MIGRATIONS: &[Migration] = &[
         description: "Namespace-scoped content_hash dedup",
         sql: include_str!("migrations/008_namespace_scoped_dedup.sql"),
     },
+    Migration {
+        version: 9,
+        description: "Cross-repo linking tables",
+        sql: include_str!("migrations/009_cross_repo_linking.sql"),
+    },
+    Migration {
+        version: 10,
+        description: "Separate api_client_calls table",
+        sql: include_str!("migrations/010_api_client_calls.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.

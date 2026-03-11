@@ -610,6 +610,20 @@ pub const ENRICHMENT_ANALYSES: &[&str] = &[
     "change_impact",
 ];
 
+// ── Cross-Repo Data ─────────────────────────────────────────────────────────
+
+/// Data for a single unresolved reference, used by batch storage.
+#[derive(Debug, Clone)]
+pub struct UnresolvedRefData {
+    pub source_qualified_name: String,
+    pub target_name: String,
+    pub namespace: String,
+    pub file_path: String,
+    pub line: usize,
+    pub ref_kind: String,
+    pub package_hint: Option<String>,
+}
+
 #[cfg(test)]
 #[path = "tests/types_tests.rs"]
 mod tests;

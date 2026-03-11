@@ -3,7 +3,31 @@ use std::collections::HashMap;
 
 use crate::{
     CodememError, Edge, GraphNode, MemoryNode, NodeKind, RelationshipType, Repository, Session,
+    UnresolvedRefData,
 };
+
+// ── Data types for trait return values ───────────────────────────────────────
+
+/// A pending unresolved reference stored for deferred cross-namespace linking.
+#[derive(Debug, Clone)]
+pub struct PendingUnresolvedRef {
+    /// ID of the unresolved ref record.
+    pub id: String,
+    /// Source symbol qualified name.
+    pub source_node: String,
+    /// The unresolved target name.
+    pub target_name: String,
+    /// Namespace the source belongs to.
+    pub namespace: String,
+    /// File path where the reference occurs.
+    pub file_path: String,
+    /// Line number.
+    pub line: usize,
+    /// Kind of reference: "call", "import", "inherits", etc.
+    pub ref_kind: String,
+    /// Package hint extracted from import context.
+    pub package_hint: Option<String>,
+}
 
 // ── Traits ──────────────────────────────────────────────────────────────────
 
@@ -567,5 +591,125 @@ pub trait StorageBackend: Send + Sync {
     /// Default implementation is a no-op.
     fn rollback_transaction(&self) -> Result<(), CodememError> {
         Ok(())
+    }
+
+    // ── Cross-Repo Persistence ────────────────────────────────────────
+
+    /// Get graph edges where either the source or destination node belongs to the
+    /// given namespace (cross-namespace query). When `include_cross_namespace` is false,
+    /// this behaves like `graph_edges_for_namespace` (both endpoints in namespace).
+    fn graph_edges_for_namespace_with_cross(
+        &self,
+        _namespace: &str,
+        _include_cross_namespace: bool,
+    ) -> Result<Vec<Edge>, CodememError> {
+        Ok(Vec::new())
+    }
+
+    /// Upsert a package into the cross-repo package registry.
+    fn upsert_package_registry(
+        &self,
+        _package_name: &str,
+        _namespace: &str,
+        _version: &str,
+        _manifest: &str,
+    ) -> Result<(), CodememError> {
+        Ok(())
+    }
+
+    /// Store an unresolved reference for future cross-namespace linking.
+    #[allow(clippy::too_many_arguments)]
+    fn store_unresolved_ref(
+        &self,
+        _source_qualified_name: &str,
+        _target_name: &str,
+        _source_namespace: &str,
+        _file_path: &str,
+        _line: usize,
+        _ref_kind: &str,
+        _package_hint: Option<&str>,
+    ) -> Result<(), CodememError> {
+        Ok(())
+    }
+
+    /// Batch store unresolved references. Default falls back to per-ref calls.
+    fn store_unresolved_refs_batch(
+        &self,
+        refs: &[UnresolvedRefData],
+    ) -> Result<usize, CodememError> {
+        let mut count = 0;
+        for r in refs {
+            self.store_unresolved_ref(
+                &r.source_qualified_name,
+                &r.target_name,
+                &r.namespace,
+                &r.file_path,
+                r.line,
+                &r.ref_kind,
+                r.package_hint.as_deref(),
+            )?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// List all registered packages. Returns (name, namespace, manifest_path) tuples.
+    fn list_registered_packages(&self) -> Result<Vec<(String, String, String)>, CodememError> {
+        Ok(Vec::new())
+    }
+
+    /// List all pending unresolved refs with full context.
+    fn list_pending_unresolved_refs(&self) -> Result<Vec<PendingUnresolvedRef>, CodememError> {
+        Ok(Vec::new())
+    }
+
+    /// Delete a resolved unresolved ref by ID.
+    fn delete_unresolved_ref(&self, _id: &str) -> Result<(), CodememError> {
+        Ok(())
+    }
+
+    /// Count unresolved refs for a given namespace.
+    fn count_unresolved_refs(&self, _namespace: &str) -> Result<usize, CodememError> {
+        Ok(0)
+    }
+
+    /// List registered packages for a given namespace.
+    /// Returns (name, namespace, manifest_path) tuples.
+    fn list_registered_packages_for_namespace(
+        &self,
+        _namespace: &str,
+    ) -> Result<Vec<(String, String, String)>, CodememError> {
+        Ok(Vec::new())
+    }
+
+    /// Store a detected API endpoint.
+    fn store_api_endpoint(
+        &self,
+        _method: &str,
+        _path: &str,
+        _handler_symbol: &str,
+        _namespace: &str,
+    ) -> Result<(), CodememError> {
+        Ok(())
+    }
+
+    /// Store a detected client call.
+    fn store_api_client_call(
+        &self,
+        _library: &str,
+        _method: Option<&str>,
+        _caller_symbol: &str,
+        _namespace: &str,
+    ) -> Result<(), CodememError> {
+        Ok(())
+    }
+
+    /// List detected API endpoints for a namespace.
+    /// Returns (method, path, handler_symbol, namespace) tuples.
+    fn list_api_endpoints(
+        &self,
+        _namespace: &str,
+    ) -> Result<Vec<(String, String, String, String)>, CodememError> {
+        Ok(Vec::new())
     }
 }

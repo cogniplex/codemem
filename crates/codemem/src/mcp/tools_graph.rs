@@ -191,6 +191,20 @@ impl McpServer {
             Err(e) => return ToolResult::tool_error(format!("Persistence failed: {e}")),
         };
 
+        // Cross-repo persistence: scan manifests, register packages, detect endpoints.
+        let manifests = codemem_engine::index::manifest::scan_manifests(root);
+        let cross_repo_result = self
+            .engine
+            .persist_cross_repo_data(
+                &manifests,
+                &resolved.unresolved,
+                &resolved.symbols,
+                &resolved.references,
+                namespace,
+                Some(root),
+            )
+            .unwrap_or_default();
+
         // Cache results for structural queries
         {
             match self.engine.lock_index_cache() {
@@ -220,6 +234,14 @@ impl McpServer {
                 "chunks_pruned": persist_result.chunks_pruned,
                 "symbols_pruned": persist_result.symbols_pruned,
                 "packages_created": persist_result.packages_created,
+                "packages_registered": cross_repo_result.packages_registered,
+                "unresolved_refs": cross_repo_result.unresolved_refs_stored,
+                "cross_repo_edges": cross_repo_result.forward_edges_created + cross_repo_result.backward_edges_created,
+                "endpoints_detected": cross_repo_result.endpoints_detected,
+                "client_calls_detected": cross_repo_result.client_calls_detected,
+                "lsp_edges_upgraded": cross_repo_result.lsp_edges_upgraded,
+                "lsp_ext_nodes": cross_repo_result.lsp_ext_nodes_created,
+                "lsp_type_annotations": cross_repo_result.lsp_type_annotations,
             }))
             .expect("JSON serialization of literal"),
         )
@@ -627,6 +649,65 @@ impl McpServer {
             })
             .collect();
 
+        // Derive namespace from directory basename (matching index_codebase convention).
+        let namespace = scan_root
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("unknown");
+
+        // Fetch cross-namespace edges from storage.
+        // get_cross_namespace_edges already filters for cross_namespace: true.
+        let cross_edges: Vec<Value> = self
+            .engine
+            .get_cross_namespace_edges(namespace)
+            .unwrap_or_default()
+            .iter()
+            .map(|e| {
+                json!({
+                    "id": e.id,
+                    "src": e.src,
+                    "dst": e.dst,
+                    "relationship": e.relationship.to_string(),
+                    "weight": e.weight,
+                    "src_namespace": e.properties.get("src_namespace"),
+                    "dst_namespace": e.properties.get("dst_namespace"),
+                })
+            })
+            .collect();
+
+        // Count unresolved refs.
+        let unresolved_count = self.engine.count_unresolved_refs(namespace).unwrap_or(0);
+
+        // Fetch registered packages.
+        let registered_packages: Vec<Value> = self
+            .engine
+            .get_registered_packages(namespace)
+            .unwrap_or_default()
+            .iter()
+            .map(|p| {
+                json!({
+                    "name": p.package_name,
+                    "namespace": p.namespace,
+                    "manifest_path": p.manifest,
+                })
+            })
+            .collect();
+
+        // Fetch detected API endpoints.
+        let endpoints: Vec<Value> = self
+            .engine
+            .get_detected_endpoints(namespace)
+            .unwrap_or_default()
+            .iter()
+            .map(|ep| {
+                json!({
+                    "method": ep.method,
+                    "path": ep.path,
+                    "handler_symbol": ep.handler,
+                })
+            })
+            .collect();
+
         ToolResult::text(
             serde_json::to_string_pretty(&json!({
                 "root": scan_root.to_string_lossy(),
@@ -634,6 +715,10 @@ impl McpServer {
                 "packages": packages,
                 "dependencies_count": deps.len(),
                 "dependencies": deps,
+                "cross_namespace_edges": cross_edges,
+                "unresolved_ref_count": unresolved_count,
+                "registered_packages": registered_packages,
+                "api_endpoints": endpoints,
             }))
             .expect("JSON serialization of literal"),
         )
@@ -786,3 +871,7 @@ mod tools_graph_structural_tests;
 #[cfg(test)]
 #[path = "tests/tools_graph_compaction_tests.rs"]
 mod tools_graph_compaction_tests;
+
+#[cfg(test)]
+#[path = "tests/tools_cross_repo_tests.rs"]
+mod tools_cross_repo_tests;

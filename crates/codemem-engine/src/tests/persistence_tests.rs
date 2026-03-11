@@ -99,6 +99,7 @@ fn make_index_result(
         chunks,
         file_paths,
         edges,
+        unresolved: vec![],
         root_path: std::path::PathBuf::from("/test"),
     }
 }
