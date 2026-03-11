@@ -212,6 +212,10 @@ impl LspEnricher for TsServerEnricher {
     fn enrich(&self, project_root: &Path, targets: &[EnrichmentTarget]) -> EnrichmentResult {
         let mut result = EnrichmentResult::default();
 
+        // Note: tsserver enrichment extracts type annotations via tsc --declaration
+        // and confirms unresolvable refs via tsc --noEmit. It does NOT resolve
+        // references (that would require the TS Language Service API).
+
         // Build target index for matching diagnostics
         let mut target_index: HashMap<(String, usize), &RefToResolve> = HashMap::new();
         for target in targets {

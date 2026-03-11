@@ -9,7 +9,7 @@ fn available_enrichers_returns_empty_when_tools_missing() {
 
 #[test]
 fn run_enrichment_empty_inputs() {
-    let result = run_enrichment(&[], &[]);
+    let result = run_enrichment(&[], &[], std::path::Path::new("/tmp"));
     assert!(result.is_empty());
 }
 
@@ -19,7 +19,7 @@ fn run_enrichment_no_enrichers() {
         file_path: "test.py".to_string(),
         refs: vec![],
     }];
-    let result = run_enrichment(&targets, &[]);
+    let result = run_enrichment(&targets, &[], std::path::Path::new("/tmp"));
     assert!(result.is_empty());
 }
 

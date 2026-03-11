@@ -57,7 +57,7 @@ impl super::super::CodememEngine {
         }
 
         // 3. Run all available enrichers
-        let results = lsp::run_enrichment(&targets, &enrichers);
+        let results = lsp::run_enrichment(&targets, &enrichers, project_root);
 
         // 4. Apply results to the graph
         let mut stats = LspEnrichStats::default();

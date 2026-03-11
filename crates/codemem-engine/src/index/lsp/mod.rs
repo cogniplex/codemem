@@ -115,11 +115,13 @@ pub fn available_enrichers() -> Vec<Box<dyn LspEnricher>> {
 
 /// Run all available enrichers against grouped targets.
 ///
-/// Groups targets by file extension, finds matching enricher,
-/// detects project roots, and runs each enricher.
+/// Groups targets by file extension, finds matching enricher, and runs it.
+/// `project_root` is the known root of the project being analyzed — used
+/// directly instead of trying to detect it from (potentially relative) file paths.
 pub fn run_enrichment(
     targets: &[EnrichmentTarget],
     enrichers: &[Box<dyn LspEnricher>],
+    project_root: &Path,
 ) -> Vec<EnrichmentResult> {
     if enrichers.is_empty() || targets.is_empty() {
         return Vec::new();
@@ -149,6 +151,11 @@ pub fn run_enrichment(
             .collect();
 
         if matching_exts.is_empty() {
+            tracing::debug!(
+                "{}: no matching files for extensions {:?}",
+                enricher.name(),
+                enricher.extensions()
+            );
             continue;
         }
 
@@ -168,15 +175,16 @@ pub fn run_enrichment(
             claimed_exts.insert(ext.clone());
         }
 
-        // Detect project root from first file
-        let project_root = enricher_targets
-            .first()
-            .and_then(|t| enricher.detect_project_root(Path::new(&t.file_path)));
+        tracing::info!(
+            "{}: enriching {} target files",
+            enricher.name(),
+            enricher_targets.len()
+        );
 
-        if let Some(root) = project_root {
-            let result = enricher.enrich(&root, &enricher_targets);
-            results.push(result);
-        }
+        // Use the known project root directly (file paths in targets are relative
+        // to this root, so detect_project_root on relative paths would fail).
+        let result = enricher.enrich(project_root, &enricher_targets);
+        results.push(result);
     }
 
     results
