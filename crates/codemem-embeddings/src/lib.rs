@@ -1,7 +1,7 @@
 //! codemem-embeddings: Pluggable embedding providers for Codemem.
 //!
 //! Supports multiple backends:
-//! - **Candle** (default): Local BAAI/bge-base-en-v1.5 via pure Rust ML
+//! - **Candle** (default): Local BERT models via pure Rust ML (any HF BERT model)
 //! - **Ollama**: Local Ollama server with any embedding model
 //! - **OpenAI**: OpenAI API or any compatible endpoint (Together, Azure, etc.)
 
@@ -18,16 +18,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tokenizers::{PaddingParams, PaddingStrategy};
 
-/// Default model name.
+/// Default model name (short form used for directory naming).
 pub const MODEL_NAME: &str = "bge-base-en-v1.5";
 
-/// HuggingFace model repo ID.
-const HF_MODEL_REPO: &str = "BAAI/bge-base-en-v1.5";
+/// Default HuggingFace model repo ID.
+/// Used internally and by `commands_init` for the default model download.
+pub const DEFAULT_HF_REPO: &str = "BAAI/bge-base-en-v1.5";
 
-/// Default embedding dimensions.
-pub const DIMENSIONS: usize = 768;
+/// Default embedding dimensions for remote providers (Ollama/OpenAI).
+/// Candle reads `hidden_size` from the model's config.json instead.
+pub const DEFAULT_REMOTE_DIMENSIONS: usize = 768;
 
-/// Max sequence length for bge-base-en-v1.5.
+/// Max sequence length for BERT models.
 const MAX_SEQ_LENGTH: usize = 512;
 
 /// Default LRU cache capacity.
@@ -39,7 +41,7 @@ pub use codemem_core::EmbeddingProvider;
 // ── Candle Embedding Service ────────────────────────────────────────────────
 
 /// Default batch size for batched embedding forward passes.
-/// Configurable via `EmbeddingConfig.batch_size`.
+/// Configurable via `EmbeddingConfig.batch_size` or `CODEMEM_EMBED_BATCH_SIZE`.
 pub const DEFAULT_BATCH_SIZE: usize = 16;
 
 /// Select the best available compute device.
@@ -49,19 +51,34 @@ pub const DEFAULT_BATCH_SIZE: usize = 16;
 fn select_device() -> Device {
     #[cfg(feature = "metal")]
     {
-        if let Ok(device) = Device::new_metal(0) {
-            tracing::info!("Using Metal GPU for embeddings");
-            return device;
+        // Use catch_unwind to handle SIGBUS/panics on CI runners without GPU access.
+        match std::panic::catch_unwind(|| Device::new_metal(0)) {
+            Ok(Ok(device)) => {
+                tracing::info!("Using Metal GPU for embeddings");
+                return device;
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("Metal device creation failed: {e}, falling back to CPU");
+            }
+            Err(_) => {
+                tracing::warn!("Metal device creation panicked, falling back to CPU");
+            }
         }
-        tracing::warn!("Metal feature enabled but device creation failed, falling back");
     }
     #[cfg(feature = "cuda")]
     {
-        if let Ok(device) = Device::new_cuda(0) {
-            tracing::info!("Using CUDA GPU for embeddings");
-            return device;
+        match std::panic::catch_unwind(|| Device::new_cuda(0)) {
+            Ok(Ok(device)) => {
+                tracing::info!("Using CUDA GPU for embeddings");
+                return device;
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("CUDA device creation failed: {e}, falling back to CPU");
+            }
+            Err(_) => {
+                tracing::warn!("CUDA device creation panicked, falling back to CPU");
+            }
         }
-        tracing::warn!("CUDA feature enabled but device creation failed, falling back");
     }
     tracing::info!("Using CPU for embeddings");
     Device::Cpu
@@ -76,12 +93,16 @@ pub struct EmbeddingService {
     device: Device,
     /// Maximum texts per forward pass (GPU memory trade-off).
     batch_size: usize,
+    /// Hidden size read from model config (e.g. 768 for bge-base, 384 for bge-small).
+    hidden_size: usize,
 }
 
 impl EmbeddingService {
     /// Create a new embedding service, loading model from the given directory.
     /// Expects `model.safetensors`, `config.json`, and `tokenizer.json` in the directory.
-    pub fn new(model_dir: &Path, batch_size: usize) -> Result<Self, CodememError> {
+    ///
+    /// `dtype` controls precision: `DType::F32` (default) or `DType::F16` (half memory, faster on Metal).
+    pub fn new(model_dir: &Path, batch_size: usize, dtype: DType) -> Result<Self, CodememError> {
         let model_path = model_dir.join("model.safetensors");
         let config_path = model_dir.join("config.json");
         let tokenizer_path = model_dir.join("tokenizer.json");
@@ -95,18 +116,27 @@ impl EmbeddingService {
 
         let device = select_device();
 
+        tracing::info!(
+            "Loading model from {} (dtype: {:?}, device: {:?})",
+            model_dir.display(),
+            dtype,
+            device
+        );
+
         // Load BERT config
         let config_str = std::fs::read_to_string(&config_path)
             .map_err(|e| CodememError::Embedding(format!("Failed to read config: {e}")))?;
         let config: BertConfig = serde_json::from_str(&config_str)
             .map_err(|e| CodememError::Embedding(format!("Failed to parse config: {e}")))?;
 
+        let hidden_size = config.hidden_size;
+
         // Load model weights from safetensors via memory-mapped IO.
         // Scope vb so it drops before a potential retry, avoiding two VarBuilders
         // holding materialized Metal tensors simultaneously.
         let model = {
             let vb = unsafe {
-                VarBuilder::from_mmaped_safetensors(&[&model_path], DType::F32, &device)
+                VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device)
                     .map_err(|e| CodememError::Embedding(format!("Failed to load weights: {e}")))?
             };
             BertModel::load(vb.pp("bert"), &config)
@@ -116,10 +146,9 @@ impl EmbeddingService {
             Ok(m) => m,
             Err(_) => {
                 let vb2 = unsafe {
-                    VarBuilder::from_mmaped_safetensors(&[&model_path], DType::F32, &device)
-                        .map_err(|e| {
-                            CodememError::Embedding(format!("Failed to load weights: {e}"))
-                        })?
+                    VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device).map_err(
+                        |e| CodememError::Embedding(format!("Failed to load weights: {e}")),
+                    )?
                 };
                 BertModel::load(vb2, &config).map_err(|e| {
                     CodememError::Embedding(format!("Failed to load BERT model: {e}"))
@@ -143,21 +172,29 @@ impl EmbeddingService {
             tokenizer,
             device,
             batch_size,
+            hidden_size,
         })
     }
 
-    /// Get the default model directory path (~/.codemem/models/{MODEL_NAME}).
-    pub fn default_model_dir() -> PathBuf {
+    /// Get the model directory path for a given model name.
+    /// Falls back to `~/.codemem/models/{model_name}`.
+    pub fn model_dir_for(model_name: &str) -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".codemem")
             .join("models")
-            .join(MODEL_NAME)
+            .join(model_name)
     }
 
-    /// Download the model from HuggingFace Hub to the given directory.
+    /// Get the default model directory path (~/.codemem/models/{MODEL_NAME}).
+    pub fn default_model_dir() -> PathBuf {
+        Self::model_dir_for(MODEL_NAME)
+    }
+
+    /// Download a model from HuggingFace Hub to the given directory.
+    /// `hf_repo` is the full repo ID (e.g. "BAAI/bge-base-en-v1.5").
     /// Returns the directory path. No-ops if model already exists.
-    pub fn download_model(dest_dir: &Path) -> Result<PathBuf, CodememError> {
+    pub fn download_model(dest_dir: &Path, hf_repo: &str) -> Result<PathBuf, CodememError> {
         let model_dest = dest_dir.join("model.safetensors");
         let config_dest = dest_dir.join("config.json");
         let tokenizer_dest = dest_dir.join("tokenizer.json");
@@ -170,11 +207,11 @@ impl EmbeddingService {
         std::fs::create_dir_all(dest_dir)
             .map_err(|e| CodememError::Embedding(format!("Failed to create dir: {e}")))?;
 
-        tracing::info!("Downloading {} from HuggingFace...", HF_MODEL_REPO);
+        tracing::info!("Downloading {} from HuggingFace...", hf_repo);
 
         let api = hf_hub::api::sync::Api::new()
             .map_err(|e| CodememError::Embedding(format!("HuggingFace API error: {e}")))?;
-        let repo = api.model(HF_MODEL_REPO.to_string());
+        let repo = api.model(hf_repo.to_string());
 
         let cached_model = repo
             .get("model.safetensors")
@@ -199,7 +236,13 @@ impl EmbeddingService {
         Ok(dest_dir.to_path_buf())
     }
 
-    /// Embed a single text string. Returns a 768-dim L2-normalized vector.
+    /// Download the default model (BAAI/bge-base-en-v1.5) to the default directory.
+    /// Convenience wrapper for `download_model(&default_model_dir(), DEFAULT_HF_REPO)`.
+    pub fn download_default_model() -> Result<PathBuf, CodememError> {
+        Self::download_model(&Self::default_model_dir(), DEFAULT_HF_REPO)
+    }
+
+    /// Embed a single text string. Returns an L2-normalized vector (dimension = model's hidden_size).
     pub fn embed(&self, text: &str) -> Result<Vec<f32>, CodememError> {
         // Tokenize using pre-configured tokenizer (truncation already set in constructor)
         let encoding = self
@@ -240,6 +283,11 @@ impl EmbeddingService {
         // Drop intermediate GPU tensors before pooling
         drop(input_ids_tensor);
         drop(token_type_ids);
+
+        // Cast hidden states to F32 for pooling math (model may output F16/BF16)
+        let hidden_states = hidden_states
+            .to_dtype(DType::F32)
+            .map_err(|e| CodememError::Embedding(format!("Cast error: {e}")))?;
 
         // Mean pooling weighted by attention mask
         // attention_mask: [1, seq_len] -> [1, seq_len, 1] for broadcasting
@@ -342,6 +390,11 @@ impl EmbeddingService {
             drop(input_ids);
             drop(token_type_ids);
 
+            // Cast hidden states to F32 for pooling math (model may output F16/BF16)
+            let hidden_states = hidden_states
+                .to_dtype(DType::F32)
+                .map_err(|e| CodememError::Embedding(format!("Cast error: {e}")))?;
+
             // Mean pooling: mask [batch, seq] -> [batch, seq, 1] for broadcast
             let mask = attention_mask
                 .to_dtype(DType::F32)
@@ -376,8 +429,8 @@ impl EmbeddingService {
                 .and_then(|t| t.to_vec1())
                 .map_err(|e| CodememError::Embedding(format!("Extract error: {e}")))?;
             for i in 0..batch_len {
-                let start = i * DIMENSIONS;
-                all_embeddings.push(flat[start..start + DIMENSIONS].to_vec());
+                let start = i * self.hidden_size;
+                all_embeddings.push(flat[start..start + self.hidden_size].to_vec());
             }
         }
 
@@ -387,7 +440,7 @@ impl EmbeddingService {
 
 impl EmbeddingProvider for EmbeddingService {
     fn dimensions(&self) -> usize {
-        DIMENSIONS
+        self.hidden_size
     }
 
     fn embed(&self, text: &str) -> Result<Vec<f32>, CodememError> {
@@ -512,6 +565,46 @@ impl EmbeddingProvider for CachedProvider {
 
 // ── Factory ───────────────────────────────────────────────────────────────
 
+/// Parse a dtype string into a Candle DType.
+///
+/// Supported values: "f32" (default), "f16" (half precision — less memory, faster on Metal).
+pub fn parse_dtype(s: &str) -> Result<DType, CodememError> {
+    match s.to_lowercase().as_str() {
+        "f32" | "float32" | "" => Ok(DType::F32),
+        "f16" | "float16" | "half" => Ok(DType::F16),
+        "bf16" | "bfloat16" => Ok(DType::BF16),
+        other => Err(CodememError::Embedding(format!(
+            "Unknown dtype: '{}'. Use 'f32', 'f16', or 'bf16'.",
+            other
+        ))),
+    }
+}
+
+/// Resolve the HuggingFace repo ID and local directory name from a model identifier.
+///
+/// Accepts:
+/// - Full HF repo: `"BAAI/bge-base-en-v1.5"` → repo=`"BAAI/bge-base-en-v1.5"`, dir=`"bge-base-en-v1.5"`
+/// - Short name: `"bge-small-en-v1.5"` → repo=`"BAAI/bge-small-en-v1.5"`, dir=`"bge-small-en-v1.5"`
+///
+/// Returns `Err` if the model identifier is a bare name without an org prefix and isn't
+/// a recognized `bge-*` shorthand — HuggingFace requires `org/repo` format.
+fn resolve_model_id(model: &str) -> Result<(String, String), CodememError> {
+    if model.contains('/') {
+        // Full repo ID — directory name is the part after the slash
+        let dir_name = model.rsplit('/').next().unwrap_or(model);
+        Ok((model.to_string(), dir_name.to_string()))
+    } else if model.starts_with("bge-") {
+        // Short name — assume BAAI namespace for bge-* models
+        Ok((format!("BAAI/{model}"), model.to_string()))
+    } else {
+        Err(CodememError::Embedding(format!(
+            "Model identifier '{}' must be a full HuggingFace repo ID (e.g., 'BAAI/bge-base-en-v1.5' \
+             or 'sentence-transformers/all-MiniLM-L6-v2'). Short names are only supported for 'bge-*' models.",
+            model
+        )))
+    }
+}
+
 /// Create an embedding provider from environment variables.
 ///
 /// When `config` is provided, its fields serve as defaults; env vars override them.
@@ -519,10 +612,12 @@ impl EmbeddingProvider for CachedProvider {
 /// | Variable | Values | Default |
 /// |----------|--------|---------|
 /// | `CODEMEM_EMBED_PROVIDER` | `candle`, `ollama`, `openai` | `candle` |
-/// | `CODEMEM_EMBED_MODEL` | model name | provider default |
+/// | `CODEMEM_EMBED_MODEL` | model name or HF repo | `BAAI/bge-base-en-v1.5` |
 /// | `CODEMEM_EMBED_URL` | base URL | provider default |
 /// | `CODEMEM_EMBED_API_KEY` | API key | also reads `OPENAI_API_KEY` |
-/// | `CODEMEM_EMBED_DIMENSIONS` | integer | `768` |
+/// | `CODEMEM_EMBED_DIMENSIONS` | integer | read from model config |
+/// | `CODEMEM_EMBED_BATCH_SIZE` | integer | `16` |
+/// | `CODEMEM_EMBED_DTYPE` | `f32`, `f16`, `bf16` | `f32` |
 pub fn from_env(
     config: Option<&codemem_core::EmbeddingConfig>,
 ) -> Result<Box<dyn EmbeddingProvider>, CodememError> {
@@ -533,12 +628,17 @@ pub fn from_env(
                 .unwrap_or_else(|| "candle".to_string())
         })
         .to_lowercase();
+    // For Ollama/OpenAI, dimensions must be specified explicitly (remote APIs need it).
+    // For Candle, this value is ignored — hidden_size is read from the model's config.json.
     let dimensions: usize = std::env::var("CODEMEM_EMBED_DIMENSIONS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| config.map_or(DIMENSIONS, |c| c.dimensions));
+        .unwrap_or_else(|| config.map_or(DEFAULT_REMOTE_DIMENSIONS, |c| c.dimensions));
     let cache_capacity = config.map_or(CACHE_CAPACITY, |c| c.cache_capacity);
-    let batch_size = config.map_or(DEFAULT_BATCH_SIZE, |c| c.batch_size);
+    let batch_size: usize = std::env::var("CODEMEM_EMBED_BATCH_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| config.map_or(DEFAULT_BATCH_SIZE, |c| c.batch_size));
 
     match provider.as_str() {
         "ollama" => {
@@ -584,8 +684,37 @@ pub fn from_env(
             Ok(Box::new(CachedProvider::new(inner, cache_capacity)))
         }
         "candle" | "" => {
-            let model_dir = EmbeddingService::default_model_dir();
-            let service = EmbeddingService::new(&model_dir, batch_size)?;
+            let model_id = std::env::var("CODEMEM_EMBED_MODEL").unwrap_or_else(|_| {
+                config
+                    .filter(|c| !c.model.is_empty())
+                    .map(|c| c.model.clone())
+                    .unwrap_or_else(|| DEFAULT_HF_REPO.to_string())
+            });
+            let (hf_repo, dir_name) = resolve_model_id(&model_id)?;
+            let model_dir = EmbeddingService::model_dir_for(&dir_name);
+
+            let dtype_str = std::env::var("CODEMEM_EMBED_DTYPE").unwrap_or_else(|_| {
+                config
+                    .filter(|c| !c.dtype.is_empty())
+                    .map(|c| c.dtype.clone())
+                    .unwrap_or_else(|| "f32".to_string())
+            });
+            let dtype = parse_dtype(&dtype_str)?;
+
+            let service = EmbeddingService::new(&model_dir, batch_size, dtype).map_err(|e| {
+                // Enhance error message with download hint for non-default models
+                if e.to_string().contains("Model not found") && hf_repo != DEFAULT_HF_REPO {
+                    CodememError::Embedding(format!(
+                        "Model '{}' not found at {}. Download it with:\n  \
+                         CODEMEM_EMBED_MODEL={} codemem init",
+                        hf_repo,
+                        model_dir.display(),
+                        hf_repo
+                    ))
+                } else {
+                    e
+                }
+            })?;
             Ok(Box::new(CachedProvider::new(
                 Box::new(service),
                 cache_capacity,

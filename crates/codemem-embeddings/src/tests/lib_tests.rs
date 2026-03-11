@@ -1,4 +1,5 @@
 use super::*;
+use candle_core::DType;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Mutex to serialize tests that manipulate environment variables.
@@ -319,7 +320,7 @@ fn from_env_unknown_provider() {
 
 #[test]
 fn embedding_service_missing_model() {
-    match EmbeddingService::new(Path::new("/nonexistent/path"), 16) {
+    match EmbeddingService::new(Path::new("/nonexistent/path"), 16, DType::F32) {
         Err(e) => {
             let err = e.to_string();
             assert!(
@@ -340,10 +341,126 @@ fn default_model_dir_path() {
 
 #[test]
 fn constants_are_sensible() {
-    assert_eq!(DIMENSIONS, 768);
+    assert_eq!(DEFAULT_REMOTE_DIMENSIONS, 768);
     assert_eq!(CACHE_CAPACITY, 10_000);
     assert_eq!(DEFAULT_BATCH_SIZE, 16);
     assert_eq!(MODEL_NAME, "bge-base-en-v1.5");
+    assert_eq!(DEFAULT_HF_REPO, "BAAI/bge-base-en-v1.5");
+}
+
+// ── parse_dtype tests ────────────────────────────────────────────────
+
+#[test]
+fn parse_dtype_f32() {
+    assert!(matches!(parse_dtype("f32").unwrap(), DType::F32));
+    assert!(matches!(parse_dtype("float32").unwrap(), DType::F32));
+    assert!(matches!(parse_dtype("").unwrap(), DType::F32));
+}
+
+#[test]
+fn parse_dtype_f16() {
+    assert!(matches!(parse_dtype("f16").unwrap(), DType::F16));
+    assert!(matches!(parse_dtype("float16").unwrap(), DType::F16));
+    assert!(matches!(parse_dtype("half").unwrap(), DType::F16));
+}
+
+#[test]
+fn parse_dtype_bf16() {
+    assert!(matches!(parse_dtype("bf16").unwrap(), DType::BF16));
+    assert!(matches!(parse_dtype("bfloat16").unwrap(), DType::BF16));
+}
+
+#[test]
+fn parse_dtype_case_insensitive() {
+    assert!(matches!(parse_dtype("F16").unwrap(), DType::F16));
+    assert!(matches!(parse_dtype("F32").unwrap(), DType::F32));
+    assert!(matches!(parse_dtype("BF16").unwrap(), DType::BF16));
+}
+
+#[test]
+fn parse_dtype_unknown() {
+    let err = parse_dtype("int8").unwrap_err().to_string();
+    assert!(err.contains("Unknown dtype"), "Error: {err}");
+}
+
+// ── resolve_model_id tests ───────────────────────────────────────────
+
+#[test]
+fn resolve_model_id_full_repo() {
+    let (repo, dir) = resolve_model_id("BAAI/bge-base-en-v1.5").unwrap();
+    assert_eq!(repo, "BAAI/bge-base-en-v1.5");
+    assert_eq!(dir, "bge-base-en-v1.5");
+}
+
+#[test]
+fn resolve_model_id_short_bge() {
+    let (repo, dir) = resolve_model_id("bge-small-en-v1.5").unwrap();
+    assert_eq!(repo, "BAAI/bge-small-en-v1.5");
+    assert_eq!(dir, "bge-small-en-v1.5");
+}
+
+#[test]
+fn resolve_model_id_other_repo() {
+    let (repo, dir) = resolve_model_id("sentence-transformers/all-MiniLM-L6-v2").unwrap();
+    assert_eq!(repo, "sentence-transformers/all-MiniLM-L6-v2");
+    assert_eq!(dir, "all-MiniLM-L6-v2");
+}
+
+#[test]
+fn resolve_model_id_bare_name_rejected() {
+    let err = resolve_model_id("my-custom-model").unwrap_err().to_string();
+    assert!(
+        err.contains("must be a full HuggingFace repo ID"),
+        "Error: {err}"
+    );
+}
+
+// ── model_dir_for tests ──────────────────────────────────────────────
+
+#[test]
+fn model_dir_for_custom_model() {
+    let dir = EmbeddingService::model_dir_for("bge-small-en-v1.5");
+    assert!(dir.to_string_lossy().contains("bge-small-en-v1.5"));
+    assert!(dir.to_string_lossy().contains(".codemem"));
+}
+
+// ── from_env batch_size env var test ─────────────────────────────────
+
+#[test]
+fn from_env_batch_size_env_var() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "ollama") };
+    unsafe { std::env::set_var("CODEMEM_EMBED_BATCH_SIZE", "8") };
+
+    // We can't directly inspect batch_size from the provider, but we verify
+    // the env var doesn't cause an error
+    let result = from_env(None);
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_BATCH_SIZE") };
+
+    assert!(result.is_ok());
+}
+
+#[test]
+fn from_env_candle_bare_name_rejected() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "candle") };
+    unsafe { std::env::set_var("CODEMEM_EMBED_MODEL", "my-custom-model") };
+
+    let result = from_env(None);
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_MODEL") };
+
+    match result {
+        Err(e) => {
+            let err = e.to_string();
+            assert!(
+                err.contains("must be a full HuggingFace repo ID"),
+                "Error should explain the format requirement: {err}"
+            );
+        }
+        Ok(_) => panic!("Expected error for bare model name without org/"),
+    }
 }
 
 #[test]

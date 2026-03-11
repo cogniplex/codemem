@@ -169,16 +169,20 @@ impl CodememConfig {
 pub struct EmbeddingConfig {
     /// Provider name: "candle" (default), "ollama", or "openai".
     pub provider: String,
-    /// Model name (provider-specific).
+    /// Model name (provider-specific). For Candle: HF repo ID (e.g. "BAAI/bge-base-en-v1.5").
     pub model: String,
     /// API URL for remote providers.
     pub url: String,
-    /// Embedding dimensions.
+    /// Embedding dimensions for remote providers (Ollama/OpenAI).
+    /// Ignored by Candle — reads `hidden_size` from model's config.json.
     pub dimensions: usize,
     /// LRU cache capacity.
     pub cache_capacity: usize,
     /// Batch size for embedding forward passes (GPU memory trade-off).
     pub batch_size: usize,
+    /// Weight dtype: "f32" (default), "f16" (half precision), "bf16".
+    /// F16 halves memory and is faster on Metal GPU.
+    pub dtype: String,
 }
 
 impl Default for EmbeddingConfig {
@@ -190,6 +194,7 @@ impl Default for EmbeddingConfig {
             dimensions: 768,
             cache_capacity: 10_000,
             batch_size: 16,
+            dtype: "f32".to_string(),
         }
     }
 }
