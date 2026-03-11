@@ -31,7 +31,7 @@ The `openai` provider works with any OpenAI-compatible API (Voyage AI, Together,
 
 ## `codemem init`
 
-Initialize Codemem in the current directory. Downloads the embedding model (~440MB BAAI/bge-base-en-v1.5 safetensors), registers 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop), and creates the MCP server configuration.
+Initialize Codemem in the current directory. Downloads the embedding model (~440MB BAAI/bge-base-en-v1.5 safetensors), registers 9 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, PostToolUseFailure, Stop, SubagentStart, SubagentStop, SessionEnd, PreCompact), and creates the MCP server configuration.
 
 **Syntax**
 
@@ -355,7 +355,14 @@ These commands are called automatically by registered hooks. They are not intend
 
 **Hook:** SessionStart
 
-Queries the memory database for relevant prior context and injects it into the new session via `hookSpecificOutput.additionalContext`. The injected context includes:
+Queries the memory database for relevant prior context and injects it into the new session via `hookSpecificOutput.additionalContext`. Handles the `source` field in the payload:
+
+- `startup` (default): Full context injection with all 5 data sources
+- `resume`: Minimal response — session is continuing with context intact
+- `compact`: Saves a checkpoint memory, then full context injection
+- `clear`: Treated like startup
+
+The injected context includes:
 
 - Recent sessions with summaries (up to 5)
 - Key Decision, Insight, and Pattern memories (up to 15)
@@ -363,7 +370,7 @@ Queries the memory database for relevant prior context and injects it into the n
 - Detected cross-session patterns (repeated searches, etc.)
 - Database statistics
 
-Reads JSON `{session_id, cwd}` from stdin. Outputs JSON with `hookSpecificOutput.additionalContext` containing compact markdown wrapped in `<codemem-context>` tags.
+Reads JSON `{session_id, cwd, source}` from stdin. Outputs JSON with `hookSpecificOutput.additionalContext` containing compact markdown wrapped in `<codemem-context>` tags.
 
 **Syntax**
 
@@ -381,7 +388,7 @@ Records the user's prompt as a Context memory (importance 0.3) for session track
 
 Reads JSON `{session_id, cwd, prompt}` from stdin. Outputs JSON `{continue: true}`.
 
-Prompts shorter than 5 characters are ignored.
+Prompts shorter than 5 characters are ignored. Trivial prompts (fewer than 30 characters or fewer than 5 words) are also skipped.
 
 **Syntax**
 
@@ -395,9 +402,9 @@ codemem prompt
 
 **Hook:** Stop
 
-Builds a structured session summary from all memories created during the session. Categorizes memories into files read, files edited, searches performed, decisions made, and user prompts. Stores the summary as an Insight memory and ends the session.
+Builds a structured session summary from all memories created during the session. Categorizes memories into files read, files edited, searches performed, decisions made, and user prompts. Stores the summary as an Insight memory and ends the session. Appends a truncated excerpt of `last_assistant_message` for richer context.
 
-Reads JSON `{session_id, cwd}` from stdin. Outputs JSON `{continue: true}`.
+Reads JSON `{session_id, cwd, stop_hook_active, last_assistant_message}` from stdin. Outputs JSON `{continue: true}`. Skips execution if `stop_hook_active` is true (prevents recursive hook loops).
 
 **Summary format:** `"Requests: ...; Investigated N file(s): ...; Modified N file(s): ...; Decisions: ...; Searched: ..."`
 
@@ -405,6 +412,86 @@ Reads JSON `{session_id, cwd}` from stdin. Outputs JSON `{continue: true}`.
 
 ```
 codemem summarize
+```
+
+---
+
+## `codemem agent-result`
+
+**Hook:** SubagentStop
+
+Captures subagent findings from `last_assistant_message` as Insight memories (importance 0.5) with `agent-result` and `agent:<type>` tags. Skips messages shorter than 20 characters. Guards against `stop_hook_active` loops.
+
+Reads JSON `{session_id, cwd, agent_type, agent_id, last_assistant_message, stop_hook_active}` from stdin. Outputs JSON `{}`.
+
+**Syntax**
+
+```
+codemem agent-result
+```
+
+---
+
+## `codemem agent-start`
+
+**Hook:** SubagentStart
+
+Logs agent spawn events via tracing. Does not store a memory — agent spawns are transient operational events.
+
+Reads JSON `{session_id, cwd, agent_type, agent_id}` from stdin. Outputs JSON `{}`.
+
+**Syntax**
+
+```
+codemem agent-start
+```
+
+---
+
+## `codemem tool-error`
+
+**Hook:** PostToolUseFailure
+
+Captures tool error patterns as Context memories (importance 0.4) with `error`, `tool-failure`, and `tool:<name>` tags. Includes input context (file_path, command, or pattern) for actionable error messages. Skips user interrupts (`is_interrupt: true`).
+
+Reads JSON `{session_id, cwd, tool_name, tool_input, error, is_interrupt}` from stdin. Outputs JSON `{}`.
+
+**Syntax**
+
+```
+codemem tool-error
+```
+
+---
+
+## `codemem session-close`
+
+**Hook:** SessionEnd
+
+Cleanly closes the session in the database with the termination reason (e.g., `user_request`, `api_request`, `tool_use`).
+
+Reads JSON `{session_id, cwd, reason}` from stdin. Outputs JSON `{}`.
+
+**Syntax**
+
+```
+codemem session-close
+```
+
+---
+
+## `codemem checkpoint`
+
+**Hook:** PreCompact
+
+Saves a checkpoint memory before context compaction, summarizing up to 5 recent Decision/Insight/Pattern memories from the namespace. Tagged `pre-compact` + `checkpoint` with importance 0.5. Also triggered internally by SessionStart when `source: compact`.
+
+Reads JSON `{session_id, cwd}` from stdin. Outputs JSON `{}`.
+
+**Syntax**
+
+```
+codemem checkpoint
 ```
 
 ---

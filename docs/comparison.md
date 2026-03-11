@@ -1,6 +1,6 @@
 # Comparison: Memory Tools for AI Coding Assistants
 
-A comprehensive comparison of Codemem against other memory and context tools in the ecosystem. Last updated March 2026.
+A comprehensive comparison of Codemem against other memory and context tools in the ecosystem.
 
 ## At a Glance
 
@@ -31,7 +31,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 |--------|--------|------|
 | **Install** | `curl -fsSL .../install.sh \| sh` or `brew install cogniplex/tap/codemem` | `pip install mem0ai` + vector DB + graph DB |
 | **Storage** | Single SQLite file + HNSW index | Triple-store: vector DB (24+ providers) + graph DB (Neo4j/Memgraph) + relational DB |
-| **Auto-capture** | 4 lifecycle hooks capture Read/Grep/Edit/Write automatically + trigger-based auto-insights | Manual `add()` calls only |
+| **Auto-capture** | 9 lifecycle hooks capture Read/Grep/Edit/Write automatically + trigger-based auto-insights | Manual `add()` calls only |
 | **Code awareness** | 14 language extractors, CST-aware chunking, structural indexing | General-purpose fact extraction from conversations |
 | **Recall scoring** | 8-component hybrid (vector + graph strength via PageRank/betweenness + BM25 + temporal + tags + importance + confidence + recency) | Vector similarity + optional graph traversal + reranking (Cohere, etc.) |
 | **Memory scoping** | Namespace-scoped (per project directory) | Multi-level: User, Session, Agent state |
@@ -137,7 +137,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 |--------|--------|------------|
 | **Language** | Rust (single binary) | TypeScript + Bun + Python (uv) |
 | **Runtime deps** | None | Node.js + Bun + uv + Python + Express on port 37777 |
-| **Hooks** | 4 lifecycle hooks + trigger-based auto-insights | 5 lifecycle hooks |
+| **Hooks** | 9 lifecycle hooks + trigger-based auto-insights | 5 lifecycle hooks |
 | **Knowledge graph** | petgraph with 25 algorithms (PageRank, Louvain, betweenness, SCC) | None |
 | **Code intelligence** | ast-grep indexing (14 languages), CST-aware chunking, structural relationships | None (stores raw text observations) |
 | **Scoring** | 8-component hybrid (vector + graph + BM25 + temporal + tags + importance + confidence + recency) | FTS5 keyword + Chroma vector (separate) |
@@ -228,18 +228,4 @@ Codemem was directly inspired by AutoMem's research. The key difference is packa
 
 ## Summary
 
-The AI memory landscape has matured significantly since early 2025. Multiple tools have raised venture funding (Mem0 $24M, Cognee $7.5M, Supermemory $3M), benchmark competition has intensified (Supermemory leads LongMemEval/LoCoMo/ConvoMem, AutoMem's 90.53% LoCoMo SOTA, MemOS's 159% temporal reasoning improvement), and the MCP protocol has become the standard integration layer.
-
-Most tools remain Python-based, require external services (vector DBs, graph DBs, embedding APIs), and target general-purpose conversation memory. The trend is toward multi-modal memory (images, video, documents), cloud-hosted APIs with SaaS connectors, and increasingly sophisticated temporal reasoning.
-
-Codemem occupies a unique position: a **single Rust binary** purpose-built for **AI coding assistants**, combining the best research ideas (graph-vector hybrid from AutoMem/HippoRAG, CST-aware chunking inspired by the cAST paper, contextual embeddings, neuroscience-inspired consolidation) into a **zero-dependency, offline-first** package with **32 MCP tools**, **self-editing memory**, **trigger-based auto-insights**, **14 enrichment types**, and **14-language structural code intelligence**. The tradeoff is intentional: Codemem drops cloud-scale multi-tenancy, multi-modal support, and pluggable backend architecture in favor of simplicity, speed, and local-first operation.
-
-Install in one line:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cogniplex/codemem/main/install.sh | sh
-# or: brew install cogniplex/tap/codemem
-# or: cargo install codemem
-```
-
-Then use the [code-mapper agent](../examples/agents/code-mapper.md) to index your codebase, run PageRank, detect clusters, and store architectural insights as persistent memories.
+Most AI memory tools are Python-based, require external services, and target general-purpose conversation memory. Codemem is a **single Rust binary** purpose-built for **AI coding assistants** — zero-dependency, offline-first, with structural code intelligence. The tradeoff is intentional: no cloud-scale multi-tenancy, no multi-modal support, no pluggable backend architecture. See the [Architecture](architecture.md) doc for full system design.

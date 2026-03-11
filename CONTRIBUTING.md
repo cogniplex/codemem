@@ -3,103 +3,92 @@
 ## Prerequisites
 
 - Rust 1.75+ (edition 2021)
-- No external runtime dependencies — all native libs are bundled or compiled from source
+- [Bun](https://bun.sh) for UI development
+- No external runtime dependencies — all native libs are bundled
 
-## Build
+## Build & Test
 
 ```bash
 git clone https://github.com/cogniplex/codemem.git
 cd codemem
 cargo build
+cargo test --workspace
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-## Test
+CI treats **all warnings as errors** (`RUSTFLAGS: -D warnings`). Always run clippy before pushing.
 
+UI:
 ```bash
-cargo test --workspace       # All tests
-cargo bench                  # Criterion benchmarks
-```
-
-## Run from Source
-
-```bash
-cargo run -- init
-cargo run -- search "some query"
-cargo run -- stats
-cargo run -- serve           # Start MCP server (stdio)
+cd ui && bun install && bun run dev          # Dev server
+cd ui && bun run tsc --noEmit && bun run eslint .  # Checks
 ```
 
 ## Project Structure
 
-Codemem is a Cargo workspace with 6 crates. See [docs/architecture.md](docs/architecture.md) for the full design.
+6-crate Cargo workspace. See [docs/architecture.md](docs/architecture.md) for the full design.
 
 | Crate | When to modify |
 |-------|---------------|
-| codemem-core | Adding/changing memory types, traits, scoring weights, shared types, config |
-| codemem-storage | Changing SQLite schema, queries, persistence logic, graph algorithms, HNSW parameters, session management |
-| codemem-embeddings | Adding embedding providers (Candle/Ollama/OpenAI), cache behavior |
-| codemem-engine | Domain logic: indexing, hooks, enrichment, consolidation, recall, search, patterns, compression |
-| codemem | Adding/modifying MCP tools, REST API routes, CLI commands, lifecycle hooks |
-| codemem-bench | Adding benchmarks, changing performance targets |
+| codemem-core | Memory types, traits, scoring weights, shared types, config |
+| codemem-storage | SQLite schema, queries, graph algorithms, HNSW parameters |
+| codemem-embeddings | Embedding providers (Candle/Ollama/OpenAI), cache behavior |
+| codemem-engine | Indexing, hooks, enrichment, consolidation, recall, search |
+| codemem | MCP tools, REST API routes, CLI commands, lifecycle hooks |
+| codemem-bench | Benchmarks, performance targets |
 
-## Web UI
+## Code Conventions
 
-The React dashboard lives in `ui/`. Uses Bun as package manager.
+- **No `.unwrap()` on locks.** Use typed lock helpers returning `CodememError::LockPoisoned`.
+- **Hook handlers use `open_without_migrations()`** for fast startup.
+- **SQLite batching** respects the 999-parameter limit.
+- **Enrichment outputs** must be tagged `static-analysis`.
+- Run `cargo fmt` before committing.
 
-```bash
-cd ui && bun install            # Install dependencies
-cd ui && bun run dev            # Dev server (Vite)
-cd ui && bun run build          # Production build
-cd ui && bun run tsc --noEmit   # TypeScript check
-cd ui && bun run eslint .       # Lint check
-```
+## Adding a Lifecycle Hook
 
-## Code Style
+1. Add the handler in `crates/codemem/src/cli/commands_lifecycle.rs` (use `read_hook_payload()` + `extract_hook_context()`)
+2. Add a `Commands` enum variant in `crates/codemem/src/cli/mod.rs`
+3. Wire the match arm in `run()`
+4. Register the hook in `commands_init.rs` `hook_defs` vector
+5. Add tests in `cli/tests/commands_lifecycle_tests.rs`
+6. Update `docs/cli-reference.md` and `docs/architecture.md`
 
-- Run `cargo fmt` before committing
-- Run `cargo clippy --workspace --all-targets -- -D warnings` and address all warnings (CI treats warnings as errors)
-- Prefer `Result<T, E>` over panicking — zero `.unwrap()` on locks in production code
-- Keep functions focused and under ~50 lines where practical
+## Adding an Enrichment Type
+
+1. Create a new file in `crates/codemem-engine/src/enrichment/`
+2. Add it to the dispatch in `enrichment/mod.rs`
+3. Tag outputs as `static-analysis` with a `track:<name>` tag
+4. Use semantic dedup (cosine > 0.90) before storing insights
+
+## Adding an MCP Tool
+
+1. Add the tool in `crates/codemem/src/mcp/tools/`
+2. Register it in `mcp/mod.rs`
+3. Document it in `docs/mcp-tools.md`
 
 ## Testing
 
-- Unit tests live alongside code (`#[cfg(test)]` modules)
-- Integration tests in `crates/*/tests/`
-- Benchmarks in `crates/codemem-bench/` using Criterion
+- Unit tests: `#[cfg(test)]` modules alongside source
+- Use `tempfile` for test databases
+- Hook tests construct `HookPayload` structs directly (include all optional fields)
 - UI E2E tests via Playwright
-- New features should include tests
-
-## Performance
-
 - Don't regress benchmarks by more than 20% (CI enforced)
-- Run `cargo bench` before submitting changes to hot paths
-- Profile with `cargo flamegraph` for performance investigations
-
-## Commit Messages
-
-Use conventional commits:
-
-```
-feat(mcp): add recall_with_expansion tool
-fix(hooks): handle empty tool_response gracefully
-perf(embeddings): switch to candle for pure Rust inference
-docs: update architecture diagrams
-test(graph): add Louvain community detection coverage
-```
 
 ## Pull Requests
 
-1. Fork and create a feature branch from `main`
+1. Create a branch from `main`
 2. Make changes with tests
-3. Run `cargo fmt && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
+3. Run all checks (fmt, clippy, test)
 4. Open a PR with a clear description
 
-## Architecture Decisions
+Significant changes (new crates, schema changes, new dependencies) should be discussed in an issue first.
 
-Significant changes should be discussed in an issue first:
+## Commit Messages
 
-- Adding new crates to the workspace
-- Changing the storage schema
-- Modifying the MCP tool interface
-- Adding new dependencies
-- Changing embedding models or HNSW parameters
+Use conventional commits: `feat:`, `fix:`, `docs:`, `chore:`, `perf:`, `refactor:`, `test:`.
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
