@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.11.0](https://github.com/cogniplex/codemem/compare/v0.10.4...v0.11.0) (2026-03-11)
+
+
+### Features
+
+* configurable embedding model, dtype, and batch size ([#31](https://github.com/cogniplex/codemem/issues/31)) ([6dfbfce](https://github.com/cogniplex/codemem/commit/6dfbfce0377b5e46c0a2de8907ac11a53f19e490))
+* enhance agent prompts with typed relationships and top-down processing ([#25](https://github.com/cogniplex/codemem/issues/25)) ([867bbac](https://github.com/cogniplex/codemem/commit/867bbace136a31550941671f56adce33b51cd574))
+* incremental re-indexing with symbol-level diff ([#26](https://github.com/cogniplex/codemem/issues/26)) ([872b10f](https://github.com/cogniplex/codemem/commit/872b10f05cbe35d44e04f87767dcd18c5f5c8ba7))
+
+
+### Bug Fixes
+
+* Claude Code hooks spec compliance (issue [#27](https://github.com/cogniplex/codemem/issues/27)) ([#29](https://github.com/cogniplex/codemem/issues/29)) ([dafc4e8](https://github.com/cogniplex/codemem/commit/dafc4e865ced97ddbcb4c7d98d0e9b10de723519))
+
+
+### Performance Improvements
+
+* lazy init for vector/BM25/embeddings in CodememEngine ([#28](https://github.com/cogniplex/codemem/issues/28)) ([823cbc1](https://github.com/cogniplex/codemem/commit/823cbc1ed798fc0988c07e63510a51eddc6c0fb6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.10.1 to 0.11.0
+    * codemem-engine bumped from 0.10.3 to 0.11.0
+
 ## [0.10.4](https://github.com/cogniplex/codemem/compare/v0.10.3...v0.10.4) (2026-03-09)
 
 

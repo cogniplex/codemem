@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.11.0](https://github.com/cogniplex/codemem/compare/v0.10.3...v0.11.0) (2026-03-11)
+
+
+### Features
+
+* incremental re-indexing with symbol-level diff ([#26](https://github.com/cogniplex/codemem/issues/26)) ([872b10f](https://github.com/cogniplex/codemem/commit/872b10f05cbe35d44e04f87767dcd18c5f5c8ba7))
+
+
+### Bug Fixes
+
+* Claude Code hooks spec compliance (issue [#27](https://github.com/cogniplex/codemem/issues/27)) ([#29](https://github.com/cogniplex/codemem/issues/29)) ([dafc4e8](https://github.com/cogniplex/codemem/commit/dafc4e865ced97ddbcb4c7d98d0e9b10de723519))
+
+
+### Performance Improvements
+
+* lazy init for vector/BM25/embeddings in CodememEngine ([#28](https://github.com/cogniplex/codemem/issues/28)) ([823cbc1](https://github.com/cogniplex/codemem/commit/823cbc1ed798fc0988c07e63510a51eddc6c0fb6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.10.1 to 0.11.0
+    * codemem-storage bumped from 0.10.1 to 0.11.0
+    * codemem-embeddings bumped from 0.10.1 to 0.11.0
+
 ## [0.10.3](https://github.com/cogniplex/codemem/compare/v0.10.2...v0.10.3) (2026-03-09)
 
 

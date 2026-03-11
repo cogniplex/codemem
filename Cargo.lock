@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "codemem"
-version = "0.10.4"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-bench"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "chrono",
  "codemem-core",
@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-core"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-embeddings"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-engine"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "ast-grep-core",
@@ -772,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "codemem-storage"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "chrono",
  "codemem-core",
