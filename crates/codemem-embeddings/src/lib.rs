@@ -51,19 +51,34 @@ pub const DEFAULT_BATCH_SIZE: usize = 16;
 fn select_device() -> Device {
     #[cfg(feature = "metal")]
     {
-        if let Ok(device) = Device::new_metal(0) {
-            tracing::info!("Using Metal GPU for embeddings");
-            return device;
+        // Use catch_unwind to handle SIGBUS/panics on CI runners without GPU access.
+        match std::panic::catch_unwind(|| Device::new_metal(0)) {
+            Ok(Ok(device)) => {
+                tracing::info!("Using Metal GPU for embeddings");
+                return device;
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("Metal device creation failed: {e}, falling back to CPU");
+            }
+            Err(_) => {
+                tracing::warn!("Metal device creation panicked, falling back to CPU");
+            }
         }
-        tracing::warn!("Metal feature enabled but device creation failed, falling back");
     }
     #[cfg(feature = "cuda")]
     {
-        if let Ok(device) = Device::new_cuda(0) {
-            tracing::info!("Using CUDA GPU for embeddings");
-            return device;
+        match std::panic::catch_unwind(|| Device::new_cuda(0)) {
+            Ok(Ok(device)) => {
+                tracing::info!("Using CUDA GPU for embeddings");
+                return device;
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("CUDA device creation failed: {e}, falling back to CPU");
+            }
+            Err(_) => {
+                tracing::warn!("CUDA device creation panicked, falling back to CPU");
+            }
         }
-        tracing::warn!("CUDA feature enabled but device creation failed, falling back");
     }
     tracing::info!("Using CPU for embeddings");
     Device::Cpu
@@ -686,17 +701,20 @@ pub fn from_env(
             });
             let dtype = parse_dtype(&dtype_str)?;
 
-            // Auto-download if model isn't present yet
-            if !model_dir.join("model.safetensors").exists() {
-                tracing::info!(
-                    "Model not found at {}, attempting download from {}",
-                    model_dir.display(),
-                    hf_repo
-                );
-                EmbeddingService::download_model(&model_dir, &hf_repo)?;
-            }
-
-            let service = EmbeddingService::new(&model_dir, batch_size, dtype)?;
+            let service = EmbeddingService::new(&model_dir, batch_size, dtype).map_err(|e| {
+                // Enhance error message with download hint for non-default models
+                if e.to_string().contains("Model not found") && hf_repo != DEFAULT_HF_REPO {
+                    CodememError::Embedding(format!(
+                        "Model '{}' not found at {}. Download it with:\n  \
+                         CODEMEM_EMBED_MODEL={} codemem init",
+                        hf_repo,
+                        model_dir.display(),
+                        hf_repo
+                    ))
+                } else {
+                    e
+                }
+            })?;
             Ok(Box::new(CachedProvider::new(
                 Box::new(service),
                 cache_capacity,
