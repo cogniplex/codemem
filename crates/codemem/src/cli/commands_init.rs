@@ -477,7 +477,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
             status_lines.push("Model: already present".to_string());
         } else {
             println!("[model] Downloading embedding model (BAAI/bge-base-en-v1.5)...");
-            match codemem_engine::EmbeddingService::download_model(&model_dir) {
+            match codemem_engine::EmbeddingService::download_default_model() {
                 Ok(_) => {
                     println!("[model] Downloaded to {}", model_dir.display());
                     status_lines.push(format!("Model: downloaded to {}", model_dir.display()));
