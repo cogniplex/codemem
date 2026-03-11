@@ -359,7 +359,7 @@ pub fn run() -> anyhow::Result<()> {
         Commands::Context => {
             // H3: Open lightweight storage instead of the full engine.
             let db_path = codemem_db_path();
-            match codemem_engine::Storage::open(&db_path) {
+            match codemem_engine::Storage::open_without_migrations(&db_path) {
                 Ok(storage) => {
                     commands_lifecycle::cmd_context(&storage)?;
                 }

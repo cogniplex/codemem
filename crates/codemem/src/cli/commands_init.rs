@@ -589,9 +589,10 @@ pub(crate) fn batch_embed_existing(db_path: &std::path::Path) {
 
     let mut embedded = 0usize;
     let total = rows.len();
+    let batch_size = config.embedding.batch_size;
 
     let mut all_pairs: Vec<(String, Vec<f32>)> = Vec::new();
-    for (batch_idx, chunk) in rows.chunks(32).enumerate() {
+    for (batch_idx, chunk) in rows.chunks(batch_size).enumerate() {
         let texts: Vec<&str> = chunk.iter().map(|(_, content)| content.as_str()).collect();
         if let Ok(embeddings) = emb_service.embed_batch(&texts) {
             for ((id, _), embedding) in chunk.iter().zip(embeddings) {
@@ -600,7 +601,7 @@ pub(crate) fn batch_embed_existing(db_path: &std::path::Path) {
                 embedded += 1;
             }
         }
-        let done = (batch_idx + 1) * 32;
+        let done = (batch_idx + 1) * batch_size;
         print!("\r  Embedding: {}/{}", done.min(total), total);
         std::io::Write::flush(&mut std::io::stdout()).ok();
     }

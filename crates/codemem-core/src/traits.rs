@@ -482,11 +482,16 @@ pub trait StorageBackend: Send + Sync {
 
     // ── File Hash Tracking ──────────────────────────────────────────
 
-    /// Load all file hashes for incremental indexing. Returns path -> hash map.
-    fn load_file_hashes(&self) -> Result<HashMap<String, String>, CodememError>;
+    /// Load file hashes for incremental indexing, scoped to a namespace.
+    /// Returns path -> hash map.
+    fn load_file_hashes(&self, namespace: &str) -> Result<HashMap<String, String>, CodememError>;
 
-    /// Save file hashes for incremental indexing.
-    fn save_file_hashes(&self, hashes: &HashMap<String, String>) -> Result<(), CodememError>;
+    /// Save file hashes for incremental indexing, scoped to a namespace.
+    fn save_file_hashes(
+        &self,
+        namespace: &str,
+        hashes: &HashMap<String, String>,
+    ) -> Result<(), CodememError>;
 
     // ── Session Activity Tracking ─────────────────────────────────
 

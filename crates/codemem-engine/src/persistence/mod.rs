@@ -606,14 +606,14 @@ impl super::CodememEngine {
             .collect();
 
         // Phase 2+3: Embed in batches and persist progressively.
-        const EMBED_CHUNK_SIZE: usize = 64;
+        let embed_batch_size = self.config.embedding.batch_size;
 
         let all_pairs: Vec<(String, String)> = sym_texts.into_iter().chain(chunk_texts).collect();
         let total = all_pairs.len();
         let sym_count = symbols.len();
         let mut done = 0usize;
 
-        for batch in all_pairs.chunks(EMBED_CHUNK_SIZE) {
+        for batch in all_pairs.chunks(embed_batch_size) {
             let texts: Vec<&str> = batch.iter().map(|(_, t)| t.as_str()).collect();
 
             let t0 = std::time::Instant::now();

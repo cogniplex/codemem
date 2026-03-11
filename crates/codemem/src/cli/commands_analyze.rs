@@ -19,7 +19,7 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
 
     // Load incremental state
     let mut change_detector = codemem_engine::index::incremental::ChangeDetector::new();
-    change_detector.load_from_storage(engine.storage());
+    change_detector.load_from_storage(engine.storage(), ns);
 
     println!("Analyzing {}...", root.display());
 

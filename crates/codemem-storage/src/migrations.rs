@@ -59,6 +59,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Separate api_client_calls table",
         sql: include_str!("migrations/010_api_client_calls.sql"),
     },
+    Migration {
+        version: 11,
+        description: "Namespace-scoped file hashes",
+        sql: include_str!("migrations/011_namespace_scoped_file_hashes.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.
