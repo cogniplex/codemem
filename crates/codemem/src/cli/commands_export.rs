@@ -313,9 +313,15 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
     let db_path = super::codemem_db_path();
     let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
 
-    // Load incremental state
+    // Derive namespace early so we can scope file hashes
+    let ns = root
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or_else(|| root.to_str().unwrap_or("unknown"));
+
+    // Load incremental state scoped to this namespace
     let mut change_detector = codemem_engine::index::incremental::ChangeDetector::new();
-    change_detector.load_from_storage(engine.storage());
+    change_detector.load_from_storage(engine.storage(), ns);
 
     let mut indexer = codemem_engine::Indexer::with_change_detector(change_detector);
 
@@ -429,8 +435,9 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
             })
             .collect();
 
+        let batch_size = engine.config().embedding.batch_size;
         let mut all_sym_pairs: Vec<(String, Vec<f32>)> = Vec::new();
-        for (batch_idx, chunk) in embed_data.chunks(32).enumerate() {
+        for (batch_idx, chunk) in embed_data.chunks(batch_size).enumerate() {
             let texts: Vec<&str> = chunk.iter().map(|(_, t)| t.as_str()).collect();
             if let Ok(embeddings) = emb_guard.embed_batch(&texts) {
                 for ((sym_id, _), embedding) in chunk.iter().zip(embeddings) {
@@ -441,7 +448,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
                     symbols_embedded += 1;
                 }
             }
-            let done = (batch_idx + 1) * 32;
+            let done = (batch_idx + 1) * batch_size;
             print!("\r  Embedding symbols: {}/{}", done.min(total), total);
             std::io::Write::flush(&mut std::io::stdout()).ok();
         }
@@ -464,7 +471,7 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
     // Save incremental state
     indexer
         .change_detector()
-        .save_to_storage(engine.storage())?;
+        .save_to_storage(engine.storage(), ns)?;
 
     if verbose {
         println!("\nSymbols:");

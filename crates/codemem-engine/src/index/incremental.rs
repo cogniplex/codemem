@@ -24,8 +24,12 @@ impl ChangeDetector {
     ///
     /// This reads from the `file_hashes` table if it exists. If the table
     /// doesn't exist or the query fails, starts fresh with no known hashes.
-    pub fn load_from_storage(&mut self, storage: &dyn codemem_core::StorageBackend) {
-        match storage.load_file_hashes() {
+    pub fn load_from_storage(
+        &mut self,
+        storage: &dyn codemem_core::StorageBackend,
+        namespace: &str,
+    ) {
+        match storage.load_file_hashes(namespace) {
             Ok(hashes) => {
                 tracing::debug!("Loaded {} known file hashes", hashes.len());
                 self.known_hashes = hashes;
@@ -40,8 +44,9 @@ impl ChangeDetector {
     pub fn save_to_storage(
         &self,
         storage: &dyn codemem_core::StorageBackend,
+        namespace: &str,
     ) -> Result<(), codemem_core::CodememError> {
-        storage.save_file_hashes(&self.known_hashes)
+        storage.save_file_hashes(namespace, &self.known_hashes)
     }
 
     /// Check if a file has changed and return (changed, hash) to avoid double-hashing.
