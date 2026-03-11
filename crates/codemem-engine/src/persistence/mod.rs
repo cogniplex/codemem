@@ -2,6 +2,8 @@
 //! edges, embeddings, compaction) into the storage and graph backends.
 
 mod compaction;
+pub mod cross_repo;
+pub mod lsp;
 
 use crate::index::{CodeChunk, ResolvedEdge, Symbol};
 use crate::IndexAndResolveResult;
@@ -23,6 +25,20 @@ pub struct IndexPersistResult {
     pub chunks_embedded: usize,
     pub chunks_pruned: usize,
     pub symbols_pruned: usize,
+}
+
+/// Counts of what was persisted by `persist_cross_repo_data`.
+#[derive(Debug, Default)]
+pub struct CrossRepoPersistResult {
+    pub packages_registered: usize,
+    pub unresolved_refs_stored: usize,
+    pub forward_edges_created: usize,
+    pub backward_edges_created: usize,
+    pub endpoints_detected: usize,
+    pub client_calls_detected: usize,
+    pub lsp_edges_upgraded: usize,
+    pub lsp_ext_nodes_created: usize,
+    pub lsp_type_annotations: usize,
 }
 
 /// Return the edge weight for a given relationship type, using config overrides

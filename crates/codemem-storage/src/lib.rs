@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 mod backend;
+pub mod cross_repo;
 pub mod graph;
 mod graph_persistence;
 mod memory;
@@ -17,6 +18,7 @@ mod migrations;
 mod queries;
 pub mod vector;
 
+pub use cross_repo::{ApiEndpointEntry, PackageRegistryEntry, UnresolvedRefEntry};
 pub use graph::GraphEngine;
 pub use vector::HnswIndex;
 

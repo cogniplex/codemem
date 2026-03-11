@@ -6,7 +6,7 @@
 use crate::index::chunker::CodeChunk;
 use crate::index::incremental::ChangeDetector;
 use crate::index::parser::{CodeParser, ParseResult};
-use crate::index::resolver::{ReferenceResolver, ResolvedEdge};
+use crate::index::resolver::{ReferenceResolver, ResolvedEdge, UnresolvedRef};
 use crate::index::symbol::{Reference, Symbol};
 use ignore::WalkBuilder;
 use std::collections::HashSet;
@@ -59,6 +59,9 @@ pub struct IndexAndResolveResult {
     pub file_paths: HashSet<String>,
     /// Resolved edges from reference resolution.
     pub edges: Vec<ResolvedEdge>,
+    /// References that could not be resolved to known symbols.
+    /// Preserved for deferred cross-repo linking.
+    pub unresolved: Vec<UnresolvedRef>,
     /// The absolute root path that was indexed. Downstream code can use this
     /// to reconstruct absolute paths (e.g. for `git -C` or file reading).
     pub root_path: PathBuf,
@@ -282,7 +285,7 @@ impl Indexer {
         let mut resolver = ReferenceResolver::new();
         resolver.add_symbols(&all_symbols);
         resolver.add_imports(&all_references);
-        let edges = resolver.resolve_all(&all_references);
+        let resolve_result = resolver.resolve_all_with_unresolved(&all_references);
 
         // Canonicalize the root so downstream code can reconstruct absolute paths.
         let root_path = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
@@ -301,7 +304,8 @@ impl Indexer {
             references: all_references,
             chunks: all_chunks,
             file_paths,
-            edges,
+            edges: resolve_result.edges,
+            unresolved: resolve_result.unresolved,
             root_path,
         })
     }

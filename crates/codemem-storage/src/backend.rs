@@ -751,6 +751,202 @@ impl StorageBackend for Storage {
     ) -> Result<(), CodememError> {
         Storage::update_repo_status(self, id, status, indexed_at)
     }
+
+    // ── Cross-Repo Persistence ────────────────────────────────────────
+
+    fn graph_edges_for_namespace_with_cross(
+        &self,
+        namespace: &str,
+        include_cross_namespace: bool,
+    ) -> Result<Vec<Edge>, CodememError> {
+        Storage::graph_edges_for_namespace_with_cross(self, namespace, include_cross_namespace)
+    }
+
+    fn upsert_package_registry(
+        &self,
+        package_name: &str,
+        namespace: &str,
+        version: &str,
+        manifest: &str,
+    ) -> Result<(), CodememError> {
+        Storage::upsert_package_registry(self, package_name, namespace, version, manifest)
+    }
+
+    fn store_unresolved_ref(
+        &self,
+        source_qualified_name: &str,
+        target_name: &str,
+        source_namespace: &str,
+        file_path: &str,
+        line: usize,
+        ref_kind: &str,
+        package_hint: Option<&str>,
+    ) -> Result<(), CodememError> {
+        use crate::cross_repo::UnresolvedRefEntry;
+        let entry = UnresolvedRefEntry {
+            id: format!("uref:{source_namespace}:{source_qualified_name}:{target_name}"),
+            namespace: source_namespace.to_string(),
+            source_node: source_qualified_name.to_string(),
+            target_name: target_name.to_string(),
+            package_hint: package_hint.map(|s| s.to_string()),
+            ref_kind: ref_kind.to_string(),
+            file_path: Some(file_path.to_string()),
+            line: Some(line as i64),
+            created_at: chrono::Utc::now().timestamp(),
+        };
+        Storage::insert_unresolved_ref(self, &entry)
+    }
+
+    fn store_unresolved_refs_batch(
+        &self,
+        refs: &[codemem_core::UnresolvedRefData],
+    ) -> Result<usize, CodememError> {
+        use crate::cross_repo::UnresolvedRefEntry;
+        let now = chrono::Utc::now().timestamp();
+        let entries: Vec<UnresolvedRefEntry> = refs
+            .iter()
+            .map(|r| UnresolvedRefEntry {
+                id: format!(
+                    "uref:{}:{}:{}",
+                    r.namespace, r.source_qualified_name, r.target_name
+                ),
+                namespace: r.namespace.clone(),
+                source_node: r.source_qualified_name.clone(),
+                target_name: r.target_name.clone(),
+                package_hint: r.package_hint.clone(),
+                ref_kind: r.ref_kind.clone(),
+                file_path: Some(r.file_path.clone()),
+                line: Some(r.line as i64),
+                created_at: now,
+            })
+            .collect();
+        let count = entries.len();
+        Storage::insert_unresolved_refs_batch(self, &entries)?;
+        Ok(count)
+    }
+
+    fn list_registered_packages(&self) -> Result<Vec<(String, String, String)>, CodememError> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare("SELECT package_name, namespace, manifest FROM package_registry")
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    fn list_pending_unresolved_refs(
+        &self,
+    ) -> Result<Vec<codemem_core::PendingUnresolvedRef>, CodememError> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, source_node, target_name, namespace, file_path, line, ref_kind, package_hint
+                 FROM unresolved_refs",
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(codemem_core::PendingUnresolvedRef {
+                    id: row.get::<_, String>(0)?,
+                    source_node: row.get::<_, String>(1)?,
+                    target_name: row.get::<_, String>(2)?,
+                    namespace: row.get::<_, String>(3)?,
+                    file_path: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                    line: row.get::<_, Option<i64>>(5)?.unwrap_or(0) as usize,
+                    ref_kind: row.get::<_, String>(6)?,
+                    package_hint: row.get::<_, Option<String>>(7)?,
+                })
+            })
+            .map_err(|e| CodememError::Storage(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    fn delete_unresolved_ref(&self, id: &str) -> Result<(), CodememError> {
+        Storage::delete_unresolved_ref(self, id)
+    }
+
+    fn count_unresolved_refs(&self, namespace: &str) -> Result<usize, CodememError> {
+        let conn = self.conn()?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM unresolved_refs WHERE namespace = ?1",
+                rusqlite::params![namespace],
+                |row| row.get(0),
+            )
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
+        Ok(count as usize)
+    }
+
+    fn list_registered_packages_for_namespace(
+        &self,
+        namespace: &str,
+    ) -> Result<Vec<(String, String, String)>, CodememError> {
+        let entries = Storage::get_packages_for_namespace(self, namespace)?;
+        Ok(entries
+            .into_iter()
+            .map(|e| (e.package_name, e.namespace, e.manifest))
+            .collect())
+    }
+
+    fn store_api_endpoint(
+        &self,
+        method: &str,
+        path: &str,
+        handler_symbol: &str,
+        namespace: &str,
+    ) -> Result<(), CodememError> {
+        use crate::cross_repo::ApiEndpointEntry;
+        let entry = ApiEndpointEntry {
+            id: format!("ep:{}:{}:{}", namespace, method, path),
+            namespace: namespace.to_string(),
+            method: Some(method.to_string()),
+            path: path.to_string(),
+            handler: Some(handler_symbol.to_string()),
+            schema: "{}".to_string(),
+        };
+        Storage::upsert_api_endpoint(self, &entry)
+    }
+
+    fn store_api_client_call(
+        &self,
+        library: &str,
+        method: Option<&str>,
+        caller_symbol: &str,
+        namespace: &str,
+    ) -> Result<(), CodememError> {
+        let id = format!("client:{caller_symbol}:{library}");
+        Storage::upsert_api_client_call(self, &id, namespace, method, "", caller_symbol, library)
+    }
+
+    fn list_api_endpoints(
+        &self,
+        namespace: &str,
+    ) -> Result<Vec<(String, String, String, String)>, CodememError> {
+        let entries = Storage::get_api_endpoints_for_namespace(self, namespace)?;
+        Ok(entries
+            .into_iter()
+            .map(|e| {
+                (
+                    e.method.unwrap_or_default(),
+                    e.path,
+                    e.handler.unwrap_or_default(),
+                    e.namespace,
+                )
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]

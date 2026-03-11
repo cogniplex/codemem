@@ -24,6 +24,31 @@ pub struct ResolvedEdge {
     pub resolution_confidence: f64,
 }
 
+/// A reference that could not be resolved to a known symbol.
+/// Preserved for deferred cross-repo linking.
+#[derive(Debug, Clone)]
+pub struct UnresolvedRef {
+    /// Qualified name of the source symbol containing this reference.
+    pub source_node: String,
+    /// The unresolved target name.
+    pub target_name: String,
+    /// Package hint extracted from import context (language-specific).
+    pub package_hint: Option<String>,
+    /// Kind of reference: "call", "import", "inherits", "implements", "type_usage".
+    pub ref_kind: String,
+    /// File where the reference occurs.
+    pub file_path: String,
+    /// Line number.
+    pub line: usize,
+}
+
+/// Combined result of reference resolution: resolved edges + unresolved refs.
+#[derive(Debug)]
+pub struct ResolveResult {
+    pub edges: Vec<ResolvedEdge>,
+    pub unresolved: Vec<UnresolvedRef>,
+}
+
 /// Resolves references to target symbols and produces graph edges.
 pub struct ReferenceResolver {
     /// Map of qualified_name -> Symbol for exact resolution.
@@ -214,6 +239,212 @@ impl ReferenceResolver {
             })
             .collect()
     }
+
+    /// Resolve all references, collecting both resolved edges and unresolved refs.
+    ///
+    /// Like `resolve_all` but also preserves unresolved references with
+    /// package hints for deferred cross-repo linking.
+    pub fn resolve_all_with_unresolved(&self, references: &[Reference]) -> ResolveResult {
+        let mut edges = Vec::new();
+        let mut unresolved = Vec::new();
+
+        for r in references {
+            match self.resolve_with_confidence(r) {
+                Some((target, confidence)) => {
+                    let relationship = match r.kind {
+                        ReferenceKind::Call => RelationshipType::Calls,
+                        ReferenceKind::Import => RelationshipType::Imports,
+                        ReferenceKind::Inherits => RelationshipType::Inherits,
+                        ReferenceKind::Implements => RelationshipType::Implements,
+                        ReferenceKind::TypeUsage => RelationshipType::DependsOn,
+                    };
+                    edges.push(ResolvedEdge {
+                        source_qualified_name: r.source_qualified_name.clone(),
+                        target_qualified_name: target.qualified_name.clone(),
+                        relationship,
+                        file_path: r.file_path.clone(),
+                        line: r.line,
+                        resolution_confidence: confidence,
+                    });
+                }
+                None => {
+                    let package_hint = extract_package_hint(&r.target_name, r.kind);
+                    unresolved.push(UnresolvedRef {
+                        source_node: r.source_qualified_name.clone(),
+                        target_name: r.target_name.clone(),
+                        package_hint,
+                        ref_kind: r.kind.to_string(),
+                        file_path: r.file_path.clone(),
+                        line: r.line,
+                    });
+                }
+            }
+        }
+
+        ResolveResult { edges, unresolved }
+    }
+}
+
+/// Extract a package hint from an import target name.
+///
+/// Language-specific rules:
+/// - Python: "requests.api.get" -> "requests" (first dot-segment)
+/// - TS/JS: "@acme/shared" -> "@acme/shared" (scoped), "lodash" -> "lodash" (first segment)
+/// - Go: "github.com/acme/utils" -> "github.com/acme/utils" (full module path)
+/// - Java: "com.acme.shared.Validator" -> "com.acme.shared" (drop last segment = class name)
+/// - Rust: "crate::module::item" -> None (local), "serde::Serialize" -> "serde" (first segment)
+///
+/// For Import references, the target_name is typically the full import path.
+/// For Call references, package_hint is usually None (calls are to local symbols).
+pub(crate) fn extract_package_hint(target_name: &str, kind: ReferenceKind) -> Option<String> {
+    // Only extract hints from Import references — calls/inherits are usually local
+    if kind != ReferenceKind::Import {
+        return None;
+    }
+
+    // Skip local/relative imports
+    if target_name.starts_with('.')
+        || target_name.starts_with("crate::")
+        || target_name.starts_with("super::")
+        || target_name.starts_with("self::")
+    {
+        return None;
+    }
+
+    // Scoped npm packages: @scope/package
+    if target_name.starts_with('@') {
+        // @acme/shared-lib/utils -> @acme/shared-lib
+        let parts: Vec<&str> = target_name.splitn(3, '/').collect();
+        if parts.len() >= 2 {
+            return Some(format!("{}/{}", parts[0], parts[1]));
+        }
+        return Some(target_name.to_string());
+    }
+
+    // Go module paths: github.com/user/repo, gopkg.in/yaml.v3, etc.
+    // Detect by presence of '/' and a domain-like first segment (contains a dot with known TLD).
+    if target_name.contains('/') {
+        let first_segment = target_name.split('/').next().unwrap_or("");
+        if first_segment.contains('.') {
+            // Looks like a domain-based Go module path — use full path as package hint
+            return Some(target_name.to_string());
+        }
+    }
+
+    // Rust crate imports: tokio::sync -> "tokio"
+    if target_name.contains("::") {
+        let first = target_name.split("::").next()?;
+        return Some(first.to_string());
+    }
+
+    // Python/TS/JS dot-separated: requests.api.get -> "requests"
+    if target_name.contains('.') {
+        let first = target_name.split('.').next()?;
+        return Some(first.to_string());
+    }
+
+    // Single word import: "requests", "lodash", "flask"
+    // Filter out Python stdlib modules that would pollute the package registry
+    // with false matches. These will never correspond to an indexed namespace.
+    if is_python_stdlib(target_name) {
+        return None;
+    }
+    Some(target_name.to_string())
+}
+
+/// Common Python stdlib modules that should not produce package hints.
+/// These single-word imports would create false registry matches.
+fn is_python_stdlib(name: &str) -> bool {
+    matches!(
+        name,
+        "os" | "sys"
+            | "re"
+            | "io"
+            | "json"
+            | "math"
+            | "time"
+            | "datetime"
+            | "collections"
+            | "itertools"
+            | "functools"
+            | "typing"
+            | "logging"
+            | "pathlib"
+            | "subprocess"
+            | "threading"
+            | "multiprocessing"
+            | "unittest"
+            | "copy"
+            | "abc"
+            | "enum"
+            | "dataclasses"
+            | "contextlib"
+            | "argparse"
+            | "hashlib"
+            | "hmac"
+            | "secrets"
+            | "socket"
+            | "http"
+            | "email"
+            | "html"
+            | "xml"
+            | "csv"
+            | "sqlite3"
+            | "pickle"
+            | "shelve"
+            | "marshal"
+            | "struct"
+            | "codecs"
+            | "string"
+            | "textwrap"
+            | "difflib"
+            | "pprint"
+            | "warnings"
+            | "traceback"
+            | "inspect"
+            | "dis"
+            | "ast"
+            | "token"
+            | "keyword"
+            | "linecache"
+            | "shutil"
+            | "tempfile"
+            | "glob"
+            | "fnmatch"
+            | "stat"
+            | "fileinput"
+            | "configparser"
+            | "signal"
+            | "errno"
+            | "ctypes"
+            | "types"
+            | "weakref"
+            | "array"
+            | "bisect"
+            | "heapq"
+            | "queue"
+            | "random"
+            | "statistics"
+            | "decimal"
+            | "fractions"
+            | "operator"
+            | "uuid"
+            | "base64"
+            | "binascii"
+            | "zlib"
+            | "gzip"
+            | "zipfile"
+            | "tarfile"
+            | "pdb"
+            | "profile"
+            | "cProfile"
+            | "timeit"
+            | "platform"
+            | "sysconfig"
+            | "builtins"
+            | "asyncio"
+            | "concurrent"
+    )
 }
 
 /// Extract a module path from a file path for same-package heuristic.

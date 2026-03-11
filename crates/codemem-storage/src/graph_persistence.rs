@@ -345,16 +345,32 @@ impl Storage {
 
     /// Get all graph edges where both src and dst nodes belong to the given namespace.
     pub fn graph_edges_for_namespace(&self, namespace: &str) -> Result<Vec<Edge>, CodememError> {
+        self.graph_edges_for_namespace_with_cross(namespace, false)
+    }
+
+    /// Get graph edges for a namespace, optionally including cross-namespace edges.
+    ///
+    /// When `include_cross_namespace` is false, both endpoints must belong to the namespace.
+    /// When true, at least one endpoint must belong to the namespace (OR instead of AND).
+    pub fn graph_edges_for_namespace_with_cross(
+        &self,
+        namespace: &str,
+        include_cross_namespace: bool,
+    ) -> Result<Vec<Edge>, CodememError> {
         let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT e.id, e.src, e.dst, e.relationship, e.weight, e.properties, e.created_at, e.valid_from, e.valid_to
-                 FROM graph_edges e
-                 INNER JOIN graph_nodes gs ON e.src = gs.id
-                 INNER JOIN graph_nodes gd ON e.dst = gd.id
-                 WHERE gs.namespace = ?1 AND gd.namespace = ?1",
-            )
-            .storage_err()?;
+        let condition = if include_cross_namespace {
+            "gs.namespace = ?1 OR gd.namespace = ?1"
+        } else {
+            "gs.namespace = ?1 AND gd.namespace = ?1"
+        };
+        let sql = format!(
+            "SELECT e.id, e.src, e.dst, e.relationship, e.weight, e.properties, e.created_at, e.valid_from, e.valid_to
+             FROM graph_edges e
+             INNER JOIN graph_nodes gs ON e.src = gs.id
+             INNER JOIN graph_nodes gd ON e.dst = gd.id
+             WHERE {condition}"
+        );
+        let mut stmt = conn.prepare(&sql).storage_err()?;
 
         let edges = stmt
             .query_map(params![namespace], extract_edge_tuple)

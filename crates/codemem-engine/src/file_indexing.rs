@@ -162,7 +162,7 @@ impl CodememEngine {
 
         let mut resolver = index::ReferenceResolver::new();
         resolver.add_symbols(&parse_result.symbols);
-        let edges = resolver.resolve_all(&parse_result.references);
+        let resolve_result = resolver.resolve_all_with_unresolved(&parse_result.references);
 
         let results = IndexAndResolveResult {
             index: index::IndexResult {
@@ -178,7 +178,8 @@ impl CodememEngine {
             references: parse_result.references,
             chunks: parse_result.chunks,
             file_paths,
-            edges,
+            edges: resolve_result.edges,
+            unresolved: resolve_result.unresolved,
             root_path: project_root
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| path.to_path_buf()),

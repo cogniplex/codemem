@@ -87,7 +87,7 @@ pub use metrics::InMemoryMetrics;
 pub use enrichment::{EnrichResult, EnrichmentPipelineResult};
 
 // Re-export persistence types
-pub use persistence::{edge_weight_for, IndexPersistResult};
+pub use persistence::{edge_weight_for, CrossRepoPersistResult, IndexPersistResult};
 
 // Re-export recall types
 pub use recall::{ExpandedResult, NamespaceStats, RecallQuery};
