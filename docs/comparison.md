@@ -31,7 +31,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 |--------|--------|------|
 | **Install** | `curl -fsSL .../install.sh \| sh` or `brew install cogniplex/tap/codemem` | `pip install mem0ai` + vector DB + graph DB |
 | **Storage** | Single SQLite file + HNSW index | Triple-store: vector DB (24+ providers) + graph DB (Neo4j/Memgraph) + relational DB |
-| **Auto-capture** | 4 lifecycle hooks capture Read/Grep/Edit/Write automatically + trigger-based auto-insights | Manual `add()` calls only |
+| **Auto-capture** | 9 lifecycle hooks capture Read/Grep/Edit/Write automatically + trigger-based auto-insights | Manual `add()` calls only |
 | **Code awareness** | 14 language extractors, CST-aware chunking, structural indexing | General-purpose fact extraction from conversations |
 | **Recall scoring** | 8-component hybrid (vector + graph strength via PageRank/betweenness + BM25 + temporal + tags + importance + confidence + recency) | Vector similarity + optional graph traversal + reranking (Cohere, etc.) |
 | **Memory scoping** | Namespace-scoped (per project directory) | Multi-level: User, Session, Agent state |
@@ -137,7 +137,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 |--------|--------|------------|
 | **Language** | Rust (single binary) | TypeScript + Bun + Python (uv) |
 | **Runtime deps** | None | Node.js + Bun + uv + Python + Express on port 37777 |
-| **Hooks** | 4 lifecycle hooks + trigger-based auto-insights | 5 lifecycle hooks |
+| **Hooks** | 9 lifecycle hooks + trigger-based auto-insights | 5 lifecycle hooks |
 | **Knowledge graph** | petgraph with 25 algorithms (PageRank, Louvain, betweenness, SCC) | None |
 | **Code intelligence** | ast-grep indexing (14 languages), CST-aware chunking, structural relationships | None (stores raw text observations) |
 | **Scoring** | 8-component hybrid (vector + graph + BM25 + temporal + tags + importance + confidence + recency) | FTS5 keyword + Chroma vector (separate) |

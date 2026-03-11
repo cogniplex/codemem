@@ -4,7 +4,7 @@ Codemem is a standalone Rust memory engine for AI coding assistants. A single bi
 
 ## How Codemem Works
 
-`codemem init` registers 4 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, Stop) and a stdio MCP server. The PostToolUse hook intercepts Read/Grep/Edit/Write tool calls, extracts structured observations (file paths, symbols, diff summaries), embeds them with BAAI/bge-base-en-v1.5 (768-dim, contextually enriched with metadata + graph neighbors), and stores them as typed memory nodes (Decision, Pattern, Insight, etc.) with graph edges (CALLS, IMPORTS, EVOLVED_INTO, etc.) in a single SQLite WAL database + usearch HNSW index. SessionStart injects prior context; Stop generates a structured session summary.
+`codemem init` registers 9 lifecycle hooks (SessionStart, UserPromptSubmit, PostToolUse, PostToolUseFailure, Stop, SubagentStart, SubagentStop, SessionEnd, PreCompact) and a stdio MCP server. The PostToolUse hook intercepts Read/Grep/Edit/Write tool calls, extracts structured observations (file paths, symbols, diff summaries), embeds them with BAAI/bge-base-en-v1.5 (768-dim, contextually enriched with metadata + graph neighbors), and stores them as typed memory nodes (Decision, Pattern, Insight, etc.) with graph edges (CALLS, IMPORTS, EVOLVED_INTO, etc.) in a single SQLite WAL database + usearch HNSW index. SessionStart injects prior context (with `source`-aware behavior: startup, resume, compact, clear); Stop generates a structured session summary; SubagentStop captures agent findings; PostToolUseFailure records error patterns; SessionEnd cleanly closes sessions; PreCompact saves checkpoint memories before context compaction.
 
 Recall uses 8-component hybrid scoring: vector cosine (25%), graph strength via PageRank/betweenness/degree/cluster coefficient (20%), Okapi BM25 with camelCase/snake_case tokenization (15%), temporal alignment (10%), importance (10%), confidence (10%), tag matching (5%), recency (5%). The unified `recall` tool supports optional graph expansion (`expand=true`) and impact analysis (`include_impact=true`). The graph layer (petgraph) runs 25 algorithms — PageRank, Louvain community detection, betweenness centrality, SCC, topological sort — cached per session. Recall filters expired temporal edges (valid_to < now) during graph expansion. All weights are configurable via `config.toml` and persist across restarts.
 
@@ -19,12 +19,12 @@ The following diagram shows the full Codemem system: AI assistant integration po
 ```mermaid
 graph TB
     subgraph "AI Coding Assistant"
-        H[4 Lifecycle Hooks<br/>SessionStart, UserPromptSubmit,<br/>PostToolUse, Stop]
+        H[9 Lifecycle Hooks<br/>SessionStart, UserPromptSubmit, PostToolUse,<br/>PostToolUseFailure, Stop, SubagentStart,<br/>SubagentStop, SessionEnd, PreCompact]
         M[MCP Tools<br/>32 tools via JSON-RPC stdio]
     end
 
     subgraph "Codemem Binary (codemem crate)"
-        CLI[cli module<br/>19 commands]
+        CLI[cli module<br/>24 commands]
         MCP_MOD[mcp module<br/>JSON-RPC server + HTTP]
         API_MOD[api module<br/>REST/SSE API + embedded UI]
 
@@ -102,7 +102,7 @@ flowchart TD
 | codemem-storage | rusqlite (bundled) WAL mode + usearch HNSW vector index + petgraph graph engine. Split into `memory.rs` (CRUD), `graph_persistence.rs` (nodes/edges/embeddings), `queries.rs` (stats/sessions/patterns), `backend.rs` (StorageBackend trait impl with multi-row INSERT batching, transaction wrapping via `begin/commit/rollback_transaction`), `migrations.rs` (schema versioning), `vector.rs` (HNSW 768-dim cosine, M=16, efConstruction=200), `graph/` (traversal with BFS/DFS/kind-aware filtering, algorithms: PageRank, Louvain, SCC, betweenness, topological, cached centrality, graph compaction, package nodes) |
 | codemem-embeddings | Pluggable embedding providers via `EmbeddingProvider` trait + `from_env()` factory: Candle (pure Rust ML, default), Ollama (local HTTP), OpenAI-compatible (Voyage AI, Together, Azure, etc.). `CachedProvider` wrapper adds LRU cache (10K) to remote providers. BAAI/bge-base-en-v1.5 (768-dim), mean pooling, L2 normalization. Safe concurrency via `LockPoisoned` error handling |
 | codemem-engine | Domain logic engine: `CodememEngine` struct holds all backends. Modules: `index/` (ast-grep code indexing, 14 languages, YAML-driven rules, manifest parsing, reference resolution), `hooks/` (PostToolUse JSON parser, per-tool extractors for 9 tool types, diff-aware memory, trigger-based auto-insights), `watch/` (real-time file watcher, <50ms debounce, .gitignore support), `enrichment/` (14 enrichment types, one file per analysis + `run_enrichments()` pipeline), `consolidation/` (5 cycles: decay, creative, cluster, forget, summarize), `persistence/` (index persistence + compaction), `analysis.rs` (decision chains, session checkpoints, impact analysis), `search.rs` (semantic/text/hybrid code search), `recall.rs` (unified recall with temporal edge filtering), `bm25.rs` (Okapi BM25 scoring with serialization), `scoring.rs` (hybrid scoring helpers), `patterns.rs` (cross-session pattern detection), `compress.rs` (LLM observation compression), `metrics.rs` (operational metrics) |
-| codemem | Unified binary + library. Three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 32 MCP tools, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 19 commands, lifecycle hooks, config management, multi-format export) |
+| codemem | Unified binary + library. Three transport modules: `mcp/` (JSON-RPC stdio + HTTP server, 32 MCP tools, scoring, types), `api/` (REST/SSE API with Axum, routes for memories/graph/vectors/stats/patterns/insights/agents/config/timeline/namespaces/sessions, PCA point cloud, embedded React UI), `cli/` (clap derive, 24 commands, lifecycle hooks, config management, multi-format export) |
 | codemem-bench | Criterion benchmarks (vector, storage, graph), 20% CI regression threshold |
 
 ---
@@ -187,7 +187,7 @@ Compression is disabled by default. On failure, falls back to raw content silent
 
 ## 4.5. Data Flow -- Session Lifecycle Hooks
 
-Codemem registers 4 lifecycle hooks during `codemem init` for full session coverage:
+Codemem registers 9 lifecycle hooks during `codemem init` for full session coverage:
 
 ```mermaid
 sequenceDiagram
@@ -195,11 +195,16 @@ sequenceDiagram
     participant Ctx as codemem context
     participant Prm as codemem prompt
     participant Ing as codemem ingest
+    participant Err as codemem tool-error
+    participant AgS as codemem agent-start
     participant Sum as codemem summarize
+    participant AgR as codemem agent-result
+    participant End as codemem session-close
+    participant Chk as codemem checkpoint
     participant DB as Storage
 
     Note over AI,DB: Session Start
-    AI->>Ctx: SessionStart hook (stdin JSON)
+    AI->>Ctx: SessionStart hook (source: startup|resume|compact|clear)
     Ctx->>DB: Query recent sessions, memories, hotspots, patterns
     Ctx-->>AI: hookSpecificOutput.additionalContext
 
@@ -211,19 +216,45 @@ sequenceDiagram
     AI->>Ing: PostToolUse hook (Read/Edit/Grep/...)
     Ing->>DB: Extract, compress (optional), embed, store
 
+    Note over AI,DB: Tool Failure
+    AI->>Err: PostToolUseFailure hook
+    Err->>DB: Store error pattern as Context memory
+
+    Note over AI,DB: Subagent Lifecycle
+    AI->>AgS: SubagentStart hook
+    AgS->>AgS: Log spawn (no DB write)
+    AI->>AgR: SubagentStop hook
+    AgR->>DB: Store agent findings as Insight memory
+
+    Note over AI,DB: Context Compaction
+    AI->>Chk: PreCompact hook
+    Chk->>DB: Save checkpoint memory
+
     Note over AI,DB: Session End
     AI->>Sum: Stop hook
     Sum->>DB: Build summary from session memories
     Sum->>DB: Store Insight memory + end session
+    AI->>End: SessionEnd hook
+    End->>DB: Close session with termination reason
 ```
 
-**SessionStart (`codemem context`):** Queries 5 data sources -- recent sessions with summaries, Decision/Insight/Pattern memories, file hotspots, detected patterns, and stats. Formats as compact markdown wrapped in `<codemem-context>` tags and outputs via `hookSpecificOutput.additionalContext` for silent context injection.
+**SessionStart (`codemem context`):** Queries 5 data sources -- recent sessions with summaries, Decision/Insight/Pattern memories, file hotspots, detected patterns, and stats. Handles the `source` field: `startup` (full context injection), `resume` (brief note — session continuing with context intact), `compact` (save checkpoint then full context), `clear` (treated like startup). Formats as compact markdown wrapped in `<codemem-context>` tags and outputs via `hookSpecificOutput.additionalContext` for silent context injection.
 
-**UserPromptSubmit (`codemem prompt`):** Stores the user's prompt as a Context memory (importance 0.3) with `source: UserPromptSubmit` metadata. Auto-starts a session if one isn't active.
+**UserPromptSubmit (`codemem prompt`):** Stores the user's prompt as a Context memory (importance 0.3) with `source: UserPromptSubmit` metadata. Auto-starts a session if one isn't active. Skips trivial prompts (<30 chars or <5 words).
 
-**PostToolUse (`codemem ingest`):** The existing capture pipeline. Extracts observations from Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/SendMessage/ListDir, optionally compresses via LLM, embeds, and stores with graph nodes and edges. Also runs trigger-based auto-insights (directory focus, module exploration, debugging detection, repeated search patterns).
+**PostToolUse (`codemem ingest`):** The existing capture pipeline. Extracts observations from Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/SendMessage/ListDir, optionally compresses via LLM, embeds, and stores with graph nodes and edges. Also runs trigger-based auto-insights (directory focus, module exploration, debugging detection, repeated search patterns). The `tool_response` field is `serde_json::Value` — structured responses are unpacked (e.g., `file.content` for Read, `stdout` for Bash, `text` for text-bearing responses) before storage.
 
-**Stop (`codemem summarize`):** Collects all memories created during the session (by timestamp), categorizes them (files read, files edited, searches, decisions, prompts), builds a structured summary, stores it as an Insight memory, and ends the session.
+**PostToolUseFailure (`codemem tool-error`):** Captures tool error patterns as Context memories (importance 0.4) with `error`, `tool-failure`, and `tool:<name>` tags. Includes input context (file_path/command/pattern) for actionable error messages. Skips user interrupts.
+
+**Stop (`codemem summarize`):** Collects all memories created during the session (by timestamp), categorizes them (files read, files edited, searches, decisions, prompts), builds a structured summary, stores it as an Insight memory, and ends the session. Appends a truncated excerpt of `last_assistant_message` for richer context. Guards against recursive hook loops via `stop_hook_active`.
+
+**SubagentStart (`codemem agent-start`):** Logs agent spawn events via tracing. No database write — agent spawns are transient operational events.
+
+**SubagentStop (`codemem agent-result`):** Captures subagent findings from `last_assistant_message` as Insight memories (importance 0.5) with `agent-result` and `agent:<type>` tags. Skips messages shorter than 20 characters. Guards against `stop_hook_active` loops.
+
+**SessionEnd (`codemem session-close`):** Cleanly closes the session in the database with the termination reason (e.g., `user_request`, `api_request`).
+
+**PreCompact (`codemem checkpoint`):** Saves a checkpoint memory before context compaction, summarizing up to 5 recent Decision/Insight/Pattern memories. Tagged `pre-compact` + `checkpoint`. Also triggered by SessionStart with `source: compact`.
 
 ---
 
