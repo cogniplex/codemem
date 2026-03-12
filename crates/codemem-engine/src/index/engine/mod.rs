@@ -442,7 +442,7 @@ impl AstGrepEngine {
             None => return,
         };
 
-        let target_name = if let Some(ref field) = rule.name_field {
+        let raw_target = if let Some(ref field) = rule.name_field {
             match self.get_node_field_text(node, field) {
                 Some(name) => name,
                 None => return,
@@ -453,9 +453,15 @@ impl AstGrepEngine {
             text.trim().to_string()
         };
 
-        if target_name.is_empty() {
+        if raw_target.is_empty() {
             return;
         }
+
+        // Clean up target name based on reference kind:
+        // - Imports: strip surrounding quotes (TS/JS `source` field includes them)
+        // - Calls: strip receiver/self prefix for resolution (self.foo → foo, pkg.Func → Func)
+        //   but keep the full dotted name as a fallback for cross-module calls
+        let target_name = clean_reference_target(&raw_target, ref_kind);
 
         let source_qn = if scope.is_empty() {
             file_path.to_string()
@@ -694,6 +700,45 @@ fn parse_reference_kind(s: &str) -> Option<ReferenceKind> {
         "implements" => Some(ReferenceKind::Implements),
         "type_usage" => Some(ReferenceKind::TypeUsage),
         _ => None,
+    }
+}
+
+/// Clean up a reference target name based on its kind.
+///
+/// - **Imports**: strip surrounding quotes (`'react'` → `react`, `"lodash"` → `lodash`)
+/// - **Calls**: extract the method/function name from dotted expressions
+///   (`self.assertEqual` → `assertEqual`, `t.Fatalf` → `Fatalf`, `fmt.Sprintf` → `Sprintf`)
+///   The resolver also tries the full dotted name via suffix matching, so stripping
+///   the receiver here just improves the chance of a simple-name hit.
+fn clean_reference_target(raw: &str, kind: ReferenceKind) -> String {
+    match kind {
+        ReferenceKind::Import => {
+            // Strip surrounding quotes: 'foo' or "foo" → foo
+            let trimmed = raw.trim();
+            if (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+                || (trimmed.starts_with('"') && trimmed.ends_with('"'))
+            {
+                trimmed[1..trimmed.len() - 1].to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }
+        ReferenceKind::Call => {
+            // For dotted calls (self.foo, pkg.Func, obj.method), extract the last segment.
+            // Skip if it contains `::` (Rust-style qualified names handled by resolver).
+            if raw.contains("::") {
+                return raw.to_string();
+            }
+            if let Some((_receiver, method)) = raw.rsplit_once('.') {
+                // Strip trailing () or (args) if present
+                let method = method.split('(').next().unwrap_or(method);
+                if !method.is_empty() {
+                    return method.to_string();
+                }
+            }
+            raw.to_string()
+        }
+        _ => raw.to_string(),
     }
 }
 

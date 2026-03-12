@@ -106,7 +106,64 @@ class Dog(Animal):
     );
 }
 
+// ── Python Call References ──────────────────────────────────────────
+
+#[test]
+fn python_call_refs_strip_self() {
+    let engine = AstGrepEngine::new();
+    let source = r#"
+class MyTest:
+    def test_it(self):
+        self.assertEqual(1, 1)
+        self.assertTrue(True)
+        plain_call()
+"#;
+    let refs = extract_refs(&engine, "py", source);
+    let calls: Vec<&str> = refs
+        .iter()
+        .filter(|r| r.kind == ReferenceKind::Call)
+        .map(|r| r.target_name.as_str())
+        .collect();
+    assert!(
+        calls.contains(&"assertEqual"),
+        "expected 'assertEqual' stripped from self.assertEqual, got: {calls:?}"
+    );
+    assert!(
+        calls.contains(&"plain_call"),
+        "expected 'plain_call', got: {calls:?}"
+    );
+}
+
 // ── Go References ───────────────────────────────────────────────────
+
+#[test]
+fn go_call_refs_strip_receiver() {
+    let engine = AstGrepEngine::new();
+    let source = r#"
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("hello")
+    doSomething()
+}
+"#;
+    let refs = extract_refs(&engine, "go", source);
+    let calls: Vec<&str> = refs
+        .iter()
+        .filter(|r| r.kind == ReferenceKind::Call)
+        .map(|r| r.target_name.as_str())
+        .collect();
+    assert!(
+        calls.contains(&"Println"),
+        "expected 'Println' stripped from fmt.Println, got: {calls:?}"
+    );
+    assert!(
+        calls.contains(&"doSomething"),
+        "expected 'doSomething', got: {calls:?}"
+    );
+}
 
 #[test]
 fn go_import_refs() {
@@ -138,6 +195,62 @@ func main() {}
 }
 
 // ── TypeScript References ───────────────────────────────────────────
+
+#[test]
+fn ts_import_refs_strip_quotes() {
+    let engine = AstGrepEngine::new();
+    let source = r#"
+import React from 'react';
+import { useState } from "react";
+import lodash from 'lodash';
+"#;
+    let refs = extract_refs(&engine, "ts", source);
+    let imports: Vec<&str> = refs
+        .iter()
+        .filter(|r| r.kind == ReferenceKind::Import)
+        .map(|r| r.target_name.as_str())
+        .collect();
+    // Verify quotes are stripped
+    assert!(
+        imports.contains(&"react"),
+        "expected 'react' without quotes, got: {imports:?}"
+    );
+    assert!(
+        imports.contains(&"lodash"),
+        "expected 'lodash' without quotes, got: {imports:?}"
+    );
+    // Ensure no quoted versions remain
+    assert!(
+        !imports.iter().any(|i| i.starts_with('\'')),
+        "found quoted import target, got: {imports:?}"
+    );
+}
+
+#[test]
+fn ts_call_refs_strip_receiver() {
+    let engine = AstGrepEngine::new();
+    let source = r#"
+function main() {
+    console.log("hello");
+    Array.from([1, 2, 3]);
+    doSomething();
+}
+"#;
+    let refs = extract_refs(&engine, "ts", source);
+    let calls: Vec<&str> = refs
+        .iter()
+        .filter(|r| r.kind == ReferenceKind::Call)
+        .map(|r| r.target_name.as_str())
+        .collect();
+    assert!(
+        calls.contains(&"log"),
+        "expected 'log' stripped from console.log, got: {calls:?}"
+    );
+    assert!(
+        calls.contains(&"doSomething"),
+        "expected 'doSomething', got: {calls:?}"
+    );
+}
 
 #[test]
 fn ts_class_extends_refs() {
