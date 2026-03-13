@@ -17,6 +17,7 @@ pub struct CodememConfig {
     pub storage: StorageConfig,
     pub chunking: ChunkingConfig,
     pub enrichment: EnrichmentConfig,
+    pub scip: ScipConfig,
 }
 
 impl CodememConfig {
@@ -100,6 +101,13 @@ impl CodememConfig {
         if !(0.0..=1.0).contains(&self.enrichment.insight_confidence) {
             return Err(CodememError::Config(
                 "insight_confidence must be between 0.0 and 1.0".to_string(),
+            ));
+        }
+
+        // SCIP max_references_per_symbol must be positive
+        if self.scip.max_references_per_symbol == 0 {
+            return Err(CodememError::Config(
+                "scip.max_references_per_symbol must be > 0".to_string(),
             ));
         }
 
@@ -253,6 +261,88 @@ impl Default for ChunkingConfig {
             min_symbol_score_threshold: 0.15,
         }
     }
+}
+
+/// SCIP integration configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScipConfig {
+    /// Master switch for SCIP integration.
+    pub enabled: bool,
+    /// Check PATH for available indexers.
+    pub auto_detect_indexers: bool,
+    /// Cache .scip files between runs.
+    pub cache_index: bool,
+    /// Re-index if cache older than this many hours.
+    pub cache_ttl_hours: u64,
+    /// Create ext: nodes for dependency symbols.
+    pub create_external_nodes: bool,
+    /// Skip utility symbols with excessive fan-out (fallback for kinds without per-kind limits).
+    pub max_references_per_symbol: usize,
+    /// Attach hover docs as memories to nodes.
+    pub store_docs_as_memories: bool,
+    /// Build nested containment tree from SCIP descriptor chains.
+    /// When true: file→module→class→method. When false: flat file→symbol.
+    pub hierarchical_containment: bool,
+    /// Collapse intra-class edges into parent metadata.
+    pub collapse_intra_class_edges: bool,
+    /// Per-kind fan-out limits (0 = use max_references_per_symbol fallback).
+    pub fan_out_limits: FanOutLimits,
+    /// Per-language indexer command overrides.
+    pub indexers: ScipIndexersConfig,
+}
+
+/// Per-kind inbound reference limits. A module can be widely imported; a function less so.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FanOutLimits {
+    pub module: usize,
+    pub function: usize,
+    pub method: usize,
+    pub class: usize,
+}
+
+impl Default for FanOutLimits {
+    fn default() -> Self {
+        Self {
+            module: 200,
+            function: 30,
+            method: 30,
+            class: 50,
+        }
+    }
+}
+
+impl Default for ScipConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_detect_indexers: true,
+            cache_index: true,
+            cache_ttl_hours: 24,
+            create_external_nodes: true,
+            max_references_per_symbol: 100,
+            store_docs_as_memories: true,
+            hierarchical_containment: true,
+            collapse_intra_class_edges: true,
+            fan_out_limits: FanOutLimits::default(),
+            indexers: ScipIndexersConfig::default(),
+        }
+    }
+}
+
+/// Per-language SCIP indexer command overrides. Empty string means auto-detect from PATH.
+///
+/// Commands are split on whitespace — paths with spaces are **not** supported.
+/// Use symlinks or PATH entries for indexers in directories with spaces.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScipIndexersConfig {
+    pub rust: String,
+    pub typescript: String,
+    pub python: String,
+    pub java: String,
+    pub go: String,
 }
 
 /// Enrichment pipeline configuration for controlling insight generation thresholds.

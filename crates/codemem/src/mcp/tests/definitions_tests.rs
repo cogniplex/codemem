@@ -4,11 +4,11 @@ use std::collections::HashSet;
 #[test]
 fn tool_definitions_returns_expected_count() {
     let defs = tool_definitions();
-    // The dispatch table in mod.rs has 32 tool entries (including the unknown fallback).
+    // The dispatch table in mod.rs has 26 tool entries (including the unknown fallback).
     // definitions.rs should define all of them.
     assert!(
-        defs.len() >= 32,
-        "Expected at least 32 tool definitions, got {}",
+        defs.len() >= 26,
+        "Expected at least 26 tool definitions, got {}",
         defs.len()
     );
 }
@@ -120,46 +120,6 @@ fn recall_has_required_query() {
 }
 
 #[test]
-fn enrichment_tools_are_defined() {
-    let defs = tool_definitions();
-    let names: HashSet<String> = defs
-        .iter()
-        .map(|d| d["name"].as_str().unwrap().to_string())
-        .collect();
-
-    for expected in [
-        "enrich_codebase",
-        "analyze_codebase",
-        "enrich_git_history",
-        "enrich_security",
-        "enrich_performance",
-    ] {
-        assert!(
-            names.contains(expected),
-            "Missing enrichment tool: {expected}"
-        );
-    }
-}
-
-#[test]
-fn enrich_codebase_requires_path() {
-    let defs = tool_definitions();
-    let tool = defs
-        .iter()
-        .find(|d| d["name"] == "enrich_codebase")
-        .expect("enrich_codebase tool should exist");
-
-    let required = tool["inputSchema"]["required"]
-        .as_array()
-        .expect("enrich_codebase should have required array");
-    let required_strs: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
-    assert!(
-        required_strs.contains(&"path"),
-        "enrich_codebase should require 'path'"
-    );
-}
-
-#[test]
 fn all_dispatch_tools_have_definitions() {
     // These are the tool names from dispatch_tool_inner in mod.rs
     let dispatched = vec![
@@ -173,7 +133,6 @@ fn all_dispatch_tools_have_definitions() {
         "graph_traverse",
         "summary_tree",
         "codemem_status",
-        "index_codebase",
         "search_code",
         "get_symbol_info",
         "get_symbol_graph",
@@ -190,11 +149,6 @@ fn all_dispatch_tools_have_definitions() {
         "delete_namespace",
         "session_checkpoint",
         "session_context",
-        "enrich_codebase",
-        "analyze_codebase",
-        "enrich_git_history",
-        "enrich_security",
-        "enrich_performance",
     ];
 
     let defs = tool_definitions();
@@ -232,8 +186,8 @@ fn tools_list_rpc_returns_definitions() {
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
     assert!(
-        tools.len() >= 32,
-        "tools/list should return at least 32 tools, got {}",
+        tools.len() >= 26,
+        "tools/list should return at least 26 tools, got {}",
         tools.len()
     );
 }

@@ -101,6 +101,7 @@ fn make_index_result(
         edges,
         unresolved: vec![],
         root_path: std::path::PathBuf::from("/test"),
+        scip_build: None,
     }
 }
 
@@ -120,6 +121,7 @@ fn edge_weight_for_custom_config() {
         calls_edge_weight: 0.9,
         imports_edge_weight: 0.3,
         contains_edge_weight: 0.2,
+        ..Default::default()
     };
     assert_eq!(edge_weight_for(&RelationshipType::Calls, &config), 0.9);
     assert_eq!(edge_weight_for(&RelationshipType::Imports, &config), 0.3);
@@ -1062,5 +1064,249 @@ fn merge_memories_requires_at_least_two_sources() {
     assert!(
         result.is_err(),
         "should require at least 2 source IDs for merge"
+    );
+}
+
+// ── persist_graph_only ──────────────────────────────────────────────
+
+#[test]
+fn persist_graph_only_stores_nodes_and_edges_no_embeddings() {
+    let engine = CodememEngine::for_testing();
+
+    let mut files = HashSet::new();
+    files.insert("src/main.rs".to_string());
+
+    let symbols = vec![make_symbol("handler", "src/main.rs", SymbolKind::Function)];
+    let chunks = vec![make_chunk("src/main.rs", 0, Some("handler"))];
+
+    let result = make_index_result(symbols, chunks, files, vec![]);
+    let pr = engine.persist_graph_only(&result, Some("test-ns")).unwrap();
+
+    // Should have zero embeddings
+    assert_eq!(pr.symbols_embedded, 0);
+    assert_eq!(pr.chunks_embedded, 0);
+
+    // But graph nodes should exist
+    let graph = engine.lock_graph().unwrap();
+    assert!(graph.get_node("file:src/main.rs").unwrap().is_some());
+    assert!(graph.get_node("sym:handler").unwrap().is_some());
+}
+
+// ── edge fusion with superseded removal ─────────────────────────────
+
+#[test]
+fn fuse_edges_removes_superseded_ast_grep_edges() {
+    use codemem_core::Edge;
+    let now = chrono::Utc::now();
+
+    let engine = CodememEngine::for_testing();
+
+    let mut files = HashSet::new();
+    files.insert("src/main.rs".to_string());
+
+    let symbols = vec![
+        make_symbol("caller", "src/main.rs", SymbolKind::Function),
+        make_symbol("callee", "src/main.rs", SymbolKind::Function),
+    ];
+
+    // ast-grep found a reference edge
+    let edges = vec![ResolvedEdge {
+        source_qualified_name: "caller".to_string(),
+        target_qualified_name: "callee".to_string(),
+        relationship: RelationshipType::Calls,
+        file_path: "src/main.rs".to_string(),
+        line: 5,
+        resolution_confidence: 0.5,
+    }];
+
+    // SCIP found the same edge with compiler-grade confidence
+    let scip_build = crate::index::scip::graph_builder::ScipBuildResult {
+        nodes: vec![],
+        edges: vec![Edge {
+            id: "calls:sym:caller->sym:callee:src/main.rs:5".to_string(),
+            src: "sym:caller".to_string(),
+            dst: "sym:callee".to_string(),
+            relationship: RelationshipType::Calls,
+            weight: 1.0,
+            properties: {
+                let mut p = std::collections::HashMap::new();
+                p.insert("source".to_string(), serde_json::json!("scip"));
+                p.insert("confidence".to_string(), serde_json::json!(0.15));
+                p.insert("source_layers".to_string(), serde_json::json!(["scip"]));
+                p
+            },
+            created_at: now,
+            valid_from: Some(now),
+            valid_to: None,
+        }],
+        memories: vec![],
+        ext_nodes_created: 0,
+        files_covered: HashSet::new(),
+        doc_memories_created: 0,
+    };
+
+    let mut result = make_index_result(symbols, vec![], files, edges);
+    result.scip_build = Some(scip_build);
+
+    engine
+        .persist_index_results(&result, Some("test-ns"))
+        .unwrap();
+
+    let graph = engine.lock_graph().unwrap();
+
+    // The fused edge should exist with combined confidence
+    let caller_edges = graph.get_edges("sym:caller").unwrap();
+    let calls_edges: Vec<_> = caller_edges
+        .iter()
+        .filter(|e| e.relationship == RelationshipType::Calls && e.dst == "sym:callee")
+        .collect();
+
+    // Should have exactly ONE edge (the fused one), not two
+    assert_eq!(
+        calls_edges.len(),
+        1,
+        "should have exactly one fused edge, not duplicates"
+    );
+
+    // The surviving edge should have fused confidence (0.15 + 0.10 = 0.25)
+    let conf = calls_edges[0]
+        .properties
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    assert!(
+        (conf - 0.25).abs() < 0.01,
+        "fused confidence should be ~0.25, got {conf}"
+    );
+
+    // source_layers should show both
+    let layers = calls_edges[0]
+        .properties
+        .get("source_layers")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    assert_eq!(layers, 2, "should have both source layers");
+}
+
+// ── SCIP stale node cleanup on re-index ─────────────────────────────
+
+#[test]
+fn reindex_cleans_stale_scip_nodes() {
+    use codemem_core::GraphNode;
+
+    let engine = CodememEngine::for_testing();
+
+    let mut files = HashSet::new();
+    files.insert("src/main.rs".to_string());
+
+    // First index: SCIP produces two symbols
+    let scip_build_v1 = crate::index::scip::graph_builder::ScipBuildResult {
+        nodes: vec![
+            GraphNode {
+                id: "sym:old_func".to_string(),
+                kind: NodeKind::Function,
+                label: "old_func".to_string(),
+                payload: {
+                    let mut p = std::collections::HashMap::new();
+                    p.insert(
+                        "source".to_string(),
+                        serde_json::Value::String("scip".to_string()),
+                    );
+                    p.insert(
+                        "file_path".to_string(),
+                        serde_json::Value::String("src/main.rs".to_string()),
+                    );
+                    p
+                },
+                centrality: 0.0,
+                memory_id: None,
+                namespace: Some("test-ns".to_string()),
+            },
+            GraphNode {
+                id: "sym:kept_func".to_string(),
+                kind: NodeKind::Function,
+                label: "kept_func".to_string(),
+                payload: {
+                    let mut p = std::collections::HashMap::new();
+                    p.insert(
+                        "source".to_string(),
+                        serde_json::Value::String("scip".to_string()),
+                    );
+                    p.insert(
+                        "file_path".to_string(),
+                        serde_json::Value::String("src/main.rs".to_string()),
+                    );
+                    p
+                },
+                centrality: 0.0,
+                memory_id: None,
+                namespace: Some("test-ns".to_string()),
+            },
+        ],
+        edges: vec![],
+        memories: vec![],
+        ext_nodes_created: 0,
+        files_covered: ["src/main.rs".to_string()].into_iter().collect(),
+        doc_memories_created: 0,
+    };
+
+    let mut result_v1 = make_index_result(vec![], vec![], files.clone(), vec![]);
+    result_v1.scip_build = Some(scip_build_v1);
+    engine
+        .persist_index_results(&result_v1, Some("test-ns"))
+        .unwrap();
+
+    // Both nodes should exist
+    {
+        let graph = engine.lock_graph().unwrap();
+        assert!(graph.get_node("sym:old_func").unwrap().is_some());
+        assert!(graph.get_node("sym:kept_func").unwrap().is_some());
+    }
+
+    // Second index: SCIP only produces kept_func (old_func was deleted from source)
+    let scip_build_v2 = crate::index::scip::graph_builder::ScipBuildResult {
+        nodes: vec![GraphNode {
+            id: "sym:kept_func".to_string(),
+            kind: NodeKind::Function,
+            label: "kept_func".to_string(),
+            payload: {
+                let mut p = std::collections::HashMap::new();
+                p.insert(
+                    "source".to_string(),
+                    serde_json::Value::String("scip".to_string()),
+                );
+                p.insert(
+                    "file_path".to_string(),
+                    serde_json::Value::String("src/main.rs".to_string()),
+                );
+                p
+            },
+            centrality: 0.0,
+            memory_id: None,
+            namespace: Some("test-ns".to_string()),
+        }],
+        edges: vec![],
+        memories: vec![],
+        ext_nodes_created: 0,
+        files_covered: ["src/main.rs".to_string()].into_iter().collect(),
+        doc_memories_created: 0,
+    };
+
+    let mut result_v2 = make_index_result(vec![], vec![], files, vec![]);
+    result_v2.scip_build = Some(scip_build_v2);
+    engine
+        .persist_index_results(&result_v2, Some("test-ns"))
+        .unwrap();
+
+    // old_func should be cleaned up, kept_func should still exist
+    let graph = engine.lock_graph().unwrap();
+    assert!(
+        graph.get_node("sym:old_func").unwrap().is_none(),
+        "stale SCIP node should be removed on re-index"
+    );
+    assert!(
+        graph.get_node("sym:kept_func").unwrap().is_some(),
+        "active SCIP node should survive re-index"
     );
 }

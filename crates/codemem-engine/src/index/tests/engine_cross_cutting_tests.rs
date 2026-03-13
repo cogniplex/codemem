@@ -267,10 +267,12 @@ fn symbol_kind_to_node_kind() {
     assert_eq!(NodeKind::from(SymbolKind::Method), NodeKind::Method);
     assert_eq!(NodeKind::from(SymbolKind::Class), NodeKind::Class);
     assert_eq!(NodeKind::from(SymbolKind::Struct), NodeKind::Class);
-    assert_eq!(NodeKind::from(SymbolKind::Enum), NodeKind::Class);
+    assert_eq!(NodeKind::from(SymbolKind::Enum), NodeKind::Enum);
     assert_eq!(NodeKind::from(SymbolKind::Interface), NodeKind::Interface);
     assert_eq!(NodeKind::from(SymbolKind::Type), NodeKind::Type);
     assert_eq!(NodeKind::from(SymbolKind::Constant), NodeKind::Constant);
     assert_eq!(NodeKind::from(SymbolKind::Module), NodeKind::Module);
     assert_eq!(NodeKind::from(SymbolKind::Test), NodeKind::Test);
+    assert_eq!(NodeKind::from(SymbolKind::Field), NodeKind::Field);
+    assert_eq!(NodeKind::from(SymbolKind::Constructor), NodeKind::Method);
 }

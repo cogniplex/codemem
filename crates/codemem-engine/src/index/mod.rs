@@ -1,5 +1,5 @@
 //! Code indexing engine: ast-grep based code parsing, symbol extraction,
-//! reference resolution, cross-repo linking, LSP enrichment, and API surface detection.
+//! reference resolution, cross-repo linking, and API surface detection.
 
 pub mod api_surface;
 pub mod chunker;
@@ -7,11 +7,11 @@ pub mod engine;
 pub mod incremental;
 pub mod indexer;
 pub mod linker;
-pub mod lsp;
 pub mod manifest;
 pub mod parser;
 pub mod resolver;
 pub mod rule_loader;
+pub mod scip;
 pub mod symbol;
 
 pub use api_surface::{
@@ -27,4 +27,5 @@ pub use linker::{
 pub use manifest::{Dependency, ManifestResult, Workspace};
 pub use parser::{CodeParser, ParseResult};
 pub use resolver::{ReferenceResolver, ResolveResult, ResolvedEdge, UnresolvedRef};
+pub use scip::orchestrate::{OrchestrationResult, ScipLanguage, ScipOrchestrator};
 pub use symbol::{Reference, ReferenceKind, Symbol, SymbolKind, Visibility};

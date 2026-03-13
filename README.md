@@ -157,17 +157,16 @@ Scoring weights, vector/graph tuning, and storage settings persist in `~/.codeme
 
 ## MCP Tools
 
-32 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
+26 tools organized by category. See [MCP Tools Reference](docs/mcp-tools.md) for full API documentation.
 
 | Category | Tools |
 |----------|-------|
 | Memory CRUD (7) | `store_memory`, `recall`, `delete_memory`, `associate_memories`, `refine_memory`, `split_memory`, `merge_memories` |
-| Graph & Structure (7) | `graph_traverse`, `summary_tree`, `codemem_status`, `index_codebase`, `search_code`, `get_symbol_info`, `get_symbol_graph` |
+| Graph & Structure (6) | `graph_traverse`, `summary_tree`, `codemem_status`, `search_code`, `get_symbol_info`, `get_symbol_graph` |
 | Graph Analysis (5) | `find_important_nodes`, `find_related_groups`, `get_cross_repo`, `get_node_memories`, `node_coverage` |
 | Consolidation & Patterns (3) | `consolidate`, `detect_patterns`, `get_decision_chain` |
 | Namespace (3) | `list_namespaces`, `namespace_stats`, `delete_namespace` |
 | Session & Context (2) | `session_checkpoint`, `session_context` |
-| Enrichment (5) | `enrich_codebase`, `analyze_codebase`, `enrich_git_history`, `enrich_security`, `enrich_performance` |
 
 ## CLI
 

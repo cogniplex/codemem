@@ -6,63 +6,6 @@ use std::collections::HashMap;
 // ── Cross-Repo Tool Tests ────────────────────────────────────────────
 
 #[test]
-fn index_codebase_returns_cross_repo_counts() {
-    // Create a temp directory with a simple Rust file and Cargo.toml
-    let dir = tempfile::tempdir().unwrap();
-    let src_dir = dir.path().join("src");
-    std::fs::create_dir_all(&src_dir).unwrap();
-    std::fs::write(
-        src_dir.join("lib.rs"),
-        "pub fn hello() { println!(\"hello\"); }\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("Cargo.toml"),
-        "[package]\nname = \"test-pkg\"\nversion = \"0.1.0\"\n",
-    )
-    .unwrap();
-
-    let server = test_server();
-    let params = json!({
-        "name": "index_codebase",
-        "arguments": {"path": dir.path().to_str().unwrap()}
-    });
-    let resp = server.handle_request("tools/call", Some(&params), json!(100));
-    let result = resp.result.unwrap();
-    let text = result["content"][0]["text"].as_str().unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
-
-    // Verify the new cross-repo fields exist in the response
-    assert!(
-        parsed.get("packages_registered").is_some(),
-        "Response should contain 'packages_registered' field"
-    );
-    assert!(
-        parsed.get("unresolved_refs").is_some(),
-        "Response should contain 'unresolved_refs' field"
-    );
-    assert!(
-        parsed.get("cross_repo_edges").is_some(),
-        "Response should contain 'cross_repo_edges' field"
-    );
-    assert!(
-        parsed.get("endpoints_detected").is_some(),
-        "Response should contain 'endpoints_detected' field"
-    );
-    assert!(
-        parsed.get("client_calls_detected").is_some(),
-        "Response should contain 'client_calls_detected' field"
-    );
-
-    // packages_registered should be >= 1 since we have a Cargo.toml with a package name
-    let pkgs = parsed["packages_registered"].as_u64().unwrap();
-    assert!(
-        pkgs >= 1,
-        "Should register at least 1 package from Cargo.toml, got {pkgs}"
-    );
-}
-
-#[test]
 fn get_cross_repo_returns_enhanced_data() {
     // Create a temp directory with a Cargo.toml
     let dir = tempfile::tempdir().unwrap();
@@ -77,12 +20,26 @@ fn get_cross_repo_returns_enhanced_data() {
 
     let server = test_server();
 
-    // First, index the codebase to populate storage
-    let index_params = json!({
-        "name": "index_codebase",
-        "arguments": {"path": dir.path().to_str().unwrap()}
-    });
-    let _ = server.handle_request("tools/call", Some(&index_params), json!(200));
+    // Index the codebase via engine (index_codebase MCP tool has been removed)
+    let mut indexer = codemem_engine::Indexer::new();
+    let resolved = indexer.index_and_resolve(dir.path()).unwrap();
+    let namespace = dir
+        .path()
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("test");
+    server
+        .engine
+        .persist_index_results(&resolved, Some(namespace))
+        .unwrap();
+    let manifests = codemem_engine::index::manifest::scan_manifests(dir.path());
+    let _ = server.engine.persist_cross_repo_data(
+        &manifests,
+        &resolved.unresolved,
+        &resolved.symbols,
+        &resolved.references,
+        namespace,
+    );
 
     // Now call get_cross_repo
     let params = json!({

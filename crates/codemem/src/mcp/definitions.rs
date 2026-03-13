@@ -177,17 +177,6 @@ pub(super) fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "index_codebase",
-            "description": "Index a codebase directory to extract symbols and references using tree-sitter",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Absolute path to the codebase directory" }
-                },
-                "required": ["path"]
-            }
-        }),
-        json!({
             "name": "search_code",
             "description": "Search code by meaning or name. mode=semantic (vector search, default), mode=text (symbol name substring), mode=hybrid (both merged).",
             "inputSchema": {
@@ -196,7 +185,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "query": { "type": "string", "description": "Search query (natural language for semantic, substring for text)" },
                     "k": { "type": "integer", "default": 10, "description": "Number of results" },
                     "mode": { "type": "string", "enum": ["semantic", "text", "hybrid"], "default": "semantic" },
-                    "kind": { "type": "string", "enum": ["function", "method", "class", "struct", "enum", "interface", "type", "constant", "module", "test"], "description": "Filter by symbol kind (text/hybrid modes)" }
+                    "kind": { "type": "string", "enum": ["function", "method", "class", "struct", "enum", "interface", "trait", "type", "constant", "module", "test", "field", "constructor", "external", "enum_variant", "type_parameter", "macro", "property"], "description": "Filter by symbol kind (text/hybrid modes)" }
                 },
                 "required": ["query"]
             }
@@ -379,72 +368,6 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "namespace": { "type": "string" },
                     "k": { "type": "integer", "default": 10, "description": "Number of recent memories" }
-                }
-            }
-        }),
-        // ── Enrichment (5 tools) ────────────────────────────────────────────
-        json!({
-            "name": "enrich_codebase",
-            "description": "Composite enrichment: runs selected (or all 14) analyses — git, security, performance, complexity, code smells, architecture, test mapping, API surface, doc coverage, blame, quality, and more",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Absolute path to the git repository root" },
-                    "days": { "type": "integer", "default": 90 },
-                    "namespace": { "type": "string" },
-                    "analyses": {
-                        "type": "array",
-                        "items": { "type": "string", "enum": codemem_core::ENRICHMENT_ANALYSES },
-                        "description": "Which analyses to run (default: all)"
-                    }
-                },
-                "required": ["path"]
-            }
-        }),
-        json!({
-            "name": "analyze_codebase",
-            "description": "Full pipeline: index -> enrich (git+security+performance+more) -> pagerank -> clusters -> summary",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Absolute path to the codebase" },
-                    "namespace": { "type": "string" },
-                    "days": { "type": "integer", "default": 90 }
-                },
-                "required": ["path"]
-            }
-        }),
-        json!({
-            "name": "enrich_git_history",
-            "description": "Enrich knowledge graph with git history: commit counts, churn rate, CoChanged edges, activity Insights",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Git repository root" },
-                    "days": { "type": "integer", "default": 90 },
-                    "namespace": { "type": "string" }
-                },
-                "required": ["path"]
-            }
-        }),
-        json!({
-            "name": "enrich_security",
-            "description": "Scan the knowledge graph for security-sensitive files and endpoints",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "namespace": { "type": "string", "description": "Namespace to scope the analysis" }
-                }
-            }
-        }),
-        json!({
-            "name": "enrich_performance",
-            "description": "Analyze coupling, dependency depth, and critical path in the knowledge graph",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "namespace": { "type": "string", "description": "Namespace to scope the analysis" },
-                    "top": { "type": "integer", "default": 10, "description": "Number of top results to return" }
                 }
             }
         }),

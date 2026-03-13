@@ -313,9 +313,17 @@ impl CodememEngine {
             )
         };
 
+        // Only compact ast-grep symbols. SCIP-sourced symbols (both explicit and
+        // synthetic containment nodes) should not be pruned by heuristic scoring.
         let sym_nodes: Vec<&GraphNode> = all_nodes
             .iter()
-            .filter(|n| n.id.starts_with("sym:"))
+            .filter(|n| {
+                n.id.starts_with("sym:")
+                    && !matches!(
+                        n.payload.get("source").and_then(|v| v.as_str()),
+                        Some("scip" | "scip-synthetic")
+                    )
+            })
             .collect();
 
         let mut max_calls_degree: f64 = 1.0;

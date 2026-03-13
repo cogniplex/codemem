@@ -116,6 +116,22 @@ enum Commands {
         /// Days of git history to analyze
         #[arg(long, default_value = "90")]
         days: u64,
+
+        /// Skip SCIP indexing (fast, ast-grep only)
+        #[arg(long)]
+        skip_scip: bool,
+
+        /// Skip embedding phase (store graph without vectorizing)
+        #[arg(long)]
+        skip_embed: bool,
+
+        /// Skip enrichment phase (no git/complexity/security analysis)
+        #[arg(long)]
+        skip_enrich: bool,
+
+        /// Force re-index even when file SHAs haven't changed
+        #[arg(long)]
+        force: bool,
     },
 
     /// Export memories to JSONL, JSON, CSV, or Markdown format
@@ -292,12 +308,24 @@ pub fn run() -> anyhow::Result<()> {
             path,
             namespace,
             days,
+            skip_scip,
+            skip_embed,
+            skip_enrich,
+            force,
         } => {
             let project_dir = match path {
                 Some(p) => p,
                 None => std::env::current_dir()?,
             };
-            commands_analyze::cmd_analyze(&project_dir, namespace.as_deref(), days)?;
+            commands_analyze::cmd_analyze(
+                &project_dir,
+                namespace.as_deref(),
+                days,
+                skip_scip,
+                skip_embed,
+                skip_enrich,
+                force,
+            )?;
         }
         Commands::Export {
             namespace,

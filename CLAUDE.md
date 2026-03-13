@@ -23,6 +23,22 @@ cd ui && npx playwright test              # E2E tests
 
 **CI uses `RUSTFLAGS: -D warnings`** — all warnings are errors. Always run clippy before pushing.
 
+## Git Workflow
+
+When working with git, always confirm the current branch before committing or pushing. Never assume you're on the correct branch.
+
+## Code Review
+
+When asked to do code review, do a single thorough pass. Do not flip-flop on whether a bug exists or is fixed — if uncertain, re-read the code before answering.
+
+## General Principles
+
+Do not over-engineer solutions. Apply only the changes requested. Do not add extra fields, workflows, or abstractions unless explicitly asked.
+
+This is primarily a Rust project. Always run `cargo test` after making changes. Run `cargo check` before claiming code compiles cleanly.
+
+When spawning sub-agents or waiting on background tasks, do NOT poll TaskList repeatedly. Check once, do other productive work, then check again after a reasonable interval.
+
 ## Workspace Layout
 
 6 crates: `codemem-core` (types/traits/errors/config) → `codemem-storage` (SQLite + HNSW + petgraph) + `codemem-embeddings` (Candle/Ollama/OpenAI) → `codemem-engine` (domain logic) → `codemem` (binary: CLI + MCP + REST API). Plus `codemem-bench` for benchmarks.

@@ -69,9 +69,7 @@ $ARGUMENTS
 |----------|------|------------|
 | Check graph size & health | `codemem_status` | `include: ["stats", "health", "metrics"]` |
 | Detect recurring patterns | `detect_patterns` | `min_frequency: 3` |
-| Enrich with git/security/perf | `enrich_codebase` | `path`, `analyses: ["git", "security", "performance"]` |
-| Git history enrichment only | `enrich_git_history` | `path`, `days: 90` |
-| Full pipeline (index+enrich+rank) | `analyze_codebase` | `path` |
+| Full pipeline (index+enrich+rank) | CLI: `codemem analyze` | `--skip-enrich`, `--skip-embed`, `--force` |
 | Deduplicate similar memories | `consolidate` | `mode: "cluster"`, `similarity_threshold: 0.85` |
 | Clean up low-value memories | `consolidate` | `mode: "forget"`, `importance_threshold: 0.3` |
 | Find creative cross-connections | `consolidate` | `mode: "creative"` |

@@ -45,6 +45,9 @@ pub enum CodememError {
     #[error("Lock poisoned: {0}")]
     LockPoisoned(String),
 
+    #[error("SCIP orchestration error: {0}")]
+    ScipOrchestration(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

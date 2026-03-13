@@ -45,6 +45,10 @@ fn relationship_type_roundtrip() {
         RelationshipType::Explains,
         RelationshipType::SharesTheme,
         RelationshipType::Summarizes,
+        RelationshipType::TypeDefinition,
+        RelationshipType::Reads,
+        RelationshipType::Writes,
+        RelationshipType::Overrides,
     ] {
         let s = rt.to_string();
         let parsed: RelationshipType = s.parse().unwrap();
@@ -81,6 +85,14 @@ fn node_kind_roundtrip() {
         NodeKind::Constant,
         NodeKind::Endpoint,
         NodeKind::Test,
+        NodeKind::External,
+        NodeKind::Trait,
+        NodeKind::Enum,
+        NodeKind::EnumVariant,
+        NodeKind::Field,
+        NodeKind::TypeParameter,
+        NodeKind::Macro,
+        NodeKind::Property,
     ] {
         let s = nk.to_string();
         let parsed: NodeKind = s.parse().unwrap();
