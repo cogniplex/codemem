@@ -69,7 +69,7 @@ impl std::str::FromStr for MemoryType {
 
 // ── Relationship Types ──────────────────────────────────────────────────────
 
-/// 24 relationship types for the knowledge graph.
+/// 28 relationship types for the knowledge graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RelationshipType {
@@ -112,6 +112,15 @@ pub enum RelationshipType {
     // Temporal (auto-created by git enrichment)
     /// Files that frequently change together in commits.
     CoChanged,
+    // SCIP-derived relationships
+    /// "variable X has type Y" — from SCIP `Relationship.is_type_definition`.
+    TypeDefinition,
+    /// Function reads symbol — from SCIP `symbol_roles & ReadAccess`.
+    Reads,
+    /// Function writes symbol — from SCIP `symbol_roles & WriteAccess`.
+    Writes,
+    /// Method → parent method (virtual dispatch) — derived from SCIP `is_implementation` on methods.
+    Overrides,
 }
 
 impl std::fmt::Display for RelationshipType {
@@ -141,6 +150,10 @@ impl std::fmt::Display for RelationshipType {
             Self::SharesTheme => write!(f, "SHARES_THEME"),
             Self::Summarizes => write!(f, "SUMMARIZES"),
             Self::CoChanged => write!(f, "CO_CHANGED"),
+            Self::TypeDefinition => write!(f, "TYPE_DEFINITION"),
+            Self::Reads => write!(f, "READS"),
+            Self::Writes => write!(f, "WRITES"),
+            Self::Overrides => write!(f, "OVERRIDES"),
         }
     }
 }
@@ -174,6 +187,10 @@ impl std::str::FromStr for RelationshipType {
             "SHARES_THEME" => Ok(Self::SharesTheme),
             "SUMMARIZES" => Ok(Self::Summarizes),
             "CO_CHANGED" => Ok(Self::CoChanged),
+            "TYPE_DEFINITION" => Ok(Self::TypeDefinition),
+            "READS" => Ok(Self::Reads),
+            "WRITES" => Ok(Self::Writes),
+            "OVERRIDES" => Ok(Self::Overrides),
             _ => Err(CodememError::InvalidRelationshipType(s.to_string())),
         }
     }
@@ -193,11 +210,11 @@ pub enum NodeKind {
     Memory,
     /// Class method (distinct from standalone function).
     Method,
-    /// TypeScript interface, Go interface, Rust trait.
+    /// TypeScript interface, Go interface.
     Interface,
     /// Type alias, typedef.
     Type,
-    /// Const, static, enum variant.
+    /// Const, static.
     Constant,
     /// REST/gRPC endpoint definition.
     Endpoint,
@@ -205,6 +222,24 @@ pub enum NodeKind {
     Test,
     /// A CST-aware code chunk.
     Chunk,
+    // SCIP-derived node kinds
+    /// Dependency symbols — stubs with hover docs, no source location.
+    /// ID format: `ext:{manager}:{package}:{qualified_name}`.
+    External,
+    /// Rust trait — semantically distinct from `Interface`.
+    Trait,
+    /// Enum type — distinct from `Constant`.
+    Enum,
+    /// Enum member/variant.
+    EnumVariant,
+    /// Struct/class field.
+    Field,
+    /// Generic type parameter (e.g., `T` in `Vec<T>`).
+    TypeParameter,
+    /// Rust macros, C preprocessor macros.
+    Macro,
+    /// JS/TS/Python properties — distinct from struct fields.
+    Property,
 }
 
 impl std::fmt::Display for NodeKind {
@@ -223,6 +258,14 @@ impl std::fmt::Display for NodeKind {
             Self::Endpoint => write!(f, "endpoint"),
             Self::Test => write!(f, "test"),
             Self::Chunk => write!(f, "chunk"),
+            Self::External => write!(f, "external"),
+            Self::Trait => write!(f, "trait"),
+            Self::Enum => write!(f, "enum"),
+            Self::EnumVariant => write!(f, "enum_variant"),
+            Self::Field => write!(f, "field"),
+            Self::TypeParameter => write!(f, "type_parameter"),
+            Self::Macro => write!(f, "macro"),
+            Self::Property => write!(f, "property"),
         }
     }
 }
@@ -245,6 +288,14 @@ impl std::str::FromStr for NodeKind {
             "endpoint" => Ok(Self::Endpoint),
             "test" => Ok(Self::Test),
             "chunk" => Ok(Self::Chunk),
+            "external" => Ok(Self::External),
+            "trait" => Ok(Self::Trait),
+            "enum" => Ok(Self::Enum),
+            "enum_variant" => Ok(Self::EnumVariant),
+            "field" => Ok(Self::Field),
+            "type_parameter" => Ok(Self::TypeParameter),
+            "macro" => Ok(Self::Macro),
+            "property" => Ok(Self::Property),
             _ => Err(CodememError::InvalidNodeKind(s.to_string())),
         }
     }
@@ -474,6 +525,14 @@ pub struct GraphConfig {
     pub calls_edge_weight: f64,
     /// Default edge weight for IMPORTS relationship.
     pub imports_edge_weight: f64,
+    /// Default edge weight for TYPE_DEFINITION relationship.
+    pub type_definition_edge_weight: f64,
+    /// Default edge weight for READS relationship.
+    pub reads_edge_weight: f64,
+    /// Default edge weight for WRITES relationship.
+    pub writes_edge_weight: f64,
+    /// Default edge weight for OVERRIDES relationship (virtual dispatch).
+    pub overrides_edge_weight: f64,
 }
 
 impl Default for GraphConfig {
@@ -482,6 +541,10 @@ impl Default for GraphConfig {
             contains_edge_weight: 0.1,
             calls_edge_weight: 1.0,
             imports_edge_weight: 0.5,
+            type_definition_edge_weight: 0.6,
+            reads_edge_weight: 0.3,
+            writes_edge_weight: 0.4,
+            overrides_edge_weight: 0.8,
         }
     }
 }

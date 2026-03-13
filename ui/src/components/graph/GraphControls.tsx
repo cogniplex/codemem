@@ -4,6 +4,7 @@ import { KIND_COLORS } from './constants'
 const NODE_KINDS = [
   'function', 'method', 'class', 'file', 'module', 'package',
   'type', 'interface', 'memory', 'constant', 'endpoint', 'test', 'chunk',
+  'external', 'trait', 'enum', 'enum_variant', 'field', 'type_parameter', 'macro', 'property',
 ]
 
 interface Props {

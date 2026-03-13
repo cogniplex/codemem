@@ -14,12 +14,12 @@ fn handle_initialize() {
 }
 
 #[test]
-fn handle_tools_list_returns_32_tools() {
+fn handle_tools_list_returns_26_tools() {
     let server = test_server();
     let resp = server.handle_request("tools/list", None, json!(2));
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 32);
+    assert_eq!(tools.len(), 26);
 
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     // Memory CRUD (7)
@@ -30,11 +30,10 @@ fn handle_tools_list_returns_32_tools() {
     assert!(names.contains(&"refine_memory"));
     assert!(names.contains(&"split_memory"));
     assert!(names.contains(&"merge_memories"));
-    // Graph & Structure (9)
+    // Graph & Structure (8)
     assert!(names.contains(&"graph_traverse"));
     assert!(names.contains(&"summary_tree"));
     assert!(names.contains(&"codemem_status"));
-    assert!(names.contains(&"index_codebase"));
     assert!(names.contains(&"search_code"));
     assert!(names.contains(&"get_symbol_info"));
     assert!(names.contains(&"get_symbol_graph"));
@@ -54,12 +53,6 @@ fn handle_tools_list_returns_32_tools() {
     // Session & Context (2)
     assert!(names.contains(&"session_checkpoint"));
     assert!(names.contains(&"session_context"));
-    // Enrichment (5)
-    assert!(names.contains(&"enrich_codebase"));
-    assert!(names.contains(&"analyze_codebase"));
-    assert!(names.contains(&"enrich_git_history"));
-    assert!(names.contains(&"enrich_security"));
-    assert!(names.contains(&"enrich_performance"));
 }
 
 #[test]

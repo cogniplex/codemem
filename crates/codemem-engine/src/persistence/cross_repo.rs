@@ -10,18 +10,14 @@ use crate::index::resolver::UnresolvedRef;
 use crate::index::symbol::{Reference, Symbol};
 use codemem_core::{CodememError, Edge, GraphBackend, RelationshipType};
 use std::collections::HashMap;
-use std::path::Path;
 
 impl super::super::CodememEngine {
     /// Persist cross-repo linking data after `persist_index_results`.
     ///
-    /// This method runs 4 phases:
+    /// This method runs 3 phases:
     /// 1. Register packages + store unresolved refs
     /// 2. Forward/backward cross-repo linking
-    /// 3. LSP enrichment (optional, when pyright/tsc available)
-    /// 4. API endpoint + client call detection
-    ///
-    /// After Phase 3, re-runs the cross-repo linker to link any new ext: nodes.
+    /// 3. API endpoint + client call detection
     pub fn persist_cross_repo_data(
         &self,
         manifests: &ManifestResult,
@@ -29,7 +25,6 @@ impl super::super::CodememEngine {
         symbols: &[Symbol],
         references: &[Reference],
         namespace: &str,
-        project_root: Option<&Path>,
     ) -> Result<CrossRepoPersistResult, CodememError> {
         let mut result = CrossRepoPersistResult::default();
 
@@ -215,67 +210,7 @@ impl super::super::CodememEngine {
             }
         }
 
-        // ── Phase 3: LSP Enrichment (optional) ──────────────────────────────
-        if let Some(root) = project_root {
-            match self.lsp_enrich(root, namespace) {
-                Ok(lsp_stats) => {
-                    result.lsp_edges_upgraded = lsp_stats.edges_upgraded;
-                    result.lsp_ext_nodes_created = lsp_stats.ext_nodes_created;
-                    result.lsp_type_annotations = lsp_stats.type_annotations_applied;
-
-                    // LSP→linker feedback loop: if LSP created ext: nodes with
-                    // package_name info, re-run forward linking to create cross-ns
-                    // edges from ext: nodes to already-indexed namespaces.
-                    if lsp_stats.ext_nodes_created > 0 {
-                        tracing::info!(
-                            "Re-running cross-repo linker after {} new ext: nodes",
-                            lsp_stats.ext_nodes_created
-                        );
-                        // Reload pending refs (some may have been resolved by LSP)
-                        let refreshed_pending: Vec<PendingRef> = self
-                            .storage
-                            .list_pending_unresolved_refs()
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|r| PendingRef {
-                                id: r.id,
-                                namespace: r.namespace,
-                                source_node: r.source_node,
-                                target_name: r.target_name,
-                                package_hint: r.package_hint,
-                                ref_kind: r.ref_kind,
-                                file_path: Some(r.file_path),
-                                line: Some(r.line),
-                            })
-                            .collect();
-
-                        let relink = linker::forward_link(
-                            namespace,
-                            &refreshed_pending
-                                .iter()
-                                .filter(|r| r.namespace == namespace)
-                                .cloned()
-                                .collect::<Vec<_>>(),
-                            &all_registry,
-                            &resolve_fn,
-                        );
-                        for edge in &relink.forward_edges {
-                            if self.persist_cross_repo_edge(edge).is_ok() {
-                                result.forward_edges_created += 1;
-                            }
-                        }
-                        for ref_id in &relink.resolved_ref_ids {
-                            let _ = self.storage.delete_unresolved_ref(ref_id);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("LSP enrichment failed: {e}");
-                }
-            }
-        }
-
-        // ── Phase 4: API Surface ────────────────────────────────────────────
+        // ── Phase 3: API Surface ────────────────────────────────────────────
         // 6. Detect API endpoints and client calls.
         let endpoints = api_surface::detect_endpoints(symbols, namespace);
         result.endpoints_detected = endpoints.len();

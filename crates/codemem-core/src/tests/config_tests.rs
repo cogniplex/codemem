@@ -288,6 +288,64 @@ fn graph_config_roundtrips_through_toml() {
 }
 
 #[test]
+fn scip_config_defaults() {
+    let config = CodememConfig::default();
+    assert!(config.scip.enabled);
+    assert!(config.scip.auto_detect_indexers);
+    assert!(config.scip.cache_index);
+    assert_eq!(config.scip.cache_ttl_hours, 24);
+    assert!(config.scip.create_external_nodes);
+    assert_eq!(config.scip.max_references_per_symbol, 100);
+    assert!(config.scip.store_docs_as_memories);
+    assert!(config.scip.indexers.rust.is_empty());
+    assert!(config.scip.indexers.typescript.is_empty());
+    assert!(config.scip.indexers.python.is_empty());
+    assert!(config.scip.indexers.java.is_empty());
+    assert!(config.scip.indexers.go.is_empty());
+}
+
+#[test]
+fn scip_config_roundtrips_through_toml() {
+    let config = ScipConfig::default();
+    let toml_str = toml::to_string_pretty(&config).unwrap();
+    let parsed: ScipConfig = toml::from_str(&toml_str).unwrap();
+    assert_eq!(parsed.enabled, config.enabled);
+    assert_eq!(parsed.cache_ttl_hours, config.cache_ttl_hours);
+    assert_eq!(
+        parsed.max_references_per_symbol,
+        config.max_references_per_symbol
+    );
+}
+
+#[test]
+fn scip_config_partial_toml_uses_defaults() {
+    let partial = r#"
+[scip]
+enabled = false
+cache_ttl_hours = 48
+
+[scip.indexers]
+rust = "rust-analyzer scip ."
+"#;
+    let config: CodememConfig = toml::from_str(partial).expect("partial TOML should parse");
+    assert!(!config.scip.enabled);
+    assert_eq!(config.scip.cache_ttl_hours, 48);
+    assert_eq!(config.scip.indexers.rust, "rust-analyzer scip .");
+    // Non-overridden fields use defaults
+    assert!(config.scip.auto_detect_indexers);
+    assert!(config.scip.cache_index);
+    assert_eq!(config.scip.max_references_per_symbol, 100);
+    assert!(config.scip.indexers.typescript.is_empty());
+}
+
+#[test]
+fn validate_rejects_zero_max_references_per_symbol() {
+    let mut config = CodememConfig::default();
+    config.scip.max_references_per_symbol = 0;
+    assert!(config.validate().is_err());
+}
+
+#[test]
 fn default_scoring_weights_sum_to_one() {
     let w = ScoringWeights::default();
     let sum = w.vector_similarity

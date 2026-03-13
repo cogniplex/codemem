@@ -13,6 +13,7 @@ import { FocusToolbar } from './FocusToolbar'
 const ALL_KINDS = new Set([
   'function', 'method', 'class', 'file', 'module', 'package',
   'type', 'interface', 'memory', 'constant', 'endpoint', 'test', 'chunk',
+  'external', 'trait', 'enum', 'enum_variant', 'field', 'type_parameter', 'macro', 'property',
 ])
 
 export function GraphExplorer() {

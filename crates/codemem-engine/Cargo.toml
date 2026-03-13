@@ -37,6 +37,13 @@ ast-grep-core = "0.41"
 ast-grep-language = "0.41"
 serde_yaml = "0.9"
 
+# SCIP code intelligence
+scip = "0.6.1"
+protobuf = "=3.7.2"
+which = "7"
+tempfile = "3"
+dirs = { workspace = true }
+
 # PCA / linear algebra
 ndarray = { workspace = true }
 

@@ -2,7 +2,15 @@ use std::path::Path;
 
 /// Full analysis pipeline: index → enrich → PageRank → clusters.
 /// Uses the unified `engine.analyze()` method.
-pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> anyhow::Result<()> {
+pub(crate) fn cmd_analyze(
+    root: &Path,
+    namespace: Option<&str>,
+    days: u64,
+    skip_scip: bool,
+    skip_embed: bool,
+    skip_enrich: bool,
+    force: bool,
+) -> anyhow::Result<()> {
     let db_path = super::codemem_db_path();
     let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
 
@@ -17,9 +25,14 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
             .unwrap_or(path_str)
     });
 
-    // Load incremental state
-    let mut change_detector = codemem_engine::index::incremental::ChangeDetector::new();
-    change_detector.load_from_storage(engine.storage(), ns);
+    // Load incremental state (skip when forcing full re-index)
+    let change_detector = if force {
+        None
+    } else {
+        let mut cd = codemem_engine::index::incremental::ChangeDetector::new();
+        cd.load_from_storage(engine.storage(), ns);
+        Some(cd)
+    };
 
     println!("Analyzing {}...", root.display());
 
@@ -27,12 +40,16 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
         path: root,
         namespace: ns,
         git_days: days,
-        change_detector: Some(change_detector),
+        change_detector,
         progress: Some(Box::new(|progress| {
             let codemem_engine::AnalyzeProgress::Embedding { done, total } = progress;
             print!("\r  Embedding: {done}/{total}");
             std::io::Write::flush(&mut std::io::stdout()).ok();
         })),
+        skip_scip,
+        skip_embed,
+        skip_enrich,
+        force,
     };
 
     let result = engine.analyze(options)?;
@@ -44,6 +61,12 @@ pub(crate) fn cmd_analyze(root: &Path, namespace: Option<&str>, days: u64) -> an
 
     // Step 1: Index summary
     println!("\nStep 1/4: Index");
+    if result.scip_files_covered > 0 {
+        println!(
+            "  SCIP:             {} files covered, {} nodes, {} edges",
+            result.scip_files_covered, result.scip_nodes_created, result.scip_edges_created
+        );
+    }
     println!("  Files parsed:     {}", result.files_parsed);
     println!("  Files skipped:    {}", result.files_skipped);
     println!("  Symbols:          {}", result.symbols_found);

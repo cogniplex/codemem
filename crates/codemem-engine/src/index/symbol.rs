@@ -187,11 +187,13 @@ fn symbol_kind_from_node_kind(nk: &codemem_core::NodeKind) -> SymbolKind {
         codemem_core::NodeKind::Function => SymbolKind::Function,
         codemem_core::NodeKind::Method => SymbolKind::Method,
         codemem_core::NodeKind::Class => SymbolKind::Class,
-        codemem_core::NodeKind::Interface => SymbolKind::Interface,
+        codemem_core::NodeKind::Interface | codemem_core::NodeKind::Trait => SymbolKind::Interface,
         codemem_core::NodeKind::Type => SymbolKind::Type,
         codemem_core::NodeKind::Constant => SymbolKind::Constant,
         codemem_core::NodeKind::Module => SymbolKind::Module,
         codemem_core::NodeKind::Test => SymbolKind::Test,
+        codemem_core::NodeKind::Enum => SymbolKind::Enum,
+        codemem_core::NodeKind::Field | codemem_core::NodeKind::Property => SymbolKind::Field,
         _ => SymbolKind::Function, // safe fallback for non-symbol node kinds
     }
 }
@@ -333,13 +335,13 @@ impl From<SymbolKind> for codemem_core::NodeKind {
             SymbolKind::Method => codemem_core::NodeKind::Method,
             SymbolKind::Class => codemem_core::NodeKind::Class,
             SymbolKind::Struct => codemem_core::NodeKind::Class,
-            SymbolKind::Enum => codemem_core::NodeKind::Class,
+            SymbolKind::Enum => codemem_core::NodeKind::Enum,
             SymbolKind::Interface => codemem_core::NodeKind::Interface,
             SymbolKind::Type => codemem_core::NodeKind::Type,
             SymbolKind::Constant => codemem_core::NodeKind::Constant,
             SymbolKind::Module => codemem_core::NodeKind::Module,
             SymbolKind::Test => codemem_core::NodeKind::Test,
-            SymbolKind::Field => codemem_core::NodeKind::Constant,
+            SymbolKind::Field => codemem_core::NodeKind::Field,
             SymbolKind::Constructor => codemem_core::NodeKind::Method,
         }
     }

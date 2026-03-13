@@ -1,16 +1,14 @@
 //! codemem-mcp: MCP server for Codemem (JSON-RPC 2.0 over stdio).
 //!
-//! Implements 32 tools:
+//! Implements 26 tools:
 //! store_memory, recall, delete_memory, associate_memories, refine_memory,
 //! split_memory, merge_memories, graph_traverse, summary_tree,
-//! codemem_status, index_codebase, search_code, get_symbol_info,
+//! codemem_status, search_code, get_symbol_info,
 //! get_symbol_graph, find_important_nodes, find_related_groups,
 //! get_node_memories, node_coverage,
 //! get_cross_repo, consolidate, detect_patterns, get_decision_chain,
 //! list_namespaces, namespace_stats, delete_namespace,
-//! session_checkpoint, session_context,
-//! enrich_codebase, analyze_codebase,
-//! enrich_git_history.
+//! session_checkpoint, session_context.
 //!
 //! Transport: Newline-delimited JSON-RPC messages over stdio.
 //! All logging goes to stderr; stdout is reserved for JSON-RPC only.
@@ -26,7 +24,6 @@ mod definitions;
 pub mod http;
 pub mod scoring;
 pub mod tools_consolidation;
-pub mod tools_enrich;
 pub mod tools_graph;
 pub mod tools_memory;
 pub mod tools_recall;
@@ -242,7 +239,6 @@ impl McpServer {
             "graph_traverse" => self.tool_graph_traverse(args),
             "summary_tree" => self.tool_summary_tree(args),
             "codemem_status" => self.tool_codemem_status(args),
-            "index_codebase" => self.tool_index_codebase(args),
             "search_code" => self.tool_search_code(args),
             "get_symbol_info" => self.tool_get_symbol_info(args),
             "get_symbol_graph" => self.tool_get_symbol_graph(args),
@@ -265,13 +261,6 @@ impl McpServer {
             // ── Session & Context ───────────────────────────────────────
             "session_checkpoint" => self.tool_session_checkpoint(args),
             "session_context" => self.tool_session_context(args),
-
-            // ── Enrichment ──────────────────────────────────────────────
-            "enrich_codebase" => self.tool_enrich_codebase(args),
-            "analyze_codebase" => self.tool_analyze_codebase(args),
-            "enrich_git_history" => self.tool_enrich_git_history(args),
-            "enrich_security" => self.tool_enrich_security(args),
-            "enrich_performance" => self.tool_enrich_performance(args),
 
             _ => ToolResult::tool_error(format!("Unknown tool: {name}")),
         }

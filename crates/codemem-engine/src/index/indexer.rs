@@ -65,6 +65,8 @@ pub struct IndexAndResolveResult {
     /// The absolute root path that was indexed. Downstream code can use this
     /// to reconstruct absolute paths (e.g. for `git -C` or file reading).
     pub root_path: PathBuf,
+    /// SCIP graph build result (nodes, edges, memories). None if SCIP was skipped.
+    pub scip_build: Option<super::scip::graph_builder::ScipBuildResult>,
 }
 
 /// The main indexing pipeline.
@@ -257,6 +259,20 @@ impl Indexer {
         &mut self,
         root: &Path,
     ) -> Result<IndexAndResolveResult, codemem_core::CodememError> {
+        self.index_and_resolve_with_scip(root, None, None)
+    }
+
+    /// Index a directory with optional SCIP integration.
+    ///
+    /// If `scip_covered_files` is provided, symbol/reference extraction is skipped
+    /// for those files (SCIP already handled them). Code chunking still runs for ALL files.
+    /// The `scip_build` result is attached to the output for persistence.
+    pub fn index_and_resolve_with_scip(
+        &mut self,
+        root: &Path,
+        scip_covered_files: Option<&HashSet<String>>,
+        scip_build: Option<super::scip::graph_builder::ScipBuildResult>,
+    ) -> Result<IndexAndResolveResult, codemem_core::CodememError> {
         let result = self.index_directory(root)?;
 
         let mut all_symbols = Vec::new();
@@ -276,10 +292,16 @@ impl Indexer {
         } = result;
 
         for pr in parse_results {
-            file_paths.insert(pr.file_path);
-            all_symbols.extend(pr.symbols);
-            all_references.extend(pr.references);
-            all_chunks.extend(pr.chunks);
+            file_paths.insert(pr.file_path.clone());
+            // For SCIP-covered files, only keep chunks — skip symbols/references
+            // since SCIP provides compiler-grade data for those.
+            if scip_covered_files.is_some_and(|s| s.contains(&pr.file_path)) {
+                all_chunks.extend(pr.chunks);
+            } else {
+                all_symbols.extend(pr.symbols);
+                all_references.extend(pr.references);
+                all_chunks.extend(pr.chunks);
+            }
         }
 
         let mut resolver = ReferenceResolver::new();
@@ -307,6 +329,7 @@ impl Indexer {
             edges: resolve_result.edges,
             unresolved: resolve_result.unresolved,
             root_path,
+            scip_build,
         })
     }
 }

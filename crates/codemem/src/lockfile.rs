@@ -24,7 +24,13 @@ pub fn try_acquire(namespace: &str) -> Result<IndexLock, String> {
 
     let safe_name: String = namespace
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let path = dir.join(format!("{safe_name}.lock"));
 
@@ -33,7 +39,9 @@ pub fn try_acquire(namespace: &str) -> Result<IndexLock, String> {
 
 fn try_create_lock(path: &std::path::Path, namespace: &str) -> Result<IndexLock, String> {
     match write_lock_atomic(path) {
-        Ok(()) => Ok(IndexLock { path: path.to_path_buf() }),
+        Ok(()) => Ok(IndexLock {
+            path: path.to_path_buf(),
+        }),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let contents = fs::read_to_string(path).unwrap_or_default();
             let pid = contents.trim().parse::<u32>().unwrap_or(0);
@@ -48,10 +56,15 @@ fn try_create_lock(path: &std::path::Path, namespace: &str) -> Result<IndexLock,
 
             let _ = fs::remove_file(path);
             write_lock_atomic(path)
-                .map(|()| IndexLock { path: path.to_path_buf() })
+                .map(|()| IndexLock {
+                    path: path.to_path_buf(),
+                })
                 .map_err(|e| format!("Failed to acquire lock after stale removal: {e}"))
         }
-        Err(e) => Err(format!("Failed to create lock file {}: {e}", path.display())),
+        Err(e) => Err(format!(
+            "Failed to create lock file {}: {e}",
+            path.display()
+        )),
     }
 }
 

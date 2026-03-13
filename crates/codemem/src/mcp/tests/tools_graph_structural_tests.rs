@@ -239,65 +239,6 @@ fn get_cross_repo_requires_path_or_index() {
 }
 
 #[test]
-fn index_codebase_nonexistent_path() {
-    let server = test_server();
-    let params =
-        json!({"name": "index_codebase", "arguments": {"path": "/nonexistent/path/abc123"}});
-    let resp = server.handle_request("tools/call", Some(&params), json!(306));
-    let result = resp.result.unwrap();
-    assert_eq!(result["isError"], true);
-    let text = result["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("does not exist"));
-}
-
-#[test]
-fn index_codebase_and_search_symbols() {
-    let server = test_server();
-
-    // Create a temp directory with a Rust file
-    let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("lib.rs"),
-        b"pub fn hello_world() { println!(\"hello\"); }\npub struct MyConfig { pub debug: bool }\n",
-    )
-    .unwrap();
-
-    // Index the directory
-    let params = json!({
-        "name": "index_codebase",
-        "arguments": {"path": dir.path().to_string_lossy()}
-    });
-    let resp = server.handle_request("tools/call", Some(&params), json!(307));
-    let result = resp.result.unwrap();
-    assert_eq!(result["isError"], false);
-    let text = result["content"][0]["text"].as_str().unwrap();
-    let index_result: Value = serde_json::from_str(text).unwrap();
-    assert!(index_result["symbols"].as_u64().unwrap() >= 2);
-
-    // Now search for symbols
-    let params = json!({
-        "name": "search_code",
-        "arguments": {"mode": "text", "query": "hello"}
-    });
-    let resp = server.handle_request("tools/call", Some(&params), json!(308));
-    let result = resp.result.unwrap();
-    assert_eq!(result["isError"], false);
-    let text = result["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("hello_world"));
-
-    // Search by kind
-    let params = json!({
-        "name": "search_code",
-        "arguments": {"mode": "text", "query": "My", "kind": "struct"}
-    });
-    let resp = server.handle_request("tools/call", Some(&params), json!(309));
-    let result = resp.result.unwrap();
-    assert_eq!(result["isError"], false);
-    let text = result["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("MyConfig"));
-}
-
-#[test]
 fn get_dependencies_for_symbol() {
     let server = test_server();
 

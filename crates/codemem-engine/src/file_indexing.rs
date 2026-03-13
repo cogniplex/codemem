@@ -184,6 +184,7 @@ impl CodememEngine {
             root_path: project_root
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| path.to_path_buf()),
+            scip_build: None,
         };
 
         self.persist_index_results(&results, namespace)?;
@@ -511,19 +512,44 @@ impl CodememEngine {
 
         // Eagerly initialize embeddings/vector/BM25 for the full analysis pipeline.
         // This triggers lazy init so that embed_and_persist() finds them ready.
-        drop(self.lock_embeddings());
-        drop(self.lock_vector());
-        drop(self.lock_bm25());
+        // Skip if embeddings are not needed.
+        if !options.skip_embed {
+            drop(self.lock_embeddings());
+            drop(self.lock_vector());
+            drop(self.lock_bm25());
+        }
 
-        // 1. Index
-        let mut indexer = match options.change_detector {
-            Some(cd) => Indexer::with_change_detector(cd),
-            None => Indexer::new(),
+        // 0. SCIP phase: run indexers, parse results, build graph data.
+        // Runs BEFORE ast-grep so we know which files SCIP covered.
+        let (scip_covered, scip_build) = if !options.skip_scip && self.config.scip.enabled {
+            match self.run_scip_phase(root, options.namespace) {
+                Ok((covered, build)) => (Some(covered), Some(build)),
+                Err(e) => {
+                    tracing::warn!("SCIP phase failed, falling back to ast-grep only: {e}");
+                    (None, None)
+                }
+            }
+        } else {
+            (None, None)
         };
-        let resolved = indexer.index_and_resolve(root)?;
+
+        let scip_nodes_created = scip_build.as_ref().map_or(0, |b| b.nodes.len());
+        let scip_edges_created = scip_build.as_ref().map_or(0, |b| b.edges.len());
+        let scip_files_covered = scip_covered.as_ref().map_or(0, |s| s.len());
+
+        // 1. Index (ast-grep skips symbol extraction for SCIP-covered files)
+        // When force=true, ignore the change detector so all files are re-processed.
+        let mut indexer = match options.change_detector {
+            Some(cd) if !options.force => Indexer::with_change_detector(cd),
+            _ => Indexer::new(),
+        };
+        let resolved =
+            indexer.index_and_resolve_with_scip(root, scip_covered.as_ref(), scip_build)?;
 
         // 2. Persist (with or without progress callback)
-        let persist = if let Some(ref on_progress) = options.progress {
+        let persist = if options.skip_embed {
+            self.persist_graph_only(&resolved, Some(options.namespace))?
+        } else if let Some(ref on_progress) = options.progress {
             self.persist_index_results_with_progress(
                 &resolved,
                 Some(options.namespace),
@@ -546,15 +572,22 @@ impl CodememEngine {
             }
         }
 
-        // 3. Enrich
-        let path_str = root.to_str().unwrap_or("");
-        let enrichment = self.run_enrichments(
-            path_str,
-            &[],
-            options.git_days,
-            Some(options.namespace),
-            None,
-        );
+        // 3. Enrich (skip if requested)
+        let enrichment = if options.skip_enrich {
+            crate::enrichment::EnrichmentPipelineResult {
+                results: serde_json::json!({}),
+                total_insights: 0,
+            }
+        } else {
+            let path_str = root.to_str().unwrap_or("");
+            self.run_enrichments(
+                path_str,
+                &[],
+                options.git_days,
+                Some(options.namespace),
+                None,
+            )
+        };
 
         // 4. Recompute centrality
         self.lock_graph()?.recompute_centrality();
@@ -585,7 +618,53 @@ impl CodememEngine {
             total_insights: enrichment.total_insights,
             top_nodes,
             community_count,
+            scip_nodes_created,
+            scip_edges_created,
+            scip_files_covered,
         })
+    }
+
+    /// Run the SCIP phase: orchestrate indexers, parse results, build graph data.
+    fn run_scip_phase(
+        &self,
+        root: &Path,
+        namespace: &str,
+    ) -> Result<(HashSet<String>, index::scip::graph_builder::ScipBuildResult), CodememError> {
+        let orchestrator =
+            index::scip::orchestrate::ScipOrchestrator::new(self.config.scip.clone());
+        let orch_result = orchestrator.run(root, namespace)?;
+
+        if orch_result.scip_result.covered_files.is_empty() {
+            return Ok((
+                HashSet::new(),
+                index::scip::graph_builder::ScipBuildResult::default(),
+            ));
+        }
+
+        for (lang, err) in &orch_result.failed_languages {
+            tracing::warn!("SCIP indexer for {:?} failed: {}", lang, err);
+        }
+        for lang in &orch_result.indexed_languages {
+            tracing::info!("SCIP indexed {:?} successfully", lang);
+        }
+
+        let build = index::scip::graph_builder::build_graph(
+            &orch_result.scip_result,
+            Some(namespace),
+            &self.config.scip,
+        );
+        let covered: HashSet<String> = build.files_covered.clone();
+
+        tracing::info!(
+            "SCIP phase: {} nodes, {} edges, {} ext nodes, {} files covered, {} doc memories",
+            build.nodes.len(),
+            build.edges.len(),
+            build.ext_nodes_created,
+            covered.len(),
+            build.doc_memories_created,
+        );
+
+        Ok((covered, build))
     }
 
     // ── A8: Session Context Synthesis ───────────────────────────────────
@@ -657,6 +736,14 @@ pub struct AnalyzeOptions<'a> {
     pub git_days: u64,
     pub change_detector: Option<index::incremental::ChangeDetector>,
     pub progress: Option<Box<dyn Fn(AnalyzeProgress) + Send + 'a>>,
+    /// Skip SCIP indexing — use ast-grep only (faster, less accurate).
+    pub skip_scip: bool,
+    /// Skip embedding phase (graph + chunks stored but not vectorized).
+    pub skip_embed: bool,
+    /// Skip enrichment phase (no git-history/complexity/etc. analysis).
+    pub skip_enrich: bool,
+    /// Force re-index even when file SHAs haven't changed.
+    pub force: bool,
 }
 
 /// Progress events emitted during analysis.
@@ -681,6 +768,12 @@ pub struct AnalyzeResult {
     pub total_insights: usize,
     pub top_nodes: Vec<crate::graph_ops::RankedNode>,
     pub community_count: usize,
+    /// SCIP nodes created (sym: + ext: nodes).
+    pub scip_nodes_created: usize,
+    /// SCIP edges created (CALLS, IMPORTS, READS, WRITES, IMPLEMENTS, etc.).
+    pub scip_edges_created: usize,
+    /// Files covered by SCIP indexers (ast-grep skipped symbol extraction for these).
+    pub scip_files_covered: usize,
 }
 
 /// Session context synthesized at session start.

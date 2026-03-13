@@ -3,7 +3,6 @@
 
 mod compaction;
 pub mod cross_repo;
-pub mod lsp;
 
 use crate::index::{CodeChunk, ResolvedEdge, Symbol};
 use crate::IndexAndResolveResult;
@@ -36,9 +35,6 @@ pub struct CrossRepoPersistResult {
     pub backward_edges_created: usize,
     pub endpoints_detected: usize,
     pub client_calls_detected: usize,
-    pub lsp_edges_upgraded: usize,
-    pub lsp_ext_nodes_created: usize,
-    pub lsp_type_annotations: usize,
 }
 
 /// Return the edge weight for a given relationship type, using config overrides
@@ -48,6 +44,10 @@ pub fn edge_weight_for(rel: &RelationshipType, config: &GraphConfig) -> f64 {
         RelationshipType::Calls => config.calls_edge_weight,
         RelationshipType::Imports => config.imports_edge_weight,
         RelationshipType::Contains => config.contains_edge_weight,
+        RelationshipType::TypeDefinition => config.type_definition_edge_weight,
+        RelationshipType::Reads => config.reads_edge_weight,
+        RelationshipType::Writes => config.writes_edge_weight,
+        RelationshipType::Overrides => config.overrides_edge_weight,
         RelationshipType::Implements | RelationshipType::Inherits => 0.8,
         RelationshipType::DependsOn => 0.7,
         RelationshipType::CoChanged => 0.6,
@@ -75,6 +75,38 @@ impl super::CodememEngine {
         namespace: Option<&str>,
     ) -> Result<IndexPersistResult, CodememError> {
         self.persist_index_results_with_progress(results, namespace, |_, _| {})
+    }
+
+    /// Like `persist_index_results`, but skips the embedding phase entirely.
+    /// Stores graph nodes, edges, and chunks without vectorizing them.
+    /// Also skips cross-repo linking — this is a fast graph-only mode intended
+    /// for rapid iteration (e.g., `--skip-embed`). Run a full `analyze` to
+    /// populate cross-repo data.
+    pub fn persist_graph_only(
+        &self,
+        results: &IndexAndResolveResult,
+        namespace: Option<&str>,
+    ) -> Result<IndexPersistResult, CodememError> {
+        let seen_files = &results.file_paths;
+        let graph_counts = self.persist_graph_nodes(results, namespace)?;
+
+        let (chunks_pruned, symbols_pruned) = if self.config.chunking.auto_compact {
+            self.compact_graph(seen_files)
+        } else {
+            (0, 0)
+        };
+
+        Ok(IndexPersistResult {
+            files_created: seen_files.len(),
+            packages_created: graph_counts.packages_created,
+            symbols_stored: results.symbols.len(),
+            chunks_stored: graph_counts.chunks_stored,
+            edges_resolved: results.edges.len(),
+            symbols_embedded: 0,
+            chunks_embedded: 0,
+            chunks_pruned,
+            symbols_pruned,
+        })
     }
 
     /// Like `persist_index_results`, but calls `on_progress(done, total)` during
@@ -182,6 +214,16 @@ impl super::CodememEngine {
             if !node.id.starts_with("sym:") {
                 continue;
             }
+            // Skip SCIP-sourced symbols (explicit and synthetic containment nodes)
+            // — they're managed by the SCIP pipeline, not ast-grep. Without this
+            // guard, re-indexing deletes all SCIP sym: nodes because their IDs
+            // don't match ast-grep's qualified names.
+            if matches!(
+                node.payload.get("source").and_then(|v| v.as_str()),
+                Some("scip" | "scip-synthetic")
+            ) {
+                continue;
+            }
             let Some(fp) = node.payload.get("file_path").and_then(|v| v.as_str()) else {
                 continue;
             };
@@ -217,6 +259,81 @@ impl super::CodememEngine {
         let ref_edges = Self::build_reference_edges(edges, &self.config.graph, now);
         self.persist_edges_to_storage_and_graph(&ref_edges, &mut graph);
 
+        // ── SCIP nodes + edges (compiler-grade)
+        if let Some(ref scip_build) = results.scip_build {
+            // Clean up stale SCIP nodes: collect existing SCIP-sourced sym: nodes
+            // for files covered by this SCIP run, then remove any not in the new set.
+            let new_scip_ids: HashSet<&str> =
+                scip_build.nodes.iter().map(|n| n.id.as_str()).collect();
+            let mut stale_scip_ids = Vec::new();
+            for node in graph.get_all_nodes() {
+                if !node.id.starts_with("sym:") {
+                    continue;
+                }
+                if !matches!(
+                    node.payload.get("source").and_then(|v| v.as_str()),
+                    Some("scip" | "scip-synthetic")
+                ) {
+                    continue;
+                }
+                if !new_scip_ids.contains(node.id.as_str()) {
+                    // Only clean up nodes in files that SCIP covered this run.
+                    if let Some(fp) = node.payload.get("file_path").and_then(|v| v.as_str()) {
+                        if seen_files.contains(fp) {
+                            stale_scip_ids.push(node.id.clone());
+                        }
+                    }
+                }
+            }
+            for stale_id in &stale_scip_ids {
+                let _ = graph.remove_node(stale_id);
+                let _ = self.storage.delete_graph_nodes_by_prefix(stale_id);
+                // Clean up orphan doc memories for removed symbols.
+                if let Some(qname) = stale_id.strip_prefix("sym:") {
+                    let doc_id = format!("scip-doc:{qname}");
+                    let _ = self.storage.delete_memory(&doc_id);
+                }
+            }
+            if !stale_scip_ids.is_empty() {
+                tracing::info!(
+                    "Cleaned up {} stale SCIP nodes from re-index",
+                    stale_scip_ids.len()
+                );
+            }
+
+            self.persist_nodes_to_storage_and_graph(&scip_build.nodes, &mut graph);
+
+            // Multi-layer fusion: merge confidence when ast-grep and SCIP agree.
+            // Superseded ast-grep edges are removed to avoid duplicates.
+            let (fused_edges, superseded_ids) = Self::fuse_edges(&ref_edges, &scip_build.edges);
+
+            // Remove the low-confidence ast-grep edges that were fused into SCIP edges.
+            for edge_id in &superseded_ids {
+                let _ = graph.remove_edge(edge_id);
+                let _ = self.storage.delete_graph_edge(edge_id);
+            }
+
+            self.persist_edges_to_storage_and_graph(&fused_edges, &mut graph);
+
+            // Persist hover doc memories and their RELATES_TO edges.
+            for (memory, related_node_id) in &scip_build.memories {
+                let _ = self.storage.insert_memory(memory);
+                let relates_edge = Edge {
+                    id: format!("relates:{}->mem:{}", related_node_id, memory.id),
+                    src: related_node_id.clone(),
+                    dst: format!("mem:{}", memory.id),
+                    relationship: RelationshipType::RelatesTo,
+                    weight: 0.3,
+                    properties: HashMap::new(),
+                    created_at: now,
+                    valid_from: Some(now),
+                    valid_to: None,
+                };
+                let _ = graph.add_edge(relates_edge.clone());
+                let _ = self.storage.insert_graph_edges_batch(&[relates_edge]);
+            }
+        }
+
         // ── Chunk nodes + file→chunk / symbol→chunk edges
         for file_path in seen_files {
             let prefix = format!("chunk:{file_path}:");
@@ -242,7 +359,9 @@ impl super::CodememEngine {
         nodes: &[GraphNode],
         graph: &mut crate::GraphEngine,
     ) {
-        let _ = self.storage.insert_graph_nodes_batch(nodes);
+        if let Err(e) = self.storage.insert_graph_nodes_batch(nodes) {
+            tracing::warn!("Failed to batch-insert {} graph nodes: {e}", nodes.len());
+        }
         for node in nodes {
             let _ = graph.add_node(node.clone());
         }
@@ -250,7 +369,9 @@ impl super::CodememEngine {
 
     /// Batch-insert edges into both SQLite and the in-memory graph.
     fn persist_edges_to_storage_and_graph(&self, edges: &[Edge], graph: &mut crate::GraphEngine) {
-        let _ = self.storage.insert_graph_edges_batch(edges);
+        if let Err(e) = self.storage.insert_graph_edges_batch(edges) {
+            tracing::warn!("Failed to batch-insert {} graph edges: {e}", edges.len());
+        }
         for edge in edges {
             let _ = graph.add_edge(edge.clone());
         }
@@ -458,6 +579,9 @@ impl super::CodememEngine {
     }
 
     /// Build edges from resolved cross-file references.
+    /// ast-grep base confidence for multi-layer fusion.
+    const AST_GREP_BASE_CONFIDENCE: f64 = 0.10;
+
     fn build_reference_edges(
         edges: &[ResolvedEdge],
         graph_config: &GraphConfig,
@@ -465,21 +589,85 @@ impl super::CodememEngine {
     ) -> Vec<Edge> {
         edges
             .iter()
-            .map(|edge| Edge {
-                id: format!(
-                    "ref:{}->{}:{}",
-                    edge.source_qualified_name, edge.target_qualified_name, edge.relationship
-                ),
-                src: format!("sym:{}", edge.source_qualified_name),
-                dst: format!("sym:{}", edge.target_qualified_name),
-                relationship: edge.relationship,
-                weight: edge_weight_for(&edge.relationship, graph_config),
-                valid_from: Some(now),
-                valid_to: None,
-                properties: HashMap::new(),
-                created_at: now,
+            .map(|edge| {
+                let mut properties = HashMap::new();
+                properties.insert("source".to_string(), serde_json::json!("ast-grep"));
+                properties.insert(
+                    "confidence".to_string(),
+                    serde_json::json!(Self::AST_GREP_BASE_CONFIDENCE),
+                );
+                properties.insert("source_layers".to_string(), serde_json::json!(["ast-grep"]));
+                Edge {
+                    id: format!(
+                        "ref:{}->{}:{}",
+                        edge.source_qualified_name, edge.target_qualified_name, edge.relationship
+                    ),
+                    src: format!("sym:{}", edge.source_qualified_name),
+                    dst: format!("sym:{}", edge.target_qualified_name),
+                    relationship: edge.relationship,
+                    weight: edge_weight_for(&edge.relationship, graph_config),
+                    valid_from: Some(now),
+                    valid_to: None,
+                    properties,
+                    created_at: now,
+                }
             })
             .collect()
+    }
+
+    /// Multi-layer edge fusion: when ast-grep and SCIP produce the same edge
+    /// (same src, dst, relationship), sum their confidences and merge source_layers.
+    /// SCIP edges not in ast-grep pass through unchanged.
+    ///
+    /// Returns `(fused_scip_edges, superseded_ast_grep_edge_ids)`. The caller must
+    /// remove the superseded ast-grep edges to avoid duplicates in the graph.
+    fn fuse_edges(ast_grep_edges: &[Edge], scip_edges: &[Edge]) -> (Vec<Edge>, Vec<String>) {
+        // Index ast-grep edges by (src, dst, relationship_str) → edge ID for O(1) lookup.
+        let ast_grep_index: HashMap<(String, String, String), &str> = ast_grep_edges
+            .iter()
+            .map(|e| {
+                (
+                    (e.src.clone(), e.dst.clone(), e.relationship.to_string()),
+                    e.id.as_str(),
+                )
+            })
+            .collect();
+
+        let mut superseded_ids = Vec::new();
+
+        let fused = scip_edges
+            .iter()
+            .map(|scip_edge| {
+                let key = (
+                    scip_edge.src.clone(),
+                    scip_edge.dst.clone(),
+                    scip_edge.relationship.to_string(),
+                );
+                if let Some(&ast_edge_id) = ast_grep_index.get(&key) {
+                    // Both layers agree — fuse confidence and mark ast-grep edge for removal.
+                    superseded_ids.push(ast_edge_id.to_string());
+                    let mut fused = scip_edge.clone();
+                    let scip_conf = scip_edge
+                        .properties
+                        .get("confidence")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.15);
+                    let fused_conf = scip_conf + Self::AST_GREP_BASE_CONFIDENCE;
+                    fused
+                        .properties
+                        .insert("confidence".to_string(), serde_json::json!(fused_conf));
+                    fused.properties.insert(
+                        "source_layers".to_string(),
+                        serde_json::json!(["ast-grep", "scip"]),
+                    );
+                    fused
+                } else {
+                    scip_edge.clone()
+                }
+            })
+            .collect();
+
+        (fused, superseded_ids)
     }
 
     /// Build chunk graph nodes and file→chunk / symbol→chunk CONTAINS edges.
