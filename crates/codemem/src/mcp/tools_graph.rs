@@ -170,6 +170,12 @@ impl McpServer {
         // matches the short names agents use when calling store_memory.
         let namespace = root.file_name().and_then(|f| f.to_str()).unwrap_or(path);
 
+        // Prevent concurrent index runs on the same namespace
+        let _lock = match crate::lockfile::try_acquire(namespace) {
+            Ok(guard) => guard,
+            Err(e) => return ToolResult::tool_error(e),
+        };
+
         let mut indexer = codemem_engine::Indexer::new();
         let resolved = match indexer.index_and_resolve(root) {
             Ok(r) => r,

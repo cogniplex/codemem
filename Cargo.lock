@@ -674,6 +674,7 @@ dependencies = [
  "dirs",
  "http-body-util",
  "include_dir",
+ "libc",
  "mime_guess",
  "ndarray",
  "openssl",
