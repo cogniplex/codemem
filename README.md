@@ -7,7 +7,7 @@
 
 A standalone Rust memory engine for AI coding assistants. Single binary, zero runtime deps.
 
-Codemem stores what your AI assistant discovers -- files read, symbols searched, edits made -- so repositories don't need re-exploring across sessions.
+Codemem stores what your AI assistant discovers -- files read, symbols searched, edits made -- so repositories don't need re-exploring across sessions. Optionally enriches the graph with compiler-grade cross-references via [SCIP](https://scip.dev) indexers.
 
 ![Codemem Graph UI -- Knowledge graph with community detection, edge visualization, and node kind filters](docs/graph-ui.png)
 
@@ -45,17 +45,17 @@ Downloads the local embedding model (~440MB, one-time), registers lifecycle hook
 
 ### That's it
 
-Codemem now automatically captures context, injects prior knowledge at session start, and provides 32 MCP tools to your assistant.
+Codemem now automatically captures context, injects prior knowledge at session start, and provides 26 MCP tools to your assistant.
 
 ### Map your codebase (optional)
 
-Run the full analysis pipeline -- indexes your codebase with tree-sitter, runs 14 enrichment analyses (git history, complexity, security, architecture, etc.), computes PageRank, and detects architectural clusters:
+Run the full analysis pipeline -- indexes your codebase with tree-sitter, enriches the graph with SCIP cross-references (if indexers are installed), computes PageRank, and detects architectural clusters:
 
 ```bash
 codemem analyze
 ```
 
-Then launch the [code-mapper agent](examples/agents/code-mapper.md) to do deep, agent-driven analysis -- it spawns a team of specialized agents that traverse the knowledge graph, discover patterns, and store architectural insights:
+Then launch the code-mapper agent to do deep, agent-driven analysis -- it spawns a team of specialized agents that traverse the knowledge graph, discover patterns, and store architectural insights:
 
 ```bash
 claude --agent code-mapper
@@ -63,10 +63,56 @@ claude --agent code-mapper
 
 See [Index & Enrich Pipeline](docs/pipeline.md) for what happens under the hood.
 
+### SCIP enrichment (optional, recommended)
+
+[SCIP](https://scip.dev) (Source Code Intelligence Protocol) gives codemem compiler-grade cross-references -- every call, import, type reference, and override in your codebase, with zero false positives. `codemem analyze` auto-detects installed indexers and runs them automatically.
+
+**Install the indexer for your language:**
+
+| Language | Indexer | Install |
+|----------|---------|---------|
+| Rust | rust-analyzer | `rustup component add rust-analyzer` |
+| TypeScript/JavaScript | scip-typescript | `npm install -g @sourcegraph/scip-typescript` |
+| Python | scip-python | `npm install -g @sourcegraph/scip-python` |
+| Go | scip-go | `go install github.com/sourcegraph/scip-go/cmd/scip-go@latest` |
+| Java/Kotlin | scip-java | [scip-java releases](https://sourcegraph.github.io/scip-java/) |
+| C# | scip-dotnet | `dotnet tool install --global scip-dotnet` |
+| Ruby | scip-ruby | `gem install scip-ruby` |
+
+Codemem detects languages from manifest files (`Cargo.toml`, `package.json`, `pyproject.toml`, `go.mod`, etc.) and checks PATH for the corresponding indexer. If found, SCIP edges are fused with ast-grep pattern edges -- when both sources agree on the same edge, their confidence scores sum (0.10 + 0.15 = 0.25), producing higher-fidelity graph connections.
+
+**Configure via `~/.codemem/config.toml`:**
+
+```toml
+[scip]
+enabled = true                    # Master switch (default: true)
+auto_detect_indexers = true       # Check PATH for available indexers
+cache_index = true                # Cache .scip files between runs
+cache_ttl_hours = 24              # Re-index if cache older than this
+create_external_nodes = true      # Create ext: nodes for dependency symbols
+store_docs_as_memories = true     # Attach hover docs as memories
+hierarchical_containment = true   # Build nested containment tree
+collapse_intra_class_edges = true # Fold intra-class calls into parent metadata
+
+[scip.fan_out_limits]
+module = 200     # Modules can be widely imported
+class = 50       # Classes referenced moderately
+function = 30    # Functions and methods less so
+method = 30
+
+# Override auto-detected indexer commands per language:
+# [scip.indexers]
+# rust = "rust-analyzer scip ."
+# typescript = "scip-typescript index --infer-tsconfig"
+```
+
+No SCIP indexer installed? No problem -- codemem works fine without it. You just get ast-grep pattern edges (confidence 0.10) instead of compiler-grade ones.
+
 ## Key Features
 
 - **Graph-vector hybrid architecture** -- HNSW vector search (768-dim) + petgraph knowledge graph (PageRank, Louvain community detection, betweenness centrality, BFS/DFS, SCC, topological sort, and more)
-- **32 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, enrichment pipeline (14 enrichment types), consolidation, impact analysis, session context, pattern detection over JSON-RPC
+- **SCIP integration** -- Compiler-grade cross-references via [SCIP](https://scip.dev) indexers (rust-analyzer, scip-typescript, scip-python, scip-go, scip-java, and more). Multi-layer edge fusion with ast-grep: when both sources agree, confidence scores sum. Auto-detects installed indexers, caches results, and cleans up stale nodes on re-index
+- **26 MCP tools** -- Memory CRUD, self-editing (refine/split/merge), graph traversal, code search, consolidation, impact analysis, session context, pattern detection over JSON-RPC
 - **4 lifecycle hooks** -- Automatic context injection (SessionStart), prompt capture (UserPromptSubmit), observation capture (PostToolUse), and session summaries (Stop)
 - **8-component hybrid scoring** -- Vector similarity, graph strength, BM25 token overlap, temporal alignment, tag matching, importance, confidence, and recency
 - **Code-aware indexing** -- tree-sitter structural extraction for 14 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) with manifest parsing (Cargo.toml, package.json, go.mod, pyproject.toml)
@@ -202,7 +248,7 @@ See [CLI Reference](docs/cli-reference.md) for full usage.
 
 - [Architecture](docs/architecture.md) -- System design, data flow diagrams, storage schema
 - [Index & Enrich Pipeline](docs/pipeline.md) -- Step-by-step data flow from source files to annotated graph
-- [MCP Tools Reference](docs/mcp-tools.md) -- All 32 tools with parameters and examples
+- [MCP Tools Reference](docs/mcp-tools.md) -- All 26 tools with parameters and examples
 - [CLI Reference](docs/cli-reference.md) -- All 19 commands
 - [Comparison](docs/comparison.md) -- vs Mem0, Zep/Graphiti, Letta, claude-mem, and more
 
