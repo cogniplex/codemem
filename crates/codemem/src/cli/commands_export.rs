@@ -319,6 +319,10 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
         .and_then(|f| f.to_str())
         .unwrap_or_else(|| root.to_str().unwrap_or("unknown"));
 
+    // Prevent concurrent index runs on the same namespace
+    let _lock = crate::lockfile::try_acquire(ns)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
     // Load incremental state scoped to this namespace
     let mut change_detector = codemem_engine::index::incremental::ChangeDetector::new();
     change_detector.load_from_storage(engine.storage(), ns);
