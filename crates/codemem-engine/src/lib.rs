@@ -17,9 +17,9 @@ pub use codemem_storage::graph::GraphEngine;
 pub use codemem_storage::HnswIndex;
 pub use codemem_storage::Storage;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicI64};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 pub mod analysis;
@@ -71,6 +71,10 @@ mod analysis_tests;
 #[cfg(test)]
 #[path = "tests/persistence_tests.rs"]
 mod persistence_tests;
+
+#[cfg(test)]
+#[path = "tests/memory_expiry_tests.rs"]
+mod memory_expiry_tests;
 
 // Re-export key index types at crate root for convenience
 pub use index::{
@@ -159,6 +163,9 @@ pub struct CodememEngine {
     /// Cached change detector for incremental single-file indexing.
     /// Loaded lazily from storage on first use.
     change_detector: Mutex<Option<index::incremental::ChangeDetector>>,
+    /// Unix timestamp of the last expired-memory sweep. Used to rate-limit
+    /// opportunistic cleanup to at most once per 60 seconds.
+    last_expiry_sweep: AtomicI64,
 }
 
 impl CodememEngine {
@@ -201,6 +208,7 @@ impl CodememEngine {
             dirty: AtomicBool::new(false),
             active_session_id: RwLock::new(None),
             change_detector: Mutex::new(None),
+            last_expiry_sweep: AtomicI64::new(0),
         }
     }
 
@@ -250,6 +258,7 @@ impl CodememEngine {
             dirty: AtomicBool::new(false),
             active_session_id: RwLock::new(None),
             change_detector: Mutex::new(None),
+            last_expiry_sweep: AtomicI64::new(0),
         };
 
         // H7: Only compute PageRank at startup; betweenness is computed lazily
@@ -286,6 +295,7 @@ impl CodememEngine {
             dirty: AtomicBool::new(false),
             active_session_id: RwLock::new(None),
             change_detector: Mutex::new(None),
+            last_expiry_sweep: AtomicI64::new(0),
         }
     }
 

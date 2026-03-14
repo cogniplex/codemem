@@ -319,6 +319,10 @@ pub struct MemoryNode {
     /// The session during which this memory was created (auto-populated by the engine).
     #[serde(default)]
     pub session_id: Option<String>,
+    /// When this memory expires. `None` means it never expires.
+    /// Session memories get a default TTL; enrichment memories expire on reindex.
+    #[serde(default)]
+    pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_accessed_at: DateTime<Utc>,
@@ -349,6 +353,7 @@ impl MemoryNode {
             metadata: HashMap::new(),
             namespace: None,
             session_id: None,
+            expires_at: None,
             created_at: now,
             updated_at: now,
             last_accessed_at: now,

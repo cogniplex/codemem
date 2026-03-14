@@ -12,8 +12,8 @@ pub use utils::truncate;
 
 // ── config ──────────────────────────────────────────────────────────────────
 pub use config::{
-    ChunkingConfig, CodememConfig, EmbeddingConfig, EnrichmentConfig, FanOutLimits, ScipConfig,
-    ScipIndexersConfig, StorageConfig,
+    ChunkingConfig, CodememConfig, EmbeddingConfig, EnrichmentConfig, FanOutLimits, MemoryConfig,
+    ScipConfig, ScipIndexersConfig, StorageConfig,
 };
 
 // ── error ───────────────────────────────────────────────────────────────────

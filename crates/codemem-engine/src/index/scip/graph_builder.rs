@@ -261,6 +261,7 @@ pub fn build_graph(
                 metadata: HashMap::new(),
                 namespace: ns.clone(),
                 session_id: None,
+                expires_at: None,
                 created_at: now,
                 updated_at: now,
                 last_accessed_at: now,

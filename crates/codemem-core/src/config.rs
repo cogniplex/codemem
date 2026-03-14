@@ -18,6 +18,7 @@ pub struct CodememConfig {
     pub chunking: ChunkingConfig,
     pub enrichment: EnrichmentConfig,
     pub scip: ScipConfig,
+    pub memory: MemoryConfig,
 }
 
 impl CodememConfig {
@@ -372,6 +373,27 @@ impl Default for EnrichmentConfig {
             perf_min_symbol_count: 30,
             insight_confidence: 0.5,
             dedup_similarity_threshold: 0.90,
+        }
+    }
+}
+
+/// Memory expiration settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MemoryConfig {
+    /// Default TTL in hours for session-scoped memories (memories with a session_id).
+    /// Set to 0 to disable auto-expiry for session memories.
+    pub default_session_ttl_hours: u64,
+    /// Expire `static-analysis` tagged memories when the underlying file is re-indexed
+    /// with a changed content hash.
+    pub expire_enrichments_on_reindex: bool,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            default_session_ttl_hours: 168, // 7 days
+            expire_enrichments_on_reindex: true,
         }
     }
 }

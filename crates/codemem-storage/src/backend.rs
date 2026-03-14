@@ -83,6 +83,8 @@ impl StorageBackend for Storage {
         Storage::delete_memories_batch_cascade(self, ids)
     }
 
+    delegate_storage!(delete_expired_memories(&self) -> Result<usize, CodememError>);
+    delegate_storage!(expire_memories_for_file(&self, file_path: &str) -> Result<usize, CodememError>);
     delegate_storage!(list_memory_ids(&self) -> Result<Vec<String>, CodememError>);
     delegate_storage!(list_memory_ids_for_namespace(&self, namespace: &str) -> Result<Vec<String>, CodememError>);
     delegate_storage!(find_memory_ids_by_tag(&self, tag: &str, namespace: Option<&str>, exclude_id: &str) -> Result<Vec<String>, CodememError>);
@@ -97,7 +99,7 @@ impl StorageBackend for Storage {
 
         let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
-            "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id IN ({})",
+            "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, expires_at, created_at, updated_at, last_accessed_at FROM memories WHERE id IN ({})",
             placeholders.join(",")
         );
 
@@ -295,13 +297,13 @@ impl StorageBackend for Storage {
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction().storage_err()?;
 
-        const COLS: usize = 14;
-        const BATCH: usize = 999 / COLS; // 71
+        const COLS: usize = 15;
+        const BATCH: usize = 999 / COLS; // 66
 
         for chunk in memories.chunks(BATCH) {
             let placeholders = multi_row_placeholders(COLS, chunk.len());
             let sql = format!(
-                "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at) VALUES {placeholders}"
+                "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, expires_at, created_at, updated_at, last_accessed_at) VALUES {placeholders}"
             );
 
             let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
@@ -320,6 +322,7 @@ impl StorageBackend for Storage {
                 param_values.push(Box::new(metadata_json));
                 param_values.push(Box::new(memory.namespace.clone()));
                 param_values.push(Box::new(memory.session_id.clone()));
+                param_values.push(Box::new(memory.expires_at.map(|dt| dt.timestamp())));
                 param_values.push(Box::new(memory.created_at.timestamp()));
                 param_values.push(Box::new(memory.updated_at.timestamp()));
                 param_values.push(Box::new(memory.last_accessed_at.timestamp()));
@@ -659,10 +662,12 @@ impl StorageBackend for Storage {
     ) -> Result<Vec<MemoryNode>, CodememError> {
         let conn = self.conn()?;
         let mut sql = "SELECT id, content, memory_type, importance, confidence, access_count, \
-                        content_hash, tags, metadata, namespace, session_id, created_at, updated_at, \
-                        last_accessed_at FROM memories WHERE 1=1"
+                        content_hash, tags, metadata, namespace, session_id, expires_at, created_at, updated_at, \
+                        last_accessed_at FROM memories WHERE (expires_at IS NULL OR expires_at > ?1)"
             .to_string();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        // ?1 is the expiry timestamp
+        param_values.push(Box::new(chrono::Utc::now().timestamp()));
 
         if let Some(ns) = namespace {
             param_values.push(Box::new(ns.to_string()));
