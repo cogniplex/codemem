@@ -660,9 +660,9 @@ impl ScopeContext {
             })
             .unwrap_or_else(|| "main".to_string());
 
-        // If on a feature branch, set base_ref to main
+        // If on a feature branch, set base_ref to the repo's default branch.
         let base_ref = if git_ref != "main" && git_ref != "master" && git_ref != "HEAD" {
-            Some("main".to_string())
+            Some(detect_default_branch(path))
         } else {
             None
         };
@@ -685,6 +685,50 @@ impl ScopeContext {
     pub fn is_overlay(&self) -> bool {
         self.base_ref.is_some()
     }
+}
+
+/// Detect the default branch for a git repository.
+/// Tries `git symbolic-ref refs/remotes/origin/HEAD` first (most reliable),
+/// then falls back to checking if "main" exists, then "master", then "main".
+fn detect_default_branch(path: &std::path::Path) -> String {
+    // Try symbolic-ref (works when origin/HEAD is set)
+    if let Some(default) = std::process::Command::new("git")
+        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
+        .current_dir(path)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+    {
+        // Output is like "refs/remotes/origin/main" — extract the branch name
+        if let Some(branch) = default.rsplit('/').next() {
+            return branch.to_string();
+        }
+    }
+
+    // Fallback: check if "main" branch exists locally
+    if std::process::Command::new("git")
+        .args(["rev-parse", "--verify", "main"])
+        .current_dir(path)
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        return "main".to_string();
+    }
+
+    // Fallback: check if "master" branch exists locally
+    if std::process::Command::new("git")
+        .args(["rev-parse", "--verify", "master"])
+        .current_dir(path)
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        return "master".to_string();
+    }
+
+    // Last resort
+    "main".to_string()
 }
 
 // ── Sessions ────────────────────────────────────────────────────────────

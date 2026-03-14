@@ -25,8 +25,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     },
                     "auto_link": { "type": "boolean", "default": true, "description": "Auto-link to code nodes mentioned in content (default: true)" },
                     "expires_at": { "type": "string", "description": "ISO 8601 expiration timestamp (e.g. 2026-03-21T00:00:00Z)" },
-                    "ttl_hours": { "type": "integer", "minimum": 1, "description": "Time-to-live in hours (alternative to expires_at)" },
-                    "git_ref": { "type": "string", "description": "Git branch/tag to scope this memory to (default: auto-detected from cwd)" }
+                    "ttl_hours": { "type": "integer", "minimum": 1, "description": "Time-to-live in hours (alternative to expires_at)" }
                 },
                 "required": ["content"]
             }
@@ -46,8 +45,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "min_confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
                     "expand": { "type": "boolean", "default": false, "description": "Enable graph expansion to discover related memories" },
                     "expansion_depth": { "type": "integer", "default": 1, "description": "Max graph hops for expansion (when expand=true)" },
-                    "include_impact": { "type": "boolean", "default": false, "description": "Include PageRank, centrality, connected decisions, dependent files" },
-                    "git_ref": { "type": "string", "description": "Git branch/tag to scope the query to (default: auto-detected from cwd)" }
+                    "include_impact": { "type": "boolean", "default": false, "description": "Include PageRank, centrality, connected decisions, dependent files" }
                 },
                 "required": ["query"]
             }

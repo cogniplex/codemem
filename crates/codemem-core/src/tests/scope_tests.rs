@@ -15,14 +15,13 @@ fn from_local_defaults_to_main_when_no_git() {
     std::fs::create_dir_all(&tmp).unwrap();
     let scope = ScopeContext::from_local(&tmp);
     std::fs::remove_dir_all(&tmp).ok();
-    assert!(
-        scope.git_ref == "main" || scope.git_ref == "master",
-        "Non-git dir should default to main/master, got: {}",
-        scope.git_ref
+    assert_eq!(
+        scope.git_ref, "main",
+        "Non-git dir should default to 'main'"
     );
     assert!(
         scope.base_ref.is_none(),
-        "main/master should have no base_ref"
+        "Default branch should have no base_ref"
     );
 }
 

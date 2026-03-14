@@ -103,20 +103,32 @@ fn read_hook_payload() -> serde_json::Value {
 struct HookContext<'a> {
     session_id: &'a str,
     namespace: Option<&'a str>,
-    /// Scope context derived from cwd (git branch detection).
-    scope: Option<codemem_core::ScopeContext>,
+    /// Raw cwd for lazy scope derivation (avoids git subprocess in every hook).
+    cwd: &'a str,
+}
+
+impl HookContext<'_> {
+    /// Derive ScopeContext from cwd. Only call this when scope is actually needed
+    /// (e.g., `cmd_prompt`), since it spawns a git subprocess for branch detection.
+    fn derive_scope(&self) -> Option<codemem_core::ScopeContext> {
+        if self.cwd.is_empty() {
+            None
+        } else {
+            Some(codemem_core::ScopeContext::from_local(
+                std::path::Path::new(self.cwd),
+            ))
+        }
+    }
 }
 
 /// Extract the common session_id / cwd / namespace fields from a payload.
 /// The returned references borrow from `payload`.
 fn extract_hook_context(payload: &serde_json::Value) -> HookContext<'_> {
     let cwd_raw = payload.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
-    let (namespace, scope) = if cwd_raw.is_empty() {
-        (None, None)
+    let namespace = if cwd_raw.is_empty() {
+        None
     } else {
-        let scope = codemem_core::ScopeContext::from_local(std::path::Path::new(cwd_raw));
-        let ns = namespace_from_cwd(cwd_raw);
-        (Some(ns), Some(scope))
+        Some(namespace_from_cwd(cwd_raw))
     };
     let session_id = payload
         .get("session_id")
@@ -125,7 +137,7 @@ fn extract_hook_context(payload: &serde_json::Value) -> HookContext<'_> {
     HookContext {
         session_id,
         namespace,
-        scope,
+        cwd: cwd_raw,
     }
 }
 
@@ -379,7 +391,7 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
         Some(ctx.session_id)
     };
     let cwd = ctx.namespace;
-    let scope = ctx.scope;
+    let scope = ctx.derive_scope();
 
     // Skip empty or very short prompts
     if prompt.len() < 5 {
