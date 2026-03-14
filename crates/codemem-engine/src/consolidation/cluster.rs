@@ -1,7 +1,7 @@
 use super::union_find::UnionFind;
 use super::ConsolidationResult;
 use crate::CodememEngine;
-use codemem_core::{CodememError, GraphBackend, VectorBackend};
+use codemem_core::CodememError;
 use codemem_storage::vector::cosine_similarity;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -210,7 +210,7 @@ impl CodememEngine {
         // Rebuild vector index if we deleted anything
         if merged_count > 0 {
             let mut vector = self.lock_vector()?;
-            self.rebuild_vector_index_internal(&mut vector);
+            self.rebuild_vector_index_internal(&mut **vector);
             drop(vector);
         }
 

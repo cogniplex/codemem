@@ -2,7 +2,7 @@
 
 use crate::index::symbol::{symbol_from_graph_node, Symbol};
 use crate::CodememEngine;
-use codemem_core::{CodememError, GraphBackend, NodeKind, RelationshipType, VectorBackend};
+use codemem_core::{CodememError, GraphBackend, NodeKind, RelationshipType};
 use serde::Serialize;
 
 /// A code search result returned by semantic vector search over symbols and chunks.
@@ -303,7 +303,7 @@ impl CodememEngine {
             })
         }
 
-        build_tree(&*graph, start_id, 0, max_depth, include_chunks)
+        build_tree(&**graph, start_id, 0, max_depth, include_chunks)
             .ok_or_else(|| CodememError::NotFound(format!("Node not found: {start_id}")))
     }
 

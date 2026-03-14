@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 /// Collect edges whose both endpoints are in `node_ids`, deduplicating by edge ID.
 fn collect_edges_between(
-    graph: &codemem_engine::GraphEngine,
+    graph: &dyn GraphBackend,
     nodes: &[codemem_core::GraphNode],
     node_ids: &std::collections::HashSet<&str>,
 ) -> Vec<GraphEdgeResponse> {
@@ -49,7 +49,7 @@ fn collect_edges_between(
 /// Collect a BFS subgraph (nodes + edges between them) from a start node.
 /// Shared helper for `get_neighbors` and `get_impact`.
 fn collect_subgraph(
-    graph: &codemem_engine::GraphEngine,
+    graph: &dyn GraphBackend,
     start_id: &str,
     depth: usize,
 ) -> Result<SubgraphResponse, codemem_core::CodememError> {
@@ -76,7 +76,7 @@ fn collect_subgraph(
 
 /// Build a top-N subgraph response with optional centrality and kind filters.
 fn build_subgraph_response(
-    graph: &codemem_engine::GraphEngine,
+    graph: &dyn GraphBackend,
     max_nodes: usize,
     namespace: Option<&str>,
     kinds: Option<&[NodeKind]>,

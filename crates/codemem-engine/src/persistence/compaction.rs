@@ -58,8 +58,8 @@ impl CodememEngine {
 
         // Fetch all nodes once and share between both compaction passes.
         let all_nodes = graph.get_all_nodes();
-        let chunks_pruned = self.compact_chunks(seen_files, &mut graph, &all_nodes);
-        let symbols_pruned = self.compact_symbols(seen_files, &mut graph, &all_nodes);
+        let chunks_pruned = self.compact_chunks(seen_files, &mut **graph, &all_nodes);
+        let symbols_pruned = self.compact_symbols(seen_files, &mut **graph, &all_nodes);
 
         if chunks_pruned > 0 || symbols_pruned > 0 {
             // compute_centrality: updates node.centrality with degree centrality.
@@ -80,7 +80,7 @@ impl CodememEngine {
     fn compact_chunks(
         &self,
         seen_files: &HashSet<String>,
-        graph: &mut std::sync::MutexGuard<'_, codemem_storage::graph::GraphEngine>,
+        graph: &mut dyn codemem_core::GraphBackend,
         all_nodes: &[GraphNode],
     ) -> usize {
         let max_chunks_per_file = self.config.chunking.max_retained_chunks_per_file;
@@ -156,7 +156,7 @@ impl CodememEngine {
                 0.0
             };
 
-            let memory_link_score = if has_memories && has_memory_link_edge(&**graph, &node.id) {
+            let memory_link_score = if has_memories && has_memory_link_edge(graph, &node.id) {
                 1.0
             } else {
                 0.0
@@ -232,7 +232,7 @@ impl CodememEngine {
     /// When pruning a chunk, transfer its line range to the parent symbol node.
     fn transfer_chunk_ranges_to_parent(
         &self,
-        graph: &mut std::sync::MutexGuard<'_, codemem_storage::graph::GraphEngine>,
+        graph: &mut dyn codemem_core::GraphBackend,
         chunk_id: &str,
     ) {
         if let Ok(Some(chunk_node)) = graph.get_node(chunk_id) {
@@ -282,7 +282,7 @@ impl CodememEngine {
     fn compact_symbols(
         &self,
         seen_files: &HashSet<String>,
-        graph: &mut std::sync::MutexGuard<'_, codemem_storage::graph::GraphEngine>,
+        graph: &mut dyn codemem_core::GraphBackend,
         all_nodes: &[GraphNode],
     ) -> usize {
         let max_syms_per_file = self.config.chunking.max_retained_symbols_per_file;
@@ -397,7 +397,7 @@ impl CodememEngine {
                 _ => 0.5,
             };
 
-            let mem_linked = has_memories && has_memory_link_edge(&**graph, &node.id);
+            let mem_linked = has_memories && has_memory_link_edge(graph, &node.id);
             let memory_link_val = if mem_linked { 1.0 } else { 0.0 };
 
             let line_start = node
@@ -483,7 +483,7 @@ impl CodememEngine {
     /// When pruning a symbol, transfer its line range to the parent file node.
     fn transfer_symbol_ranges_to_file(
         &self,
-        graph: &mut std::sync::MutexGuard<'_, codemem_storage::graph::GraphEngine>,
+        graph: &mut dyn codemem_core::GraphBackend,
         sym_id: &str,
     ) {
         if let Ok(Some(sym_node)) = graph.get_node(sym_id) {

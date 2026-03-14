@@ -1,9 +1,7 @@
 use crate::scoring;
 use crate::CodememEngine;
 use crate::SplitPart;
-use codemem_core::{
-    CodememError, Edge, GraphBackend, MemoryNode, MemoryType, RelationshipType, VectorBackend,
-};
+use codemem_core::{CodememError, Edge, MemoryNode, MemoryType, RelationshipType};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 

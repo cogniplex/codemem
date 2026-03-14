@@ -1,6 +1,6 @@
 use super::ConsolidationResult;
 use crate::CodememEngine;
-use codemem_core::{CodememError, GraphBackend, VectorBackend};
+use codemem_core::CodememError;
 use serde_json::json;
 
 impl CodememEngine {
@@ -72,7 +72,7 @@ impl CodememEngine {
         // Rebuild vector index if we deleted anything
         if deleted > 0 {
             let mut vector = self.lock_vector()?;
-            self.rebuild_vector_index_internal(&mut vector);
+            self.rebuild_vector_index_internal(&mut **vector);
             drop(vector);
         }
 

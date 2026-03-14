@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::{
-    CodememError, Edge, GraphNode, MemoryNode, NodeKind, RelationshipType, Repository, Session,
-    UnresolvedRefData,
+    CodememError, Edge, GraphNode, MemoryNode, NodeKind, RawGraphMetrics, RelationshipType,
+    Repository, Session, UnresolvedRefData,
 };
 
 // ── Data types for trait return values ───────────────────────────────────────
@@ -53,6 +53,24 @@ pub trait VectorBackend: Send + Sync {
 
     /// Get index statistics.
     fn stats(&self) -> VectorStats;
+
+    /// Whether the index has accumulated enough ghost entries to warrant compaction.
+    fn needs_compaction(&self) -> bool {
+        false
+    }
+
+    /// Number of ghost entries left by removals.
+    fn ghost_count(&self) -> usize {
+        0
+    }
+
+    /// Rebuild the index from scratch given all current entries.
+    fn rebuild_from_entries(
+        &mut self,
+        _entries: &[(String, Vec<f32>)],
+    ) -> Result<(), CodememError> {
+        Ok(())
+    }
 }
 
 /// Statistics about the vector index.
@@ -65,6 +83,23 @@ pub struct VectorStats {
 }
 
 /// Graph backend trait for graph operations.
+///
+/// # Default implementations
+///
+/// Extended methods (centrality, community detection, etc.) have no-op defaults
+/// so that the core CRUD + traversal methods are sufficient for a minimal
+/// implementation. Backend authors should override the algorithmic methods
+/// relevant to their storage engine. The in-memory `GraphEngine` overrides all
+/// of them.
+///
+/// # `_ref` methods
+///
+/// `get_node_ref` and `get_edges_ref` return borrowed references into the
+/// backend's in-memory storage. They exist for zero-copy hot-path performance
+/// in the default `GraphEngine`. Database-backed implementations cannot return
+/// references to internal state and should leave the defaults (which return
+/// `None` / empty). Callers that need database compatibility should use the
+/// owned variants `get_node` / `get_edges` instead.
 pub trait GraphBackend: Send + Sync {
     /// Add a node to the graph.
     fn add_node(&mut self, node: GraphNode) -> Result<(), CodememError>;
@@ -115,6 +150,111 @@ pub trait GraphBackend: Send + Sync {
 
     /// Get graph statistics.
     fn stats(&self) -> GraphStats;
+
+    // ── Extended methods (with defaults for backwards compatibility) ──
+
+    /// Get all nodes in the graph.
+    fn get_all_nodes(&self) -> Vec<GraphNode> {
+        Vec::new()
+    }
+
+    /// Zero-copy node lookup. Returns a reference into the backend's internal storage.
+    /// Only meaningful for in-memory backends. Database backends should leave the
+    /// default (returns `None`) and callers should use `get_node()` instead.
+    fn get_node_ref(&self, _id: &str) -> Option<&GraphNode> {
+        None
+    }
+
+    /// Zero-copy edge lookup. Returns references into the backend's internal storage.
+    /// Only meaningful for in-memory backends. Database backends should leave the
+    /// default (returns empty) and callers should use `get_edges()` instead.
+    fn get_edges_ref(&self, _node_id: &str) -> Vec<&Edge> {
+        Vec::new()
+    }
+
+    /// Number of nodes in the graph.
+    fn node_count(&self) -> usize {
+        self.stats().node_count
+    }
+
+    /// Number of edges in the graph.
+    fn edge_count(&self) -> usize {
+        self.stats().edge_count
+    }
+
+    /// Recompute all centrality metrics (PageRank + betweenness).
+    fn recompute_centrality(&mut self) {}
+
+    /// Recompute centrality, optionally including expensive betweenness calculation.
+    fn recompute_centrality_with_options(&mut self, _include_betweenness: bool) {}
+
+    /// Lazily compute betweenness centrality if not yet computed.
+    fn ensure_betweenness_computed(&mut self) {}
+
+    /// Compute degree centrality (updates nodes in place).
+    fn compute_centrality(&mut self) {}
+
+    /// Get cached PageRank score for a node.
+    fn get_pagerank(&self, _node_id: &str) -> f64 {
+        0.0
+    }
+
+    /// Get cached betweenness centrality score for a node.
+    fn get_betweenness(&self, _node_id: &str) -> f64 {
+        0.0
+    }
+
+    /// Collect graph metrics for a memory node (used in hybrid scoring).
+    fn raw_graph_metrics_for_memory(&self, _memory_id: &str) -> Option<RawGraphMetrics> {
+        None
+    }
+
+    /// Find connected components (treating graph as undirected).
+    fn connected_components(&self) -> Vec<Vec<String>> {
+        Vec::new()
+    }
+
+    /// Compute PageRank scores for all nodes.
+    /// Returns a map from node ID to PageRank score.
+    fn pagerank(&self, _damping: f64, _iterations: usize, _tolerance: f64) -> HashMap<String, f64> {
+        HashMap::new()
+    }
+
+    /// Run Louvain community detection at the given resolution.
+    /// Returns groups of node IDs, one group per community.
+    fn louvain_communities(&self, _resolution: f64) -> Vec<Vec<String>> {
+        Vec::new()
+    }
+
+    /// Compute topological layers of the graph.
+    /// Returns layers where all nodes in layer i have no dependencies on nodes
+    /// in layer i or later.
+    fn topological_layers(&self) -> Vec<Vec<String>> {
+        Vec::new()
+    }
+
+    /// Return node-to-community-ID mapping for Louvain.
+    fn louvain_with_assignment(&self, resolution: f64) -> HashMap<String, usize> {
+        let communities = self.louvain_communities(resolution);
+        let mut assignment = HashMap::new();
+        for (idx, community) in communities.into_iter().enumerate() {
+            for node_id in community {
+                assignment.insert(node_id, idx);
+            }
+        }
+        assignment
+    }
+
+    /// Return a top-N subgraph: the highest-centrality nodes plus all edges between them.
+    /// Non-structural edges from top-N nodes pull their targets into the result.
+    fn subgraph_top_n(
+        &self,
+        _n: usize,
+        _namespace: Option<&str>,
+        _kinds: Option<&[NodeKind]>,
+    ) -> (Vec<GraphNode>, Vec<Edge>) {
+        (Vec::new(), Vec::new())
+    }
 }
 
 /// Statistics about the graph.

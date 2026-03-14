@@ -2,7 +2,7 @@
 
 use super::EnrichResult;
 use crate::CodememEngine;
-use codemem_core::{CodememError, Edge, GraphBackend, RelationshipType};
+use codemem_core::{CodememError, Edge, RelationshipType};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 

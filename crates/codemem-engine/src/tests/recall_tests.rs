@@ -1,5 +1,5 @@
 use crate::CodememEngine;
-use codemem_core::{Edge, GraphBackend, MemoryNode, MemoryType, RelationshipType};
+use codemem_core::{Edge, MemoryNode, MemoryType, RelationshipType};
 use std::collections::HashMap;
 
 fn make_memory(id: &str, content: &str) -> MemoryNode {
@@ -430,7 +430,7 @@ fn resolve_entity_memories_skips_expired_edges() {
 
     // Directly test resolve_entity_memories — expired edge should be skipped
     let graph = engine.lock_graph().unwrap();
-    let entity_ids = engine.resolve_entity_memories("ExpiredService", &graph, now);
+    let entity_ids = engine.resolve_entity_memories("ExpiredService", &**graph, now);
     assert!(
         !entity_ids.contains("entity-exp1"),
         "resolve_entity_memories should not return memories connected via expired edges"

@@ -1,7 +1,5 @@
 //! Export, import, and index commands.
 
-use codemem_core::VectorBackend;
-
 pub(crate) fn cmd_export(
     namespace: Option<&str>,
     memory_type: Option<&str>,

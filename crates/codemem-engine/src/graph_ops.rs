@@ -4,7 +4,7 @@
 //! transport layers don't interact with the graph mutex directly.
 
 use crate::CodememEngine;
-use codemem_core::{CodememError, Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
+use codemem_core::{CodememError, Edge, GraphNode, NodeKind, RelationshipType};
 use std::collections::HashMap;
 
 // ── Result Types ─────────────────────────────────────────────────────────────

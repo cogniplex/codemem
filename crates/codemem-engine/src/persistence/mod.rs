@@ -6,10 +6,7 @@ pub mod cross_repo;
 
 use crate::index::{CodeChunk, ResolvedEdge, Symbol};
 use crate::IndexAndResolveResult;
-use codemem_core::{
-    CodememError, Edge, GraphBackend, GraphConfig, GraphNode, NodeKind, RelationshipType,
-    VectorBackend,
-};
+use codemem_core::{CodememError, Edge, GraphConfig, GraphNode, NodeKind, RelationshipType};
 use std::collections::{HashMap, HashSet};
 
 /// Counts of what was persisted by `persist_index_results`.
@@ -190,13 +187,13 @@ impl super::CodememEngine {
                 }
             })
             .collect();
-        self.persist_nodes_to_storage_and_graph(&file_nodes, &mut graph);
+        self.persist_nodes_to_storage_and_graph(&file_nodes, &mut **graph);
 
         // ── Package (directory) nodes
         let (dir_nodes, dir_edges, created_dirs) =
-            self.build_package_tree(seen_files, &ns_string, contains_weight, now, &graph);
-        self.persist_nodes_to_storage_and_graph(&dir_nodes, &mut graph);
-        self.persist_edges_to_storage_and_graph(&dir_edges, &mut graph);
+            self.build_package_tree(seen_files, &ns_string, contains_weight, now, &**graph);
+        self.persist_nodes_to_storage_and_graph(&dir_nodes, &mut **graph);
+        self.persist_edges_to_storage_and_graph(&dir_edges, &mut **graph);
 
         // ── Symbol nodes + file→symbol edges
         let (sym_nodes, sym_edges) =
@@ -252,12 +249,12 @@ impl super::CodememEngine {
         }
         let mut graph = self.lock_graph()?; // Re-acquire lock
 
-        self.persist_nodes_to_storage_and_graph(&sym_nodes, &mut graph);
-        self.persist_edges_to_storage_and_graph(&sym_edges, &mut graph);
+        self.persist_nodes_to_storage_and_graph(&sym_nodes, &mut **graph);
+        self.persist_edges_to_storage_and_graph(&sym_edges, &mut **graph);
 
         // ── Resolved reference edges
         let ref_edges = Self::build_reference_edges(edges, &self.config.graph, now);
-        self.persist_edges_to_storage_and_graph(&ref_edges, &mut graph);
+        self.persist_edges_to_storage_and_graph(&ref_edges, &mut **graph);
 
         // ── SCIP nodes + edges (compiler-grade)
         if let Some(ref scip_build) = results.scip_build {
@@ -301,7 +298,7 @@ impl super::CodememEngine {
                 );
             }
 
-            self.persist_nodes_to_storage_and_graph(&scip_build.nodes, &mut graph);
+            self.persist_nodes_to_storage_and_graph(&scip_build.nodes, &mut **graph);
 
             // Multi-layer fusion: merge confidence when ast-grep and SCIP agree.
             // Superseded ast-grep edges are removed to avoid duplicates.
@@ -313,7 +310,7 @@ impl super::CodememEngine {
                 let _ = self.storage.delete_graph_edge(edge_id);
             }
 
-            self.persist_edges_to_storage_and_graph(&fused_edges, &mut graph);
+            self.persist_edges_to_storage_and_graph(&fused_edges, &mut **graph);
 
             // Persist hover doc memories and their RELATES_TO edges.
             for (memory, related_node_id) in &scip_build.memories {
@@ -342,8 +339,8 @@ impl super::CodememEngine {
         let (chunk_nodes, chunk_edges) =
             Self::build_chunk_nodes(all_chunks, &ns_string, contains_weight, now);
         let chunk_count = chunk_nodes.len();
-        self.persist_nodes_to_storage_and_graph(&chunk_nodes, &mut graph);
-        self.persist_edges_to_storage_and_graph(&chunk_edges, &mut graph);
+        self.persist_nodes_to_storage_and_graph(&chunk_nodes, &mut **graph);
+        self.persist_edges_to_storage_and_graph(&chunk_edges, &mut **graph);
 
         drop(graph);
 
@@ -357,7 +354,7 @@ impl super::CodememEngine {
     fn persist_nodes_to_storage_and_graph(
         &self,
         nodes: &[GraphNode],
-        graph: &mut crate::GraphEngine,
+        graph: &mut dyn codemem_core::GraphBackend,
     ) {
         if let Err(e) = self.storage.insert_graph_nodes_batch(nodes) {
             tracing::warn!("Failed to batch-insert {} graph nodes: {e}", nodes.len());
@@ -368,7 +365,11 @@ impl super::CodememEngine {
     }
 
     /// Batch-insert edges into both SQLite and the in-memory graph.
-    fn persist_edges_to_storage_and_graph(&self, edges: &[Edge], graph: &mut crate::GraphEngine) {
+    fn persist_edges_to_storage_and_graph(
+        &self,
+        edges: &[Edge],
+        graph: &mut dyn codemem_core::GraphBackend,
+    ) {
         if let Err(e) = self.storage.insert_graph_edges_batch(edges) {
             tracing::warn!("Failed to batch-insert {} graph edges: {e}", edges.len());
         }
@@ -385,7 +386,7 @@ impl super::CodememEngine {
         ns_string: &Option<String>,
         contains_weight: f64,
         now: chrono::DateTime<chrono::Utc>,
-        graph: &crate::GraphEngine,
+        graph: &dyn codemem_core::GraphBackend,
     ) -> (Vec<GraphNode>, Vec<Edge>, usize) {
         let mut created_dirs: HashSet<String> = HashSet::new();
         let mut dir_nodes = Vec::new();

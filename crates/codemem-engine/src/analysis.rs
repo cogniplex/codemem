@@ -5,8 +5,8 @@
 
 use crate::CodememEngine;
 use codemem_core::{
-    CodememError, DetectedPattern, GraphBackend, MemoryNode, MemoryType, NodeCoverageEntry,
-    NodeKind, RelationshipType, SearchResult,
+    CodememError, DetectedPattern, MemoryNode, MemoryType, NodeCoverageEntry, NodeKind,
+    RelationshipType, SearchResult,
 };
 use serde_json::json;
 use std::collections::{HashMap, HashSet};

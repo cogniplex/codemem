@@ -1,6 +1,6 @@
 use super::ConsolidationResult;
 use crate::CodememEngine;
-use codemem_core::{CodememError, Edge, GraphBackend, MemoryNode, MemoryType, RelationshipType};
+use codemem_core::{CodememError, Edge, MemoryNode, MemoryType, RelationshipType};
 use serde_json::json;
 use std::collections::HashMap;
 

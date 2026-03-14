@@ -412,6 +412,86 @@ impl GraphBackend for GraphEngine {
             relationship_type_counts,
         }
     }
+
+    fn get_all_nodes(&self) -> Vec<GraphNode> {
+        GraphEngine::get_all_nodes(self)
+    }
+
+    fn get_node_ref(&self, id: &str) -> Option<&GraphNode> {
+        GraphEngine::get_node_ref(self, id)
+    }
+
+    fn get_edges_ref(&self, node_id: &str) -> Vec<&Edge> {
+        GraphEngine::get_edges_ref(self, node_id)
+    }
+
+    fn node_count(&self) -> usize {
+        GraphEngine::node_count(self)
+    }
+
+    fn edge_count(&self) -> usize {
+        GraphEngine::edge_count(self)
+    }
+
+    fn recompute_centrality(&mut self) {
+        GraphEngine::recompute_centrality(self);
+    }
+
+    fn recompute_centrality_with_options(&mut self, include_betweenness: bool) {
+        GraphEngine::recompute_centrality_with_options(self, include_betweenness);
+    }
+
+    fn ensure_betweenness_computed(&mut self) {
+        GraphEngine::ensure_betweenness_computed(self);
+    }
+
+    fn compute_centrality(&mut self) {
+        GraphEngine::compute_centrality(self);
+    }
+
+    fn get_pagerank(&self, node_id: &str) -> f64 {
+        GraphEngine::get_pagerank(self, node_id)
+    }
+
+    fn get_betweenness(&self, node_id: &str) -> f64 {
+        GraphEngine::get_betweenness(self, node_id)
+    }
+
+    fn raw_graph_metrics_for_memory(
+        &self,
+        memory_id: &str,
+    ) -> Option<codemem_core::RawGraphMetrics> {
+        GraphEngine::raw_graph_metrics_for_memory(self, memory_id)
+    }
+
+    fn connected_components(&self) -> Vec<Vec<String>> {
+        GraphEngine::connected_components(self)
+    }
+
+    fn pagerank(&self, damping: f64, iterations: usize, tolerance: f64) -> HashMap<String, f64> {
+        GraphEngine::pagerank(self, damping, iterations, tolerance)
+    }
+
+    fn louvain_communities(&self, resolution: f64) -> Vec<Vec<String>> {
+        GraphEngine::louvain_communities(self, resolution)
+    }
+
+    fn topological_layers(&self) -> Vec<Vec<String>> {
+        GraphEngine::topological_layers(self)
+    }
+
+    fn louvain_with_assignment(&self, resolution: f64) -> HashMap<String, usize> {
+        GraphEngine::louvain_with_assignment(self, resolution)
+    }
+
+    fn subgraph_top_n(
+        &self,
+        n: usize,
+        namespace: Option<&str>,
+        kinds: Option<&[codemem_core::NodeKind]>,
+    ) -> (Vec<GraphNode>, Vec<Edge>) {
+        GraphEngine::subgraph_top_n(self, n, namespace, kinds)
+    }
 }
 
 #[cfg(test)]

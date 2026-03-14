@@ -54,8 +54,8 @@ impl McpServer {
     /// Create a server with storage, vector, graph, and optional embeddings backends.
     pub fn new(
         storage: Box<dyn StorageBackend>,
-        vector: codemem_engine::HnswIndex,
-        graph: codemem_engine::GraphEngine,
+        vector: Box<dyn codemem_core::VectorBackend>,
+        graph: Box<dyn codemem_core::GraphBackend>,
         embeddings: Option<Box<dyn codemem_engine::EmbeddingProvider>>,
     ) -> Self {
         Self {

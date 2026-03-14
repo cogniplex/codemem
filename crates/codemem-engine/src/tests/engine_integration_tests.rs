@@ -1,5 +1,5 @@
 use crate::CodememEngine;
-use codemem_core::{Edge, GraphBackend, GraphNode, MemoryNode, NodeKind, RelationshipType};
+use codemem_core::{Edge, GraphNode, MemoryNode, NodeKind, RelationshipType};
 use std::collections::HashMap;
 
 fn make_memory(id: &str, content: &str) -> MemoryNode {

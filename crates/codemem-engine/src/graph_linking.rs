@@ -1,7 +1,5 @@
 use crate::CodememEngine;
-use codemem_core::{
-    CodememError, Edge, GraphBackend, MemoryNode, NodeKind, NodeMemoryResult, RelationshipType,
-};
+use codemem_core::{CodememError, Edge, MemoryNode, NodeKind, NodeMemoryResult, RelationshipType};
 use std::collections::HashSet;
 
 #[cfg(test)]

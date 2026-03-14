@@ -11,7 +11,8 @@
 //! - **metrics** — Operational metrics collection
 
 use codemem_core::{
-    CodememConfig, CodememError, ScoringWeights, StorageBackend, VectorBackend, VectorConfig,
+    CodememConfig, CodememError, GraphBackend, ScoringWeights, StorageBackend, VectorBackend,
+    VectorConfig,
 };
 pub use codemem_storage::graph::GraphEngine;
 pub use codemem_storage::HnswIndex;
@@ -129,18 +130,16 @@ pub struct IndexCache {
 /// Transport layers (MCP, REST API, CLI) hold a `CodememEngine` and delegate
 /// domain operations to it, keeping transport concerns separate.
 ///
-/// **Concrete types are intentional**: `CodememEngine` uses concrete backend types
-/// (`Storage`, `HnswIndex`, `GraphEngine`) rather than trait objects (`dyn StorageBackend`,
-/// `dyn VectorBackend`, `dyn GraphBackend`) for performance. This enables monomorphization
-/// (the compiler generates specialized code for each concrete type), eliminates vtable
-/// indirection overhead on every call, and provides predictable memory layout for
-/// cache-friendly access patterns. The trait abstractions exist for testing and
-/// alternative implementations, but the engine itself benefits from static dispatch.
+/// **Trait-object backends**: `CodememEngine` uses `Box<dyn Trait>` for all three
+/// backends (storage, vector, graph). This enables pluggable backends (Postgres,
+/// Qdrant, Neo4j) at the cost of vtable indirection. The default build uses
+/// SQLite + usearch HNSW + petgraph, and the vtable overhead is negligible
+/// compared to I/O latency.
 pub struct CodememEngine {
     pub(crate) storage: Box<dyn StorageBackend>,
-    /// Lazily initialized HNSW vector index. Loaded on first `lock_vector()` call.
-    pub(crate) vector: OnceLock<Mutex<HnswIndex>>,
-    pub(crate) graph: Mutex<GraphEngine>,
+    /// Lazily initialized vector index. Loaded on first `lock_vector()` call.
+    pub(crate) vector: OnceLock<Mutex<Box<dyn VectorBackend>>>,
+    pub(crate) graph: Mutex<Box<dyn GraphBackend>>,
     /// Lazily initialized embedding provider. Loaded on first `lock_embeddings()` call.
     pub(crate) embeddings: OnceLock<Option<Mutex<Box<dyn codemem_embeddings::EmbeddingProvider>>>>,
     /// Path to the database file, used to derive the index save path.
@@ -172,8 +171,8 @@ impl CodememEngine {
     /// Create an engine with storage, vector, graph, and optional embeddings backends.
     pub fn new(
         storage: Box<dyn StorageBackend>,
-        vector: HnswIndex,
-        graph: GraphEngine,
+        vector: Box<dyn VectorBackend>,
+        graph: Box<dyn GraphBackend>,
         embeddings: Option<Box<dyn codemem_embeddings::EmbeddingProvider>>,
     ) -> Self {
         let config = CodememConfig::load_or_default();
@@ -183,8 +182,8 @@ impl CodememEngine {
     /// Create an engine with an explicit config (avoids double-loading from disk).
     pub fn new_with_config(
         storage: Box<dyn StorageBackend>,
-        vector: HnswIndex,
-        graph: GraphEngine,
+        vector: Box<dyn VectorBackend>,
+        graph: Box<dyn GraphBackend>,
         embeddings: Option<Box<dyn codemem_embeddings::EmbeddingProvider>>,
         config: CodememConfig,
     ) -> Self {
@@ -247,7 +246,7 @@ impl CodememEngine {
         let engine = Self {
             storage: Box::new(storage),
             vector: OnceLock::new(),
-            graph: Mutex::new(graph),
+            graph: Mutex::new(Box::new(graph)),
             embeddings: OnceLock::new(),
             db_path: Some(db_path.to_path_buf()),
             index_cache: Mutex::new(None),
@@ -276,7 +275,9 @@ impl CodememEngine {
         let graph = GraphEngine::new();
         let config = CodememConfig::default();
         let vector_lock = OnceLock::new();
-        let _ = vector_lock.set(Mutex::new(HnswIndex::with_defaults().unwrap()));
+        let _ = vector_lock.set(Mutex::new(
+            Box::new(HnswIndex::with_defaults().unwrap()) as Box<dyn VectorBackend>
+        ));
         let embeddings_lock = OnceLock::new();
         let _ = embeddings_lock.set(None);
         let bm25_lock = OnceLock::new();
@@ -284,7 +285,7 @@ impl CodememEngine {
         Self {
             storage: Box::new(storage),
             vector: vector_lock,
-            graph: Mutex::new(graph),
+            graph: Mutex::new(Box::new(graph)),
             embeddings: embeddings_lock,
             db_path: None,
             index_cache: Mutex::new(None),
@@ -301,14 +302,18 @@ impl CodememEngine {
 
     // ── Lock Helpers ─────────────────────────────────────────────────────────
 
-    pub fn lock_vector(&self) -> Result<std::sync::MutexGuard<'_, HnswIndex>, CodememError> {
+    pub fn lock_vector(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Box<dyn VectorBackend>>, CodememError> {
         self.vector
             .get_or_init(|| self.init_vector())
             .lock()
             .map_err(|e| CodememError::LockPoisoned(format!("vector: {e}")))
     }
 
-    pub fn lock_graph(&self) -> Result<std::sync::MutexGuard<'_, GraphEngine>, CodememError> {
+    pub fn lock_graph(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Box<dyn GraphBackend>>, CodememError> {
         self.graph
             .lock()
             .map_err(|e| CodememError::LockPoisoned(format!("graph: {e}")))
@@ -380,7 +385,7 @@ impl CodememEngine {
     // ── Lazy Initialization ────────────────────────────────────────────
 
     /// Initialize the HNSW vector index: load from disk, run consistency check.
-    fn init_vector(&self) -> Mutex<HnswIndex> {
+    fn init_vector(&self) -> Mutex<Box<dyn VectorBackend>> {
         let vector_config = VectorConfig {
             dimensions: self.config.vector.dimensions,
             ..VectorConfig::default()
@@ -421,7 +426,7 @@ impl CodememEngine {
             }
         }
 
-        Mutex::new(vector)
+        Mutex::new(Box::new(vector))
     }
 
     /// Initialize the BM25 index: load from disk or rebuild from memories.
@@ -587,20 +592,20 @@ impl CodememEngine {
     /// Provides safe read-only access without exposing raw mutexes.
     pub fn with_graph<F, R>(&self, f: F) -> Result<R, CodememError>
     where
-        F: FnOnce(&GraphEngine) -> R,
+        F: FnOnce(&dyn GraphBackend) -> R,
     {
         let guard = self.lock_graph()?;
-        Ok(f(&guard))
+        Ok(f(&**guard))
     }
 
     /// Execute a closure with a locked reference to the vector index.
     /// Provides safe read-only access without exposing raw mutexes.
     pub fn with_vector<F, R>(&self, f: F) -> Result<R, CodememError>
     where
-        F: FnOnce(&HnswIndex) -> R,
+        F: FnOnce(&dyn VectorBackend) -> R,
     {
         let guard = self.lock_vector()?;
-        Ok(f(&guard))
+        Ok(f(&**guard))
     }
 
     /// Check if the engine has unsaved changes (dirty flag is set).

@@ -1,7 +1,5 @@
 //! Search & stats commands.
 
-use codemem_core::VectorBackend;
-
 pub(crate) fn cmd_search(query: &str, k: usize, namespace: Option<&str>) -> anyhow::Result<()> {
     let db_path = super::codemem_db_path();
     let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
