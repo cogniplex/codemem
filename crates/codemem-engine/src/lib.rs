@@ -12,7 +12,6 @@
 
 use codemem_core::{
     CodememConfig, CodememError, GraphBackend, ScoringWeights, StorageBackend, VectorBackend,
-    VectorConfig,
 };
 pub use codemem_storage::graph::GraphEngine;
 pub use codemem_storage::HnswIndex;
@@ -235,19 +234,19 @@ impl CodememEngine {
 
         // Validate backend config — only built-in backends are supported without
         // feature-flagged crates (codemem-postgres, codemem-qdrant, codemem-neo4j).
-        if config.storage.backend != "sqlite" {
+        if !config.storage.backend.eq_ignore_ascii_case("sqlite") {
             return Err(CodememError::Config(format!(
                 "Unsupported storage backend '{}'. Only 'sqlite' is available in this build.",
                 config.storage.backend
             )));
         }
-        if config.vector.backend != "hnsw" {
+        if !config.vector.backend.eq_ignore_ascii_case("hnsw") {
             return Err(CodememError::Config(format!(
                 "Unsupported vector backend '{}'. Only 'hnsw' is available in this build.",
                 config.vector.backend
             )));
         }
-        if config.graph.backend != "petgraph" {
+        if !config.graph.backend.eq_ignore_ascii_case("petgraph") {
             return Err(CodememError::Config(format!(
                 "Unsupported graph backend '{}'. Only 'petgraph' is available in this build.",
                 config.graph.backend
@@ -407,10 +406,7 @@ impl CodememEngine {
 
     /// Initialize the HNSW vector index: load from disk, run consistency check.
     fn init_vector(&self) -> Mutex<Box<dyn VectorBackend>> {
-        let vector_config = VectorConfig {
-            dimensions: self.config.vector.dimensions,
-            ..VectorConfig::default()
-        };
+        let vector_config = self.config.vector.clone();
         let mut vector = HnswIndex::new(vector_config.clone())
             .unwrap_or_else(|_| HnswIndex::with_defaults().expect("default vector index"));
 
