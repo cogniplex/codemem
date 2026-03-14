@@ -53,6 +53,20 @@ impl CodememEngine {
         } else {
             memory
         };
+
+        // Auto-populate repo/git_ref from engine scope if not already set
+        let memory = if memory.repo.is_none() {
+            if let Some(scope) = self.scope() {
+                let mut m = memory.into_owned();
+                m.repo = Some(scope.repo.clone());
+                m.git_ref = Some(scope.git_ref.clone());
+                std::borrow::Cow::Owned(m)
+            } else {
+                memory
+            }
+        } else {
+            memory
+        };
         let memory = memory.as_ref();
 
         // H3: Step 1 — Embed if the provider is already loaded (don't trigger lazy init).

@@ -29,8 +29,8 @@ fn insert_memory_inner(
     let metadata_json = serde_json::to_string(&memory.metadata)?;
 
     conn.execute(
-        "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, expires_at, created_at, updated_at, last_accessed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, repo, git_ref, expires_at, created_at, updated_at, last_accessed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             memory.id,
             memory.content,
@@ -43,6 +43,8 @@ fn insert_memory_inner(
             metadata_json,
             memory.namespace,
             memory.session_id,
+            memory.repo,
+            memory.git_ref,
             memory.expires_at.map(|dt| dt.timestamp()),
             memory.created_at.timestamp(),
             memory.updated_at.timestamp(),
@@ -117,7 +119,7 @@ impl Storage {
 
         let result = conn
             .query_row(
-                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, expires_at, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
+                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, repo, git_ref, expires_at, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
                 MemoryRow::from_row,
             )
@@ -137,7 +139,7 @@ impl Storage {
 
         let result = conn
             .query_row(
-                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, expires_at, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
+                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, repo, git_ref, expires_at, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
                 MemoryRow::from_row,
             )

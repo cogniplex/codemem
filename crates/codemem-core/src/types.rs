@@ -319,6 +319,12 @@ pub struct MemoryNode {
     /// The session during which this memory was created (auto-populated by the engine).
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Repository identifier (auto-populated from scope context).
+    #[serde(default)]
+    pub repo: Option<String>,
+    /// Git ref (branch/tag) this memory belongs to (auto-populated from scope context).
+    #[serde(default)]
+    pub git_ref: Option<String>,
     /// When this memory expires. `None` means it never expires.
     /// Session memories get a default TTL; enrichment memories expire on reindex.
     #[serde(default)]
@@ -353,6 +359,8 @@ impl MemoryNode {
             metadata: HashMap::new(),
             namespace: None,
             session_id: None,
+            repo: None,
+            git_ref: None,
             expires_at: None,
             created_at: now,
             updated_at: now,
