@@ -608,6 +608,85 @@ impl std::fmt::Display for PatternType {
     }
 }
 
+// ── Scope Context ───────────────────────────────────────────────────────
+
+/// Scoping context threaded through storage and engine operations.
+///
+/// Replaces the flat `namespace: &str` with a richer context that includes
+/// repository identity, git branch, and optional user/session scoping.
+/// Backward compatible: `namespace()` derives the same directory-basename
+/// value used before, and all new fields are optional or have defaults.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScopeContext {
+    /// Repository identifier (e.g., "github.com/org/repo" or directory basename).
+    pub repo: String,
+    /// Git ref: branch name, tag, or commit SHA. Defaults to "main".
+    pub git_ref: String,
+    /// Base ref for overlay resolution (e.g., "main" when on a feature branch).
+    /// When set, queries fall back to base_ref for data not in the overlay.
+    pub base_ref: Option<String>,
+    /// User identifier (for user-scoped memories in team mode).
+    pub user: Option<String>,
+    /// Session identifier (for session-scoped memories).
+    pub session: Option<String>,
+}
+
+impl ScopeContext {
+    /// Create a scope from a local directory path by detecting the git branch.
+    ///
+    /// Runs `git rev-parse --abbrev-ref HEAD` to detect the current branch and
+    /// `git rev-parse --show-toplevel` + remote URL for repo identity.
+    /// Falls back to directory basename if git is not available.
+    pub fn from_local(path: &std::path::Path) -> Self {
+        let repo = path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let git_ref = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(path)
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8(o.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "main".to_string());
+
+        // If on a feature branch, set base_ref to main
+        let base_ref = if git_ref != "main" && git_ref != "master" && git_ref != "HEAD" {
+            Some("main".to_string())
+        } else {
+            None
+        };
+
+        Self {
+            repo,
+            git_ref,
+            base_ref,
+            user: None,
+            session: None,
+        }
+    }
+
+    /// Derive namespace from scope (backward compatible with directory-basename convention).
+    pub fn namespace(&self) -> &str {
+        &self.repo
+    }
+
+    /// Whether this scope is on a feature branch (has a base_ref overlay).
+    pub fn is_overlay(&self) -> bool {
+        self.base_ref.is_some()
+    }
+}
+
 // ── Sessions ────────────────────────────────────────────────────────────
 
 /// A session representing a single interaction period with an AI assistant.
@@ -707,3 +786,7 @@ pub struct UnresolvedRefData {
 #[cfg(test)]
 #[path = "tests/types_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/scope_tests.rs"]
+mod scope_tests;

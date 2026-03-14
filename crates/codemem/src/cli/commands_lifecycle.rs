@@ -103,16 +103,20 @@ fn read_hook_payload() -> serde_json::Value {
 struct HookContext<'a> {
     session_id: &'a str,
     namespace: Option<&'a str>,
+    /// Scope context derived from cwd (git branch detection).
+    scope: Option<codemem_core::ScopeContext>,
 }
 
 /// Extract the common session_id / cwd / namespace fields from a payload.
 /// The returned references borrow from `payload`.
 fn extract_hook_context(payload: &serde_json::Value) -> HookContext<'_> {
     let cwd_raw = payload.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
-    let namespace = if cwd_raw.is_empty() {
-        None
+    let (namespace, scope) = if cwd_raw.is_empty() {
+        (None, None)
     } else {
-        Some(namespace_from_cwd(cwd_raw))
+        let scope = codemem_core::ScopeContext::from_local(std::path::Path::new(cwd_raw));
+        let ns = namespace_from_cwd(cwd_raw);
+        (Some(ns), Some(scope))
     };
     let session_id = payload
         .get("session_id")
@@ -121,6 +125,7 @@ fn extract_hook_context(payload: &serde_json::Value) -> HookContext<'_> {
     HookContext {
         session_id,
         namespace,
+        scope,
     }
 }
 
@@ -374,6 +379,7 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
         Some(ctx.session_id)
     };
     let cwd = ctx.namespace;
+    let scope = ctx.scope;
 
     // Skip empty or very short prompts
     if prompt.len() < 5 {
@@ -436,6 +442,7 @@ pub(crate) fn cmd_prompt() -> anyhow::Result<()> {
     match codemem_engine::CodememEngine::from_db_path(&db_path) {
         Ok(engine) => {
             engine.set_active_session(session_id.map(|s| s.to_string()));
+            engine.set_scope(scope);
             if let Err(e) = engine.persist_memory(&memory) {
                 tracing::warn!("Failed to persist prompt memory: {e}");
             }

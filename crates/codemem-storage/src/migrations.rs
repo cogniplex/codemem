@@ -69,6 +69,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Memory expiration",
         sql: include_str!("migrations/012_memory_expiration.sql"),
     },
+    Migration {
+        version: 13,
+        description: "Scope context (repo + git_ref)",
+        sql: include_str!("migrations/013_scope_context.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.
