@@ -29,8 +29,8 @@ fn insert_memory_inner(
     let metadata_json = serde_json::to_string(&memory.metadata)?;
 
     conn.execute(
-        "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        "INSERT OR IGNORE INTO memories (id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, expires_at, created_at, updated_at, last_accessed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             memory.id,
             memory.content,
@@ -43,6 +43,7 @@ fn insert_memory_inner(
             metadata_json,
             memory.namespace,
             memory.session_id,
+            memory.expires_at.map(|dt| dt.timestamp()),
             memory.created_at.timestamp(),
             memory.updated_at.timestamp(),
             memory.last_accessed_at.timestamp(),
@@ -94,6 +95,11 @@ impl Storage {
     }
 
     /// Get a memory by ID. Updates access_count and last_accessed_at.
+    ///
+    /// Note: returns expired memories intentionally — direct ID lookups should
+    /// always succeed for debugging and internal use. Expiry filtering happens
+    /// in `list_memories_filtered` (bulk queries) and the opportunistic sweep
+    /// in `delete_expired_memories` handles actual cleanup.
     pub fn get_memory(&self, id: &str) -> Result<Option<MemoryNode>, CodememError> {
         let conn = self.conn()?;
 
@@ -111,7 +117,7 @@ impl Storage {
 
         let result = conn
             .query_row(
-                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
+                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, expires_at, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
                 MemoryRow::from_row,
             )
@@ -131,7 +137,7 @@ impl Storage {
 
         let result = conn
             .query_row(
-                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
+                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, expires_at, created_at, updated_at, last_accessed_at FROM memories WHERE id = ?1",
                 params![id],
                 MemoryRow::from_row,
             )
@@ -493,6 +499,85 @@ impl Storage {
             .storage_err()?;
         }
         Ok(())
+    }
+
+    /// Delete all expired memories (where `expires_at <= now`).
+    /// Returns the number of memories deleted.
+    pub fn delete_expired_memories(&self) -> Result<usize, CodememError> {
+        let conn = self.conn()?;
+        let now = chrono::Utc::now().timestamp();
+
+        // Collect IDs of expired memories first, then delete embeddings for exactly
+        // those IDs (avoids O(all-embeddings) NOT IN subquery).
+        let mut stmt = conn
+            .prepare("SELECT id FROM memories WHERE expires_at IS NOT NULL AND expires_at <= ?1")
+            .storage_err()?;
+        let expired_ids: Vec<String> = stmt
+            .query_map(params![now], |row| row.get(0))
+            .storage_err()?
+            .collect::<Result<Vec<String>, _>>()
+            .storage_err()?;
+
+        if expired_ids.is_empty() {
+            return Ok(0);
+        }
+
+        // Batch in chunks of 999 to respect SQLite's parameter limit.
+        let mut total_deleted = 0usize;
+        for chunk in expired_ids.chunks(999) {
+            let placeholders: String = (1..=chunk.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
+
+            let emb_sql =
+                format!("DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})");
+            conn.execute(&emb_sql, params.as_slice()).storage_err()?;
+
+            let mem_sql = format!("DELETE FROM memories WHERE id IN ({placeholders})");
+            total_deleted += conn.execute(&mem_sql, params.as_slice()).storage_err()?;
+        }
+
+        Ok(total_deleted)
+    }
+
+    /// Mark memories as expired for symbols in files whose content hash changed.
+    /// Targets memories with `static-analysis` tag linked (via graph) to symbols
+    /// in the given file — found via `graph_nodes.memory_id` (primary link) or
+    /// `RELATES_TO` edges in `graph_edges` (secondary link for SCIP doc memories).
+    /// Sets `expires_at` to now so they'll be cleaned up on next opportunistic sweep.
+    pub fn expire_memories_for_file(&self, file_path: &str) -> Result<usize, CodememError> {
+        let conn = self.conn()?;
+        let now = chrono::Utc::now().timestamp();
+        let expired = conn
+            .execute(
+                "UPDATE memories SET expires_at = ?1
+                 WHERE expires_at IS NULL
+                   AND id IN (SELECT m2.id FROM memories m2, json_each(m2.tags) jt
+                              WHERE jt.value = 'static-analysis')
+                   AND (
+                     id IN (
+                       SELECT gn.memory_id FROM graph_nodes gn
+                       WHERE gn.memory_id IS NOT NULL
+                         AND json_extract(gn.payload, '$.file_path') = ?2
+                     )
+                     OR id IN (
+                       SELECT REPLACE(ge.dst, 'mem:', '')
+                       FROM graph_edges ge
+                       JOIN graph_nodes gn ON ge.src = gn.id
+                       WHERE ge.relationship = 'RELATES_TO'
+                         AND ge.dst LIKE 'mem:%'
+                         AND json_extract(gn.payload, '$.file_path') = ?2
+                     )
+                   )",
+                params![now, file_path],
+            )
+            .storage_err()?;
+        Ok(expired)
     }
 }
 

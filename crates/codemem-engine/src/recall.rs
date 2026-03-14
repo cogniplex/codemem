@@ -63,6 +63,9 @@ impl CodememEngine {
     /// 9-component hybrid score. Supports filtering by memory type, namespace,
     /// tag exclusion, and minimum importance/confidence thresholds.
     pub fn recall(&self, q: &RecallQuery<'_>) -> Result<Vec<SearchResult>, CodememError> {
+        // Opportunistic cleanup of expired memories (rate-limited to once per 60s)
+        self.sweep_expired_memories();
+
         // Try vector search first (if embeddings available)
         let vector_results: Vec<(String, f32)> = if let Some(emb_guard) = self.lock_embeddings()? {
             match emb_guard.embed(q.query) {
@@ -188,8 +191,12 @@ impl CodememEngine {
         Ok(results)
     }
 
-    /// Check exclude_tags, min_importance, and min_confidence filters.
+    /// Check expiry, exclude_tags, min_importance, and min_confidence filters.
     fn passes_quality_filters(memory: &MemoryNode, q: &RecallQuery<'_>) -> bool {
+        // Skip expired memories (their embeddings may linger in HNSW until next sweep)
+        if memory.expires_at.is_some_and(|dt| dt <= Utc::now()) {
+            return false;
+        }
         if !q.exclude_tags.is_empty() && memory.tags.iter().any(|t| q.exclude_tags.contains(t)) {
             return false;
         }
@@ -216,6 +223,9 @@ impl CodememEngine {
         expansion_depth: usize,
         namespace_filter: Option<&str>,
     ) -> Result<Vec<ExpandedResult>, CodememError> {
+        // Opportunistic cleanup of expired memories (rate-limited to once per 60s)
+        self.sweep_expired_memories();
+
         // H1: Code-aware tokenization for consistent BM25 scoring
         let query_tokens: Vec<String> = crate::bm25::tokenize(query);
         let query_token_refs: Vec<&str> = query_tokens.iter().map(|s| s.as_str()).collect();
@@ -261,6 +271,9 @@ impl CodememEngine {
             let weights = self.scoring_weights()?;
 
             for memory in all {
+                if memory.expires_at.is_some_and(|dt| dt <= now) {
+                    continue;
+                }
                 let breakdown = compute_score(&memory, &query_token_refs, 0.0, &graph, &bm25, now);
                 let score = breakdown.total_with_weights(&weights);
                 if score > 0.01 {
@@ -284,6 +297,9 @@ impl CodememEngine {
                 .collect();
 
             for memory in candidate_memories {
+                if memory.expires_at.is_some_and(|dt| dt <= now) {
+                    continue;
+                }
                 if let Some(ns) = namespace_filter {
                     if memory.namespace.as_deref() != Some(ns) {
                         continue;
@@ -345,6 +361,9 @@ impl CodememEngine {
 
                     // Fetch the memory (no-touch to avoid inflating access_count)
                     if let Ok(Some(memory)) = self.storage.get_memory_no_touch(memory_id) {
+                        if memory.expires_at.is_some_and(|dt| dt <= now) {
+                            continue;
+                        }
                         if let Some(ns) = namespace_filter {
                             if memory.namespace.as_deref() != Some(ns) {
                                 continue;

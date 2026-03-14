@@ -41,6 +41,20 @@ impl CodememEngine {
         } else {
             std::borrow::Cow::Borrowed(memory)
         };
+
+        // Auto-set expires_at for session memories if not explicitly set
+        let memory = if memory.expires_at.is_none() && memory.session_id.is_some() {
+            let ttl_hours = self.config.memory.default_session_ttl_hours;
+            if ttl_hours > 0 {
+                let mut m = memory.into_owned();
+                m.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(ttl_hours as i64));
+                std::borrow::Cow::Owned(m)
+            } else {
+                memory
+            }
+        } else {
+            memory
+        };
         let memory = memory.as_ref();
 
         // H3: Step 1 — Embed if the provider is already loaded (don't trigger lazy init).
@@ -524,5 +538,28 @@ impl CodememEngine {
         // Persist vector index to disk
         self.save_index();
         Ok(true)
+    }
+
+    /// Opportunistic sweep of expired memories. Rate-limited to once per 60 seconds
+    /// to avoid adding overhead to every recall call.
+    pub(crate) fn sweep_expired_memories(&self) {
+        let now = chrono::Utc::now().timestamp();
+        let last = self.last_expiry_sweep.load(Ordering::Relaxed);
+        if now - last < 60 {
+            return;
+        }
+        // CAS to avoid concurrent sweeps
+        if self
+            .last_expiry_sweep
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+        {
+            return;
+        }
+        match self.storage.delete_expired_memories() {
+            Ok(0) => {}
+            Ok(n) => tracing::debug!("Swept {n} expired memories"),
+            Err(e) => tracing::warn!("Expired memory sweep failed: {e}"),
+        }
     }
 }

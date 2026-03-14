@@ -31,6 +31,22 @@ impl McpServer {
         memory.tags = tags;
         memory.namespace = namespace;
 
+        // Optional expiration: explicit ISO 8601 timestamp or TTL in hours
+        if let Some(expires_str) = args.get("expires_at").and_then(|v| v.as_str()) {
+            match expires_str.parse::<chrono::DateTime<chrono::Utc>>() {
+                Ok(dt) => memory.expires_at = Some(dt),
+                Err(_) => {
+                    return ToolResult::tool_error(format!(
+                        "Invalid 'expires_at' — expected ISO 8601 timestamp (e.g. 2026-03-21T00:00:00Z), got: {expires_str}"
+                    ))
+                }
+            }
+        } else if let Some(ttl) = args.get("ttl_hours").and_then(|v| v.as_u64()) {
+            if ttl > 0 {
+                memory.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(ttl as i64));
+            }
+        }
+
         match self.engine.store_memory_with_links(&memory, &links) {
             Ok(()) => {}
             Err(CodememError::Duplicate(h)) => {

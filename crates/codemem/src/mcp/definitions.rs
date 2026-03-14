@@ -23,7 +23,9 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                         "items": { "type": "string" },
                         "description": "List of graph node IDs to link this memory to"
                     },
-                    "auto_link": { "type": "boolean", "default": true, "description": "Auto-link to code nodes mentioned in content (default: true)" }
+                    "auto_link": { "type": "boolean", "default": true, "description": "Auto-link to code nodes mentioned in content (default: true)" },
+                    "expires_at": { "type": "string", "description": "ISO 8601 expiration timestamp (e.g. 2026-03-21T00:00:00Z)" },
+                    "ttl_hours": { "type": "integer", "minimum": 1, "description": "Time-to-live in hours (alternative to expires_at)" }
                 },
                 "required": ["content"]
             }

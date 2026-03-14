@@ -64,6 +64,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Namespace-scoped file hashes",
         sql: include_str!("migrations/011_namespace_scoped_file_hashes.sql"),
     },
+    Migration {
+        version: 12,
+        description: "Memory expiration",
+        sql: include_str!("migrations/012_memory_expiration.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.

@@ -251,6 +251,14 @@ pub trait StorageBackend: Send + Sync {
         Ok(count)
     }
 
+    /// Delete all memories whose `expires_at` timestamp is in the past.
+    /// Returns the number of memories deleted.
+    fn delete_expired_memories(&self) -> Result<usize, CodememError>;
+
+    /// Expire (set `expires_at` to now) all `static-analysis` memories
+    /// linked to symbols in the given file path.
+    fn expire_memories_for_file(&self, file_path: &str) -> Result<usize, CodememError>;
+
     /// List all memory IDs, ordered by created_at descending.
     fn list_memory_ids(&self) -> Result<Vec<String>, CodememError>;
 

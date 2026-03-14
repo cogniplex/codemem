@@ -147,6 +147,14 @@ impl CodememEngine {
                 tracing::debug!("Skipping unchanged file: {path_str}");
                 return Ok(());
             }
+            // Expire static-analysis memories linked to symbols in this changed file
+            if self.config.memory.expire_enrichments_on_reindex {
+                match self.storage.expire_memories_for_file(&path_str) {
+                    Ok(0) => {}
+                    Ok(n) => tracing::debug!("Expired {n} enrichment memories for {path_str}"),
+                    Err(e) => tracing::warn!("Failed to expire memories for {path_str}: {e}"),
+                }
+            }
             hash
         };
 

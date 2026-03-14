@@ -166,6 +166,7 @@ pub(crate) struct MemoryRow {
     pub(crate) metadata: String,
     pub(crate) namespace: Option<String>,
     pub(crate) session_id: Option<String>,
+    pub(crate) expires_at: Option<i64>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
     pub(crate) last_accessed_at: i64,
@@ -185,9 +186,10 @@ impl MemoryRow {
             metadata: row.get(8)?,
             namespace: row.get(9)?,
             session_id: row.get(10)?,
-            created_at: row.get(11)?,
-            updated_at: row.get(12)?,
-            last_accessed_at: row.get(13)?,
+            expires_at: row.get(11)?,
+            created_at: row.get(12)?,
+            updated_at: row.get(13)?,
+            last_accessed_at: row.get(14)?,
         })
     }
 
@@ -222,6 +224,11 @@ impl MemoryRow {
             })
             .with_timezone(&chrono::Utc);
 
+        let expires_at = self
+            .expires_at
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
         Ok(MemoryNode {
             id: self.id,
             content: self.content,
@@ -234,6 +241,7 @@ impl MemoryRow {
             metadata,
             namespace: self.namespace,
             session_id: self.session_id,
+            expires_at,
             created_at,
             updated_at,
             last_accessed_at,
