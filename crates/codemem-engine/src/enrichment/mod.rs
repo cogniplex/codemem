@@ -19,7 +19,7 @@ mod security_scan;
 mod test_mapping;
 
 use crate::CodememEngine;
-use codemem_core::{Edge, GraphBackend, MemoryNode, MemoryType, RelationshipType, VectorBackend};
+use codemem_core::{Edge, MemoryNode, MemoryType, RelationshipType};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

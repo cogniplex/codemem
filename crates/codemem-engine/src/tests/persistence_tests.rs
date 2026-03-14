@@ -4,7 +4,7 @@ use crate::index::resolver::ResolvedEdge;
 use crate::index::symbol::{Symbol, SymbolKind, Visibility};
 use crate::persistence::edge_weight_for;
 use crate::CodememEngine;
-use codemem_core::{GraphBackend, GraphConfig, NodeKind, RelationshipType};
+use codemem_core::{GraphConfig, NodeKind, RelationshipType};
 use std::collections::HashSet;
 
 // ── Helper: build a minimal Symbol ──────────────────────────────────

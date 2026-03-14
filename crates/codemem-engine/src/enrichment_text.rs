@@ -1,7 +1,7 @@
 use crate::index::{CodeChunk, ResolvedEdge, Symbol};
 use crate::scoring;
 use crate::CodememEngine;
-use codemem_core::{GraphBackend, MemoryType};
+use codemem_core::MemoryType;
 
 impl CodememEngine {
     // ── Contextual Enrichment ────────────────────────────────────────────────

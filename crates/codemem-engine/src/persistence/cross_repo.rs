@@ -8,7 +8,7 @@ use crate::index::linker::{self, CrossRepoEdge, PendingRef, RegisteredPackage};
 use crate::index::manifest::ManifestResult;
 use crate::index::resolver::UnresolvedRef;
 use crate::index::symbol::{Reference, Symbol};
-use codemem_core::{CodememError, Edge, GraphBackend, RelationshipType};
+use codemem_core::{CodememError, Edge, RelationshipType};
 use std::collections::HashMap;
 
 impl super::super::CodememEngine {

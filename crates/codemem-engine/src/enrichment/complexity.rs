@@ -2,7 +2,7 @@
 
 use super::{resolve_path, EnrichResult};
 use crate::CodememEngine;
-use codemem_core::{CodememError, GraphBackend, NodeKind};
+use codemem_core::{CodememError, NodeKind};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;

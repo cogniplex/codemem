@@ -293,6 +293,20 @@ impl VectorBackend for HnswIndex {
             memory_bytes: self.index.memory_usage(),
         }
     }
+
+    fn needs_compaction(&self) -> bool {
+        // Ghost entries exceed 20% of live entries
+        let live = self.id_to_key.len();
+        live > 0 && self.ghost_count > live / 5
+    }
+
+    fn ghost_count(&self) -> usize {
+        self.ghost_count
+    }
+
+    fn rebuild_from_entries(&mut self, entries: &[(String, Vec<f32>)]) -> Result<(), CodememError> {
+        HnswIndex::rebuild_from_entries(self, entries)
+    }
 }
 
 use serde::{Deserialize, Serialize};

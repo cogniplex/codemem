@@ -1,7 +1,7 @@
 use crate::index::{self, IndexAndResolveResult, Indexer};
 use crate::patterns;
 use crate::CodememEngine;
-use codemem_core::{CodememError, DetectedPattern, GraphBackend, MemoryNode, VectorBackend};
+use codemem_core::{CodememError, DetectedPattern, MemoryNode};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::Ordering;
@@ -60,7 +60,7 @@ impl CodememEngine {
     pub fn reload_graph(&self) -> Result<(), CodememError> {
         let new_graph = codemem_storage::graph::GraphEngine::from_storage(&*self.storage)?;
         let mut graph = self.lock_graph()?;
-        *graph = new_graph;
+        *graph = Box::new(new_graph);
         graph.recompute_centrality();
         Ok(())
     }
@@ -800,7 +800,7 @@ pub struct SessionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codemem_core::{Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
+    use codemem_core::{Edge, GraphNode, NodeKind, RelationshipType};
     use std::collections::{HashMap, HashSet};
 
     /// Create a test engine backed by a temporary database.

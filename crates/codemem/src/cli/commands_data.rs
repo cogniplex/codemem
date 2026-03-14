@@ -1,6 +1,5 @@
 //! Serve, ingest, and watch commands.
 
-use codemem_core::GraphBackend;
 use std::sync::Arc;
 
 /// Build the shared server components via the engine's unified constructor.

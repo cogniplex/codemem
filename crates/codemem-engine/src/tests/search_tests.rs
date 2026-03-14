@@ -1,6 +1,6 @@
 use crate::search::extract_code_references;
 use crate::CodememEngine;
-use codemem_core::{Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
+use codemem_core::{Edge, GraphNode, NodeKind, RelationshipType};
 use std::collections::HashMap;
 
 // ── extract_code_references ─────────────────────────────────────────

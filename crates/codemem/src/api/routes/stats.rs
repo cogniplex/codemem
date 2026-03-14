@@ -3,7 +3,6 @@
 use crate::api::types::{ComponentHealth, HealthResponse, MetricsResponse, StatsResponse};
 use crate::api::AppState;
 use axum::{extract::State, Json};
-use codemem_core::VectorBackend;
 use std::collections::HashMap;
 use std::sync::Arc;
 

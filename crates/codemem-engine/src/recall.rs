@@ -3,9 +3,7 @@
 use crate::scoring::compute_score;
 use crate::CodememEngine;
 use chrono::Utc;
-use codemem_core::{
-    CodememError, GraphBackend, MemoryNode, MemoryType, NodeKind, SearchResult, VectorBackend,
-};
+use codemem_core::{CodememError, MemoryNode, MemoryType, NodeKind, SearchResult};
 use std::collections::{HashMap, HashSet};
 
 /// A recall result that includes the expansion path taken to reach the memory.
@@ -103,7 +101,7 @@ impl CodememEngine {
         // Entity expansion: find memories connected to code entities mentioned in the query.
         // This ensures that structurally related memories are candidates even when they are
         // semantically distant from the query text.
-        let entity_memory_ids = self.resolve_entity_memories(q.query, &graph, now);
+        let entity_memory_ids = self.resolve_entity_memories(q.query, &**graph, now);
 
         let mut results: Vec<SearchResult> = Vec::new();
         let weights = self.scoring_weights()?;
@@ -120,7 +118,8 @@ impl CodememEngine {
                     continue;
                 }
 
-                let breakdown = compute_score(&memory, &query_token_refs, 0.0, &graph, &bm25, now);
+                let breakdown =
+                    compute_score(&memory, &query_token_refs, 0.0, &**graph, &bm25, now);
                 let score = breakdown.total_with_weights(&weights);
                 if score > 0.01 {
                     results.push(SearchResult {
@@ -168,7 +167,7 @@ impl CodememEngine {
 
                 let similarity = sim_map.get(memory.id.as_str()).copied().unwrap_or(0.0);
                 let breakdown =
-                    compute_score(&memory, &query_token_refs, similarity, &graph, &bm25, now);
+                    compute_score(&memory, &query_token_refs, similarity, &**graph, &bm25, now);
                 let score = breakdown.total_with_weights(&weights);
                 if score > 0.01 {
                     results.push(SearchResult {
@@ -274,7 +273,8 @@ impl CodememEngine {
                 if memory.expires_at.is_some_and(|dt| dt <= now) {
                     continue;
                 }
-                let breakdown = compute_score(&memory, &query_token_refs, 0.0, &graph, &bm25, now);
+                let breakdown =
+                    compute_score(&memory, &query_token_refs, 0.0, &**graph, &bm25, now);
                 let score = breakdown.total_with_weights(&weights);
                 if score > 0.01 {
                     seen_ids.insert(memory.id.clone());
@@ -397,7 +397,7 @@ impl CodememEngine {
                     &sm.memory,
                     &query_token_refs,
                     sm.vector_sim,
-                    &graph,
+                    &**graph,
                     &bm25,
                     now,
                 );
@@ -433,7 +433,7 @@ impl CodememEngine {
     pub(crate) fn resolve_entity_memories(
         &self,
         query: &str,
-        graph: &codemem_storage::graph::GraphEngine,
+        graph: &dyn codemem_core::GraphBackend,
         now: chrono::DateTime<chrono::Utc>,
     ) -> HashSet<String> {
         let entity_refs = crate::search::extract_code_references(query);

@@ -212,15 +212,27 @@ impl Default for EmbeddingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StorageConfig {
+    /// Backend type: "sqlite" (default) or "postgres".
+    #[serde(default = "default_storage_backend")]
+    pub backend: String,
+    /// Connection URL for remote backends (e.g., "postgres://user:pass@host/db").
+    #[serde(default)]
+    pub url: Option<String>,
     /// SQLite cache size in MB.
     pub cache_size_mb: u32,
     /// SQLite busy timeout in seconds.
     pub busy_timeout_secs: u64,
 }
 
+fn default_storage_backend() -> String {
+    "sqlite".to_string()
+}
+
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
+            backend: default_storage_backend(),
+            url: None,
             cache_size_mb: 64,
             busy_timeout_secs: 5,
         }

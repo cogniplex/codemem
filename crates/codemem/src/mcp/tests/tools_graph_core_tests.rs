@@ -2,7 +2,7 @@ use super::*;
 use crate::mcp::scoring::compute_score;
 use crate::mcp::test_helpers::*;
 use chrono::Utc;
-use codemem_core::{Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
+use codemem_core::{Edge, GraphNode, NodeKind, RelationshipType};
 use std::collections::HashMap;
 
 #[test]
@@ -53,7 +53,7 @@ fn graph_strength_zero_when_no_edges() {
 
     let memory = server.engine.storage().get_memory(id).unwrap().unwrap();
     let bm25 = server.engine.lock_bm25().unwrap();
-    let breakdown = compute_score(&memory, &["isolated"], 0.0, &graph, &bm25, Utc::now());
+    let breakdown = compute_score(&memory, &["isolated"], 0.0, &**graph, &bm25, Utc::now());
     assert_eq!(breakdown.graph_strength, 0.0);
 }
 
@@ -133,7 +133,7 @@ fn graph_strength_increases_with_code_edges() {
     let graph = server.engine.lock_graph().unwrap();
     let memory = server.engine.storage().get_memory(src_id).unwrap().unwrap();
     let bm25 = server.engine.lock_bm25().unwrap();
-    let breakdown = compute_score(&memory, &["rust"], 0.0, &graph, &bm25, Utc::now());
+    let breakdown = compute_score(&memory, &["rust"], 0.0, &**graph, &bm25, Utc::now());
     assert!(
         breakdown.graph_strength > 0.0,
         "graph_strength should be > 0 with code node edges, got {}",
@@ -167,7 +167,7 @@ fn graph_strength_caps_at_one() {
     let graph = server.engine.lock_graph().unwrap();
     let memory = server.engine.storage().get_memory(src_id).unwrap().unwrap();
     let bm25 = server.engine.lock_bm25().unwrap();
-    let breakdown = compute_score(&memory, &["hub"], 0.0, &graph, &bm25, Utc::now());
+    let breakdown = compute_score(&memory, &["hub"], 0.0, &**graph, &bm25, Utc::now());
     assert!(
         breakdown.graph_strength <= 1.0,
         "graph_strength should be <= 1.0, got {}",

@@ -83,7 +83,7 @@ impl CodememEngine {
     }
 
     /// Internal helper: rebuild vector index from all stored embeddings.
-    pub fn rebuild_vector_index_internal(&self, vector: &mut codemem_storage::HnswIndex) {
+    pub fn rebuild_vector_index_internal(&self, vector: &mut dyn VectorBackend) {
         let embeddings = match self.storage.list_all_embeddings() {
             Ok(e) => e,
             Err(e) => {
@@ -92,11 +92,6 @@ impl CodememEngine {
             }
         };
 
-        if let Ok(mut fresh) = codemem_storage::HnswIndex::with_defaults() {
-            for (id, floats) in &embeddings {
-                let _ = fresh.insert(id, floats);
-            }
-            *vector = fresh;
-        }
+        let _ = vector.rebuild_from_entries(&embeddings);
     }
 }

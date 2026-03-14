@@ -28,7 +28,7 @@ fn resolve_path_root_only_file() {
 // ── Helpers ──────────────────────────────────────────────────────────
 
 use crate::CodememEngine;
-use codemem_core::{Edge, GraphBackend, GraphNode, NodeKind, RelationshipType};
+use codemem_core::{Edge, GraphNode, NodeKind, RelationshipType};
 use serde_json::json;
 use std::collections::HashMap;
 

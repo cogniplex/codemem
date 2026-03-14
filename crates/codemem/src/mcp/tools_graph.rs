@@ -4,7 +4,7 @@
 
 use super::types::ToolResult;
 use super::McpServer;
-use codemem_core::{NodeKind, RelationshipType, VectorBackend};
+use codemem_core::{NodeKind, RelationshipType};
 use serde_json::{json, Value};
 
 impl McpServer {

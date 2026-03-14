@@ -1,7 +1,5 @@
 use crate::CodememEngine;
-use codemem_core::{
-    Edge, GraphBackend, GraphNode, MemoryNode, MemoryType, NodeKind, RelationshipType,
-};
+use codemem_core::{Edge, GraphNode, MemoryNode, MemoryType, NodeKind, RelationshipType};
 use std::collections::HashMap;
 
 fn make_memory_typed(

@@ -2,8 +2,7 @@
 
 use crate::bm25;
 use chrono::{DateTime, Utc};
-use codemem_core::{MemoryNode, ScoreBreakdown};
-use codemem_storage::graph::GraphEngine;
+use codemem_core::{GraphBackend, MemoryNode, ScoreBreakdown};
 
 // ── Code-graph sub-weights for `graph_strength_for_memory` ──────────────────
 
@@ -32,7 +31,7 @@ const RECENCY_DECAY_HOURS: f64 = 7.0 * 24.0;
 ///
 /// A function with many linked memories ranks higher. A conversational memory
 /// connected to many session peers ranks higher than an isolated one.
-pub fn graph_strength_for_memory(graph: &GraphEngine, memory_id: &str) -> f64 {
+pub fn graph_strength_for_memory(graph: &dyn GraphBackend, memory_id: &str) -> f64 {
     let metrics = match graph.raw_graph_metrics_for_memory(memory_id) {
         Some(m) => m,
         None => return 0.0,
@@ -87,7 +86,7 @@ pub fn compute_score(
     memory: &MemoryNode,
     query_tokens: &[&str],
     vector_similarity: f64,
-    graph: &GraphEngine,
+    graph: &dyn GraphBackend,
     bm25: &bm25::Bm25Index,
     now: DateTime<Utc>,
 ) -> ScoreBreakdown {
