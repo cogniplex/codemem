@@ -233,6 +233,27 @@ impl CodememEngine {
 
         let config = CodememConfig::load_or_default();
 
+        // Validate backend config — only built-in backends are supported without
+        // feature-flagged crates (codemem-postgres, codemem-qdrant, codemem-neo4j).
+        if config.storage.backend != "sqlite" {
+            return Err(CodememError::Config(format!(
+                "Unsupported storage backend '{}'. Only 'sqlite' is available in this build.",
+                config.storage.backend
+            )));
+        }
+        if config.vector.backend != "hnsw" {
+            return Err(CodememError::Config(format!(
+                "Unsupported vector backend '{}'. Only 'hnsw' is available in this build.",
+                config.vector.backend
+            )));
+        }
+        if config.graph.backend != "petgraph" {
+            return Err(CodememError::Config(format!(
+                "Unsupported graph backend '{}'. Only 'petgraph' is available in this build.",
+                config.graph.backend
+            )));
+        }
+
         // Wire StorageConfig into Storage::open
         let storage = Storage::open_with_config(
             db_path,

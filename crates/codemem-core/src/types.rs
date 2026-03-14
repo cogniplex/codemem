@@ -488,10 +488,14 @@ impl Default for ScoringWeights {
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
-/// Configuration for the HNSW vector index.
+/// Configuration for the vector index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VectorConfig {
+    /// Backend type: "hnsw" (default), "pgvector", or "qdrant".
+    pub backend: String,
+    /// Connection URL for remote backends (e.g., "http://localhost:6333" for Qdrant).
+    pub url: Option<String>,
     pub dimensions: usize,
     pub metric: DistanceMetric,
     pub m: usize,
@@ -502,6 +506,8 @@ pub struct VectorConfig {
 impl Default for VectorConfig {
     fn default() -> Self {
         Self {
+            backend: "hnsw".to_string(),
+            url: None,
             dimensions: 768,
             metric: DistanceMetric::Cosine,
             m: 16,
@@ -524,6 +530,10 @@ pub enum DistanceMetric {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GraphConfig {
+    /// Backend type: "petgraph" (default) or "neo4j".
+    pub backend: String,
+    /// Connection URL for remote backends (e.g., "bolt://localhost:7687" for Neo4j).
+    pub url: Option<String>,
     /// Default edge weight for CONTAINS relationship (structural, low).
     pub contains_edge_weight: f64,
     /// Default edge weight for CALLS relationship (high signal).
@@ -543,6 +553,8 @@ pub struct GraphConfig {
 impl Default for GraphConfig {
     fn default() -> Self {
         Self {
+            backend: "petgraph".to_string(),
+            url: None,
             contains_edge_weight: 0.1,
             calls_edge_weight: 1.0,
             imports_edge_weight: 0.5,
