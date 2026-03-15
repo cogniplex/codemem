@@ -370,7 +370,7 @@ impl Storage {
         {
             (
                 "SELECT m.id, m.content, m.memory_type, m.importance, m.confidence, m.access_count, \
-                 m.content_hash, m.tags, m.metadata, m.namespace, m.session_id, m.expires_at, m.created_at, m.updated_at, m.last_accessed_at \
+                 m.content_hash, m.tags, m.metadata, m.namespace, m.session_id, m.repo, m.git_ref, m.expires_at, m.created_at, m.updated_at, m.last_accessed_at \
                  FROM memories m, json_each(m.tags) AS jt \
                  WHERE jt.value = ?1 AND m.namespace = ?2 \
                  AND (m.expires_at IS NULL OR m.expires_at > ?3) \
@@ -386,7 +386,7 @@ impl Storage {
         } else {
             (
                 "SELECT m.id, m.content, m.memory_type, m.importance, m.confidence, m.access_count, \
-                 m.content_hash, m.tags, m.metadata, m.namespace, m.session_id, m.expires_at, m.created_at, m.updated_at, m.last_accessed_at \
+                 m.content_hash, m.tags, m.metadata, m.namespace, m.session_id, m.repo, m.git_ref, m.expires_at, m.created_at, m.updated_at, m.last_accessed_at \
                  FROM memories m, json_each(m.tags) AS jt \
                  WHERE jt.value = ?1 \
                  AND (m.expires_at IS NULL OR m.expires_at > ?2) \
@@ -407,10 +407,10 @@ impl Storage {
 
         let rows = stmt
             .query_map(params_refs.as_slice(), |row| {
-                let expires_ts: Option<i64> = row.get(11)?;
-                let created_ts: i64 = row.get(12)?;
-                let updated_ts: i64 = row.get(13)?;
-                let accessed_ts: i64 = row.get(14)?;
+                let expires_ts: Option<i64> = row.get(13)?;
+                let created_ts: i64 = row.get(14)?;
+                let updated_ts: i64 = row.get(15)?;
+                let accessed_ts: i64 = row.get(16)?;
                 let tags_json: String = row.get(7)?;
                 let metadata_json: String = row.get(8)?;
                 let memory_type_str: String = row.get(2)?;
@@ -429,6 +429,8 @@ impl Storage {
                     metadata: serde_json::from_str(&metadata_json).unwrap_or_default(),
                     namespace: row.get(9)?,
                     session_id: row.get(10)?,
+                    repo: row.get(11)?,
+                    git_ref: row.get(12)?,
                     expires_at: expires_ts
                         .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
                         .map(|dt| dt.with_timezone(&chrono::Utc)),

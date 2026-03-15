@@ -47,6 +47,10 @@ impl McpServer {
             }
         }
 
+        if let Some(git_ref) = args.get("git_ref").and_then(|v| v.as_str()) {
+            memory.git_ref = Some(git_ref.to_string());
+        }
+
         match self.engine.store_memory_with_links(&memory, &links) {
             Ok(()) => {}
             Err(CodememError::Duplicate(h)) => {
@@ -82,6 +86,7 @@ impl McpServer {
         let exclude_tags = parse_string_array(args, "exclude_tags");
         let min_importance: Option<f64> = args.get("min_importance").and_then(|v| v.as_f64());
         let min_confidence: Option<f64> = args.get("min_confidence").and_then(|v| v.as_f64());
+        let git_ref_filter: Option<&str> = args.get("git_ref").and_then(|v| v.as_str());
         let expand = args
             .get("expand")
             .and_then(|v| v.as_bool())
@@ -102,6 +107,20 @@ impl McpServer {
                     ToolResult::text("No matching memories found.")
                 }
                 Ok(results) => {
+                    // Apply git_ref filter (recall_with_impact doesn't take RecallQuery)
+                    let results: Vec<_> = if let Some(ref_filter) = git_ref_filter {
+                        results
+                            .into_iter()
+                            .filter(|r| {
+                                r.search_result.memory.git_ref.as_deref() == Some(ref_filter)
+                            })
+                            .collect()
+                    } else {
+                        results
+                    };
+                    if results.is_empty() {
+                        return ToolResult::text("No matching memories found.");
+                    }
                     let output: Vec<Value> = results
                         .iter()
                         .map(|r| {
@@ -140,6 +159,18 @@ impl McpServer {
                     ToolResult::text("No matching memories found.")
                 }
                 Ok(results) => {
+                    // Apply git_ref filter (recall_with_expansion doesn't take RecallQuery)
+                    let results: Vec<_> = if let Some(ref_filter) = git_ref_filter {
+                        results
+                            .into_iter()
+                            .filter(|er| er.result.memory.git_ref.as_deref() == Some(ref_filter))
+                            .collect()
+                    } else {
+                        results
+                    };
+                    if results.is_empty() {
+                        return ToolResult::text("No matching memories found.");
+                    }
                     let output: Vec<Value> = results
                         .iter()
                         .map(|er| {
@@ -172,6 +203,7 @@ impl McpServer {
                 exclude_tags: &exclude_tags,
                 min_importance,
                 min_confidence,
+                git_ref_filter,
             };
             match self.engine.recall(&rq) {
                 Ok(results) => format_recall_results(&results, None),

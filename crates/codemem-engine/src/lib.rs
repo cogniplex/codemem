@@ -76,6 +76,10 @@ mod persistence_tests;
 #[path = "tests/memory_expiry_tests.rs"]
 mod memory_expiry_tests;
 
+#[cfg(test)]
+#[path = "tests/scope_tests.rs"]
+mod scope_tests;
+
 // Re-export key index types at crate root for convenience
 pub use index::{
     ChunkConfig, CodeChunk, CodeParser, Dependency, IndexAndResolveResult, IndexProgress,
@@ -158,6 +162,8 @@ pub struct CodememEngine {
     dirty: AtomicBool,
     /// Active session ID for auto-populating `session_id` on persisted memories.
     active_session_id: RwLock<Option<String>>,
+    /// Active scope context for repo/branch/user-aware operations.
+    scope: RwLock<Option<codemem_core::ScopeContext>>,
     /// Cached change detector for incremental single-file indexing.
     /// Loaded lazily from storage on first use.
     change_detector: Mutex<Option<index::incremental::ChangeDetector>>,
@@ -205,6 +211,7 @@ impl CodememEngine {
             metrics: Arc::new(InMemoryMetrics::new()),
             dirty: AtomicBool::new(false),
             active_session_id: RwLock::new(None),
+            scope: RwLock::new(None),
             change_detector: Mutex::new(None),
             last_expiry_sweep: AtomicI64::new(0),
         }
@@ -276,6 +283,7 @@ impl CodememEngine {
             metrics: Arc::new(InMemoryMetrics::new()),
             dirty: AtomicBool::new(false),
             active_session_id: RwLock::new(None),
+            scope: RwLock::new(None),
             change_detector: Mutex::new(None),
             last_expiry_sweep: AtomicI64::new(0),
         };
@@ -315,6 +323,7 @@ impl CodememEngine {
             metrics: Arc::new(InMemoryMetrics::new()),
             dirty: AtomicBool::new(false),
             active_session_id: RwLock::new(None),
+            scope: RwLock::new(None),
             change_detector: Mutex::new(None),
             last_expiry_sweep: AtomicI64::new(0),
         }
@@ -568,6 +577,29 @@ impl CodememEngine {
             Ok(guard) => guard.clone(),
             Err(e) => e.into_inner().clone(),
         }
+    }
+
+    // ── Scope Context ─────────────────────────────────────────────────────
+
+    /// Set the active scope context for repo/branch/user-aware operations.
+    pub fn set_scope(&self, scope: Option<codemem_core::ScopeContext>) {
+        match self.scope.write() {
+            Ok(mut guard) => *guard = scope,
+            Err(e) => *e.into_inner() = scope,
+        }
+    }
+
+    /// Get the current scope context.
+    pub fn scope(&self) -> Option<codemem_core::ScopeContext> {
+        match self.scope.read() {
+            Ok(guard) => guard.clone(),
+            Err(e) => e.into_inner().clone(),
+        }
+    }
+
+    /// Derive namespace from the active scope, falling back to None.
+    pub fn scope_namespace(&self) -> Option<String> {
+        self.scope().map(|s| s.namespace().to_string())
     }
 
     // ── Public Accessors ──────────────────────────────────────────────────

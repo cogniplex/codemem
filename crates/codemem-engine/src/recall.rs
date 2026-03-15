@@ -36,6 +36,8 @@ pub struct RecallQuery<'a> {
     pub exclude_tags: &'a [String],
     pub min_importance: Option<f64>,
     pub min_confidence: Option<f64>,
+    /// Filter results to memories with this git ref (branch/tag).
+    pub git_ref_filter: Option<&'a str>,
 }
 
 impl<'a> RecallQuery<'a> {
@@ -49,6 +51,7 @@ impl<'a> RecallQuery<'a> {
             exclude_tags: &[],
             min_importance: None,
             min_confidence: None,
+            git_ref_filter: None,
         }
     }
 }
@@ -190,7 +193,7 @@ impl CodememEngine {
         Ok(results)
     }
 
-    /// Check expiry, exclude_tags, min_importance, and min_confidence filters.
+    /// Check expiry, exclude_tags, min_importance, min_confidence, and git_ref filters.
     fn passes_quality_filters(memory: &MemoryNode, q: &RecallQuery<'_>) -> bool {
         // Skip expired memories (their embeddings may linger in HNSW until next sweep)
         if memory.expires_at.is_some_and(|dt| dt <= Utc::now()) {
@@ -206,6 +209,11 @@ impl CodememEngine {
         }
         if let Some(min) = q.min_confidence {
             if memory.confidence < min {
+                return false;
+            }
+        }
+        if let Some(ref_filter) = q.git_ref_filter {
+            if memory.git_ref.as_deref() != Some(ref_filter) {
                 return false;
             }
         }
