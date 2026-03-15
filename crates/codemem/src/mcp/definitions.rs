@@ -382,7 +382,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "diff": { "type": "string", "description": "Unified diff text (e.g., output of `git diff`)" },
-                    "depth": { "type": "integer", "default": 2, "description": "Max graph hops for transitive impact analysis" }
+                    "depth": { "type": "integer", "default": 2, "description": "Max graph hops for transitive impact analysis" },
+                    "base_ref": { "type": "string", "description": "Base branch for overlay resolution (e.g., 'main')" }
                 },
                 "required": ["diff"]
             }

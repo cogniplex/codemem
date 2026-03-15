@@ -2,7 +2,7 @@
 
 use std::io::Read;
 
-pub(crate) fn cmd_review(depth: usize, format: &str) -> anyhow::Result<()> {
+pub(crate) fn cmd_review(base: &str, depth: usize, format: &str) -> anyhow::Result<()> {
     // Read diff from stdin
     let mut diff = String::new();
     std::io::stdin().read_to_string(&mut diff)?;
@@ -14,6 +14,13 @@ pub(crate) fn cmd_review(depth: usize, format: &str) -> anyhow::Result<()> {
 
     let db_path = super::codemem_db_path();
     let engine = codemem_engine::CodememEngine::from_db_path(&db_path)?;
+
+    // Set scope context with the base ref so overlay resolution can use it.
+    // Derive repo from cwd, current branch from git.
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let mut scope = codemem_core::ScopeContext::from_local(&cwd);
+    scope.base_ref = Some(base.to_string());
+    engine.set_scope(Some(scope));
 
     let report = engine.blast_radius(&diff, depth)?;
 
@@ -65,7 +72,7 @@ pub(crate) fn cmd_review(depth: usize, format: &str) -> anyhow::Result<()> {
                         "  [{}] {}",
                         mem.memory_type,
                         if mem.content.len() > 80 {
-                            format!("{}...", &mem.content[..80])
+                            format!("{}...", codemem_core::truncate(&mem.content, 80))
                         } else {
                             mem.content.clone()
                         }

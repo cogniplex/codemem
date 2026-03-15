@@ -137,7 +137,8 @@ enum Commands {
 
     /// Review a diff: map changed lines to symbols, compute blast radius
     Review {
-        /// Base ref for the diff (e.g., "main")
+        /// Base ref for scope context (e.g., "main"). Sets the overlay base
+        /// so memories/graph data from the base branch is included in analysis.
         #[arg(long, default_value = "main")]
         base: String,
         /// Traversal depth for transitive impact analysis
@@ -342,11 +343,11 @@ pub fn run() -> anyhow::Result<()> {
             )?;
         }
         Commands::Review {
-            base: _,
+            base,
             depth,
             format,
         } => {
-            commands_review::cmd_review(depth, &format)?;
+            commands_review::cmd_review(&base, depth, &format)?;
         }
         Commands::Export {
             namespace,

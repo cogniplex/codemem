@@ -2,7 +2,7 @@
 //! compute blast radius via multi-hop graph traversal.
 
 use crate::CodememEngine;
-use codemem_core::{CodememError, GraphBackend, MemoryNode, NodeKind, RelationshipType};
+use codemem_core::{CodememError, GraphBackend, MemoryNode, RelationshipType};
 use std::collections::{HashMap, HashSet};
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -164,13 +164,23 @@ impl CodememEngine {
         let mut seen_symbols: HashSet<String> = HashSet::new();
         let mut seen_files: HashSet<String> = HashSet::new();
 
+        // Build file→symbols index to avoid O(nodes × hunks) scan
+        let mut file_symbols: HashMap<&str, Vec<&codemem_core::GraphNode>> = HashMap::new();
+        for node in &all_nodes {
+            if !node.id.starts_with("sym:") {
+                continue;
+            }
+            if let Some(fp) = node.payload.get("file_path").and_then(|v| v.as_str()) {
+                file_symbols.entry(fp).or_default().push(node);
+            }
+        }
+
         for hunk in &hunks {
             let file_id = format!("file:{}", hunk.file_path);
             if seen_files.insert(file_id.clone()) {
                 mapping.changed_files.push(file_id);
             }
 
-            // All changed lines (both added and removed matter for symbol mapping)
             let changed_lines: HashSet<u32> = hunk
                 .added_lines
                 .iter()
@@ -178,37 +188,26 @@ impl CodememEngine {
                 .copied()
                 .collect();
 
-            // Find symbols in this file whose line range overlaps changed lines
-            for node in &all_nodes {
-                if !node.id.starts_with("sym:") {
-                    continue;
-                }
-                let node_file = node
-                    .payload
-                    .get("file_path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                if node_file != hunk.file_path {
-                    continue;
-                }
+            // Only check symbols in this file (indexed lookup)
+            if let Some(nodes) = file_symbols.get(hunk.file_path.as_str()) {
+                for node in nodes {
+                    let line_start = node
+                        .payload
+                        .get("line_start")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    let line_end = node
+                        .payload
+                        .get("line_end")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(line_start as u64) as u32;
 
-                let line_start = node
-                    .payload
-                    .get("line_start")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                let line_end = node
-                    .payload
-                    .get("line_end")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(line_start as u64) as u32;
-
-                // Check if any changed line falls within this symbol's range
-                let overlaps = changed_lines
-                    .iter()
-                    .any(|&l| l >= line_start && l <= line_end);
-                if overlaps && seen_symbols.insert(node.id.clone()) {
-                    mapping.changed_symbols.push(node.id.clone());
+                    let overlaps = changed_lines
+                        .iter()
+                        .any(|&l| l >= line_start && l <= line_end);
+                    if overlaps && seen_symbols.insert(node.id.clone()) {
+                        mapping.changed_symbols.push(node.id.clone());
+                    }
                 }
             }
         }
@@ -311,28 +310,50 @@ impl CodememEngine {
             }
         }
 
-        // Transitive dependents (2+ hops) via BFS
+        // Transitive dependents (2+ hops) via iterative incoming-edge traversal.
+        // BFS follows outgoing edges (wrong direction for "who depends on me?").
+        // Instead, walk incoming edges layer by layer.
         if depth > 1 {
-            let direct_ids: Vec<String> = direct_deps.iter().map(|d| d.id.clone()).collect();
-            for start_id in &direct_ids {
-                if let Ok(nodes) = graph.bfs_filtered(start_id, depth - 1, &[NodeKind::Chunk], None)
-                {
-                    for node in &nodes {
-                        if !node.id.starts_with("sym:") || !seen.insert(node.id.clone()) {
+            let mut frontier: Vec<String> = direct_deps.iter().map(|d| d.id.clone()).collect();
+            for _ in 1..depth {
+                let mut next_frontier = Vec::new();
+                for node_id in &frontier {
+                    let edges = graph.get_edges(node_id).unwrap_or_default();
+                    for edge in &edges {
+                        // Only follow incoming dependency edges
+                        if edge.dst != *node_id {
                             continue;
                         }
-                        if let Some(info) = node_to_symbol_info(&**graph, &node.id) {
+                        if !matches!(
+                            edge.relationship,
+                            RelationshipType::Calls
+                                | RelationshipType::Imports
+                                | RelationshipType::Inherits
+                                | RelationshipType::Implements
+                                | RelationshipType::Overrides
+                        ) {
+                            continue;
+                        }
+                        let dep_id = &edge.src;
+                        if !dep_id.starts_with("sym:") || !seen.insert(dep_id.clone()) {
+                            continue;
+                        }
+                        if let Some(info) = node_to_symbol_info(&**graph, dep_id) {
                             if let Some(ref fp) = info.file_path {
                                 affected_files.insert(fp.clone());
                             }
-                            // Detect modules
                             if info.kind == "Module" {
                                 affected_modules.insert(info.id.clone());
                             }
+                            next_frontier.push(dep_id.clone());
                             transitive_deps.push(info);
                         }
                     }
                 }
+                if next_frontier.is_empty() {
+                    break;
+                }
+                frontier = next_frontier;
             }
         }
 

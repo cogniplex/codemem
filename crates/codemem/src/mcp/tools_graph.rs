@@ -773,6 +773,14 @@ impl McpServer {
         };
         let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
 
+        // Set base_ref on scope if provided (for overlay resolution)
+        if let Some(base_ref) = args.get("base_ref").and_then(|v| v.as_str()) {
+            if let Some(mut scope) = self.engine.scope() {
+                scope.base_ref = Some(base_ref.to_string());
+                self.engine.set_scope(Some(scope));
+            }
+        }
+
         match self.engine.blast_radius(diff, depth) {
             Ok(report) => ToolResult::text(
                 serde_json::to_string_pretty(&report).expect("JSON serialization of literal"),
