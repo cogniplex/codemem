@@ -4,6 +4,7 @@
 //! and parses each file using the CodeParser.
 
 use crate::index::chunker::CodeChunk;
+use crate::index::document_indexer::{parse_document, supports_document_extension, DocumentNode};
 use crate::index::incremental::ChangeDetector;
 use crate::index::parser::{CodeParser, ParseResult};
 use crate::index::resolver::{ReferenceResolver, ResolvedEdge, UnresolvedRef};
@@ -40,6 +41,8 @@ pub struct IndexResult {
     pub total_references: usize,
     /// Total CST-aware chunks extracted across all files.
     pub total_chunks: usize,
+    /// Total document nodes extracted from Markdown / YAML files.
+    pub total_documents: usize,
     /// Individual parse results for each successfully parsed file.
     pub parse_results: Vec<ParseResult>,
 }
@@ -55,6 +58,8 @@ pub struct IndexAndResolveResult {
     pub references: Vec<Reference>,
     /// All CST-aware chunks collected from all parsed files.
     pub chunks: Vec<CodeChunk>,
+    /// All document nodes extracted from Markdown / YAML files.
+    pub doc_nodes: Vec<DocumentNode>,
     /// All unique file paths that were parsed (relative to `root_path`).
     pub file_paths: HashSet<String>,
     /// Resolved edges from reference resolution.
@@ -141,6 +146,7 @@ impl Indexer {
         let mut total_symbols = 0usize;
         let mut total_references = 0usize;
         let mut total_chunks = 0usize;
+        let mut total_documents = 0usize;
         let mut parse_results = Vec::new();
 
         let walker = WalkBuilder::new(root)
@@ -166,19 +172,20 @@ impl Indexer {
 
             let path = entry.path();
 
-            // Check if the file extension is supported
             let ext = match path.extension().and_then(|e| e.to_str()) {
                 Some(e) => e,
                 None => continue,
             };
 
-            if !self.parser.supports_extension(ext) {
+            let is_code = self.parser.supports_extension(ext);
+            let is_doc = supports_document_extension(ext);
+
+            if !is_code && !is_doc {
                 continue;
             }
 
             files_scanned += 1;
 
-            // Read file content
             let content = match std::fs::read(path) {
                 Ok(c) => c,
                 Err(err) => {
@@ -187,18 +194,46 @@ impl Indexer {
                 }
             };
 
-            // Use paths relative to root so node IDs are portable across machines.
             let rel_path = path.strip_prefix(root).unwrap_or(path);
             let path_str = rel_path.to_string_lossy().to_string();
 
-            // Check incremental state (returns pre-computed hash to avoid double-hashing)
             let (changed, hash) = self.change_detector.check_changed(&path_str, &content);
             if !changed {
                 files_skipped += 1;
                 continue;
             }
 
-            // Parse the file
+            if is_doc {
+                let doc_nodes = parse_document(&path_str, &content);
+                if !doc_nodes.is_empty() {
+                    total_documents += doc_nodes.len();
+                    files_parsed += 1;
+                    self.change_detector.record_hash(&path_str, hash);
+
+                    // Wrap doc nodes in a ParseResult with no symbols/references/chunks
+                    // so the file path is tracked and file nodes are created downstream.
+                    parse_results.push(ParseResult {
+                        file_path: path_str.clone(),
+                        language: "document".to_string(),
+                        symbols: Vec::new(),
+                        references: Vec::new(),
+                        chunks: Vec::new(),
+                        doc_nodes,
+                    });
+
+                    if let Some(tx) = tx {
+                        let _ = tx.send(IndexProgress {
+                            files_scanned,
+                            files_parsed,
+                            total_symbols,
+                            current_file: path_str.clone(),
+                        });
+                    }
+                }
+                continue;
+            }
+
+            // Code file path
             match self.parser.parse_file(&path_str, &content) {
                 Some(result) => {
                     total_symbols += result.symbols.len();
@@ -206,12 +241,10 @@ impl Indexer {
                     total_chunks += result.chunks.len();
                     files_parsed += 1;
 
-                    // Record the pre-computed hash (avoids re-hashing)
                     self.change_detector.record_hash(&path_str, hash);
 
                     parse_results.push(result);
 
-                    // Send progress event if a sender is provided
                     if let Some(tx) = tx {
                         let _ = tx.send(IndexProgress {
                             files_scanned,
@@ -228,7 +261,7 @@ impl Indexer {
         }
 
         tracing::info!(
-            "Indexed {}: {} scanned, {} parsed, {} skipped, {} symbols, {} references, {} chunks",
+            "Indexed {}: {} scanned, {} parsed, {} skipped, {} symbols, {} references, {} chunks, {} documents",
             root.display(),
             files_scanned,
             files_parsed,
@@ -236,6 +269,7 @@ impl Indexer {
             total_symbols,
             total_references,
             total_chunks,
+            total_documents,
         );
 
         Ok(IndexResult {
@@ -245,6 +279,7 @@ impl Indexer {
             total_symbols,
             total_references,
             total_chunks,
+            total_documents,
             parse_results,
         })
     }
@@ -278,6 +313,7 @@ impl Indexer {
         let mut all_symbols = Vec::new();
         let mut all_references = Vec::new();
         let mut all_chunks = Vec::new();
+        let mut all_doc_nodes = Vec::new();
         let mut file_paths = HashSet::new();
 
         // Consume parse_results by value to avoid cloning symbols/references/chunks
@@ -288,6 +324,7 @@ impl Indexer {
             total_symbols,
             total_references,
             total_chunks,
+            total_documents,
             parse_results,
         } = result;
 
@@ -302,6 +339,7 @@ impl Indexer {
                 all_references.extend(pr.references);
                 all_chunks.extend(pr.chunks);
             }
+            all_doc_nodes.extend(pr.doc_nodes);
         }
 
         let mut resolver = ReferenceResolver::new();
@@ -320,11 +358,13 @@ impl Indexer {
                 total_symbols,
                 total_references,
                 total_chunks,
+                total_documents,
                 parse_results: Vec::new(),
             },
             symbols: all_symbols,
             references: all_references,
             chunks: all_chunks,
+            doc_nodes: all_doc_nodes,
             file_paths,
             edges: resolve_result.edges,
             unresolved: resolve_result.unresolved,
