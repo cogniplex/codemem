@@ -9,6 +9,7 @@ mod commands_export;
 mod commands_init;
 mod commands_lifecycle;
 mod commands_migrate;
+mod commands_review;
 mod commands_search;
 
 use clap::{Parser, Subcommand};
@@ -132,6 +133,19 @@ enum Commands {
         /// Force re-index even when file SHAs haven't changed
         #[arg(long)]
         force: bool,
+    },
+
+    /// Review a diff: map changed lines to symbols, compute blast radius
+    Review {
+        /// Base ref for the diff (e.g., "main")
+        #[arg(long, default_value = "main")]
+        base: String,
+        /// Traversal depth for transitive impact analysis
+        #[arg(long, default_value = "2")]
+        depth: usize,
+        /// Output format: json (default) or text
+        #[arg(short, long, default_value = "json")]
+        format: String,
     },
 
     /// Export memories to JSONL, JSON, CSV, or Markdown format
@@ -326,6 +340,13 @@ pub fn run() -> anyhow::Result<()> {
                 skip_enrich,
                 force,
             )?;
+        }
+        Commands::Review {
+            base: _,
+            depth,
+            format,
+        } => {
+            commands_review::cmd_review(depth, &format)?;
         }
         Commands::Export {
             namespace,
