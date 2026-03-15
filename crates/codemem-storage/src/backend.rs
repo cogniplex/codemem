@@ -679,7 +679,7 @@ impl StorageBackend for Storage {
             param_values.push(Box::new(mt.to_string()));
             sql.push_str(&format!(" AND memory_type = ?{}", param_values.len()));
         }
-        sql.push_str(" ORDER BY created_at DESC");
+        sql.push_str(" ORDER BY created_at DESC LIMIT 10000");
 
         let refs: Vec<&dyn rusqlite::types::ToSql> =
             param_values.iter().map(|p| p.as_ref()).collect();
@@ -733,10 +733,13 @@ impl StorageBackend for Storage {
     }
 
     fn rollback_transaction(&self) -> Result<(), CodememError> {
-        self.in_transaction
-            .store(false, std::sync::atomic::Ordering::Release);
         let conn = self.conn()?;
         conn.execute_batch("ROLLBACK").storage_err()?;
+        // Clear flag after ROLLBACK succeeds — mirrors commit_transaction's
+        // pattern. If ROLLBACK fails, the flag stays set so callers know a
+        // transaction is still active.
+        self.in_transaction
+            .store(false, std::sync::atomic::Ordering::Release);
         Ok(())
     }
 
@@ -854,8 +857,8 @@ impl StorageBackend for Storage {
                 ))
             })
             .map_err(|e| CodememError::Storage(e.to_string()))?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
         Ok(rows)
     }
 
@@ -883,8 +886,8 @@ impl StorageBackend for Storage {
                 })
             })
             .map_err(|e| CodememError::Storage(e.to_string()))?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| CodememError::Storage(e.to_string()))?;
         Ok(rows)
     }
 

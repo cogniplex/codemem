@@ -191,7 +191,7 @@ impl super::CodememEngine {
 
         // ── Package (directory) nodes
         let (dir_nodes, dir_edges, created_dirs) =
-            self.build_package_tree(seen_files, &ns_string, contains_weight, now, &**graph);
+            self.build_package_tree(seen_files, &ns_string, contains_weight, now);
         self.persist_nodes_to_storage_and_graph(&dir_nodes, &mut **graph);
         self.persist_edges_to_storage_and_graph(&dir_edges, &mut **graph);
 
@@ -386,9 +386,9 @@ impl super::CodememEngine {
         ns_string: &Option<String>,
         contains_weight: f64,
         now: chrono::DateTime<chrono::Utc>,
-        graph: &dyn codemem_core::GraphBackend,
     ) -> (Vec<GraphNode>, Vec<Edge>, usize) {
         let mut created_dirs: HashSet<String> = HashSet::new();
+        let mut created_edge_ids: HashSet<String> = HashSet::new();
         let mut dir_nodes = Vec::new();
         let mut dir_edges = Vec::new();
 
@@ -423,12 +423,10 @@ impl super::CodememEngine {
                 }
                 let parent_pkg_id = format!("pkg:{}/", ancestors[i - 1]);
                 let edge_id = format!("contains:{parent_pkg_id}->{pkg_id}");
-                if graph
-                    .get_edges(&parent_pkg_id)
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|e| e.id == edge_id)
-                {
+                // Use local set for O(1) dedup instead of querying the graph
+                // for every directory. Edges persisted via INSERT OR REPLACE
+                // handle pre-existing edges from prior runs.
+                if !created_edge_ids.insert(edge_id.clone()) {
                     continue;
                 }
                 dir_edges.push(Edge {

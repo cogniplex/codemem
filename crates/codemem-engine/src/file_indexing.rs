@@ -169,8 +169,22 @@ impl CodememEngine {
         let mut file_paths = HashSet::new();
         file_paths.insert(parse_result.file_path.clone());
 
+        // Populate the resolver with ALL known symbols from the in-memory graph
+        // so cross-file references (calls to functions in other files) can be
+        // resolved. Without this, only same-file references would resolve,
+        // causing the graph to gradually lose cross-file edges between full
+        // re-indexes.
         let mut resolver = index::ReferenceResolver::new();
         resolver.add_symbols(&parse_result.symbols);
+        if let Ok(graph) = self.lock_graph() {
+            let graph_symbols: Vec<index::Symbol> = graph
+                .get_all_nodes()
+                .iter()
+                .filter(|n| n.id.starts_with("sym:"))
+                .filter_map(index::symbol::symbol_from_graph_node)
+                .collect();
+            resolver.add_symbols(&graph_symbols);
+        }
         let resolve_result = resolver.resolve_all_with_unresolved(&parse_result.references);
 
         let results = IndexAndResolveResult {
@@ -321,6 +335,13 @@ impl CodememEngine {
                 }
             }
         }
+        // Remove stale entries from BM25 index so deleted/renamed symbols
+        // don't persist in text search results or skew IDF calculations.
+        if let Ok(mut bm25) = self.lock_bm25() {
+            for sym_id in &stale_ids {
+                bm25.remove_document(sym_id);
+            }
+        }
 
         Ok(count)
     }
@@ -408,6 +429,16 @@ impl CodememEngine {
         }
         drop(vec);
 
+        // Remove deleted symbols/chunks from BM25 index
+        if let Ok(mut bm25) = self.lock_bm25() {
+            for sym_id in &sym_ids {
+                bm25.remove_document(sym_id);
+            }
+            for chunk_id in &chunk_ids {
+                bm25.remove_document(chunk_id);
+            }
+        }
+
         self.save_index();
         Ok(())
     }
@@ -435,16 +466,31 @@ impl CodememEngine {
         // Without it, relative paths resolve against CWD which may be wrong.
         if let Some(root) = project_root {
             for node in &all_nodes {
-                if !node.id.starts_with("sym:") && !node.id.starts_with("chunk:") {
-                    continue;
+                // Collect sym: and chunk: nodes whose backing files are gone
+                if node.id.starts_with("sym:") || node.id.starts_with("chunk:") {
+                    let file_path = match node.payload.get("file_path").and_then(|v| v.as_str()) {
+                        Some(fp) => fp,
+                        None => continue,
+                    };
+                    let abs_path = root.join(file_path);
+                    if !abs_path.exists() {
+                        orphan_sym_ids.push(node.id.clone());
+                    }
                 }
-                let file_path = match node.payload.get("file_path").and_then(|v| v.as_str()) {
-                    Some(fp) => fp,
-                    None => continue,
-                };
-                let abs_path = root.join(file_path);
-                if !abs_path.exists() {
-                    orphan_sym_ids.push(node.id.clone());
+                // Collect file: nodes whose backing files are gone
+                else if let Some(fp) = node.id.strip_prefix("file:") {
+                    let abs_path = root.join(fp);
+                    if !abs_path.exists() {
+                        orphan_sym_ids.push(node.id.clone());
+                    }
+                }
+                // Collect pkg: nodes whose directories are gone
+                else if let Some(dir) = node.id.strip_prefix("pkg:") {
+                    let dir_trimmed = dir.trim_end_matches('/');
+                    let abs_path = root.join(dir_trimmed);
+                    if !abs_path.exists() {
+                        orphan_sym_ids.push(node.id.clone());
+                    }
                 }
             }
         }

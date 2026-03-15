@@ -117,7 +117,7 @@ impl ReferenceResolver {
             for (qn, sym) in &self.symbol_index {
                 if qn.ends_with(stripped) {
                     let prefix_len = qn.len() - stripped.len();
-                    if prefix_len == 0 || qn.as_bytes()[prefix_len - 1] == b':' {
+                    if prefix_len == 0 || qn[..prefix_len].ends_with("::") {
                         return Some((sym, 0.85));
                     }
                 }
@@ -134,7 +134,7 @@ impl ReferenceResolver {
             for (qn, sym) in &self.symbol_index {
                 if qn.ends_with(&reference.target_name) {
                     let prefix_len = qn.len() - reference.target_name.len();
-                    if prefix_len == 0 || qn.as_bytes()[prefix_len - 1] == b':' {
+                    if prefix_len == 0 || qn[..prefix_len].ends_with("::") {
                         return Some((sym, 0.8));
                     }
                 }
@@ -322,12 +322,18 @@ pub(crate) fn extract_package_hint(target_name: &str, kind: ReferenceKind) -> Op
     }
 
     // Go module paths: github.com/user/repo, gopkg.in/yaml.v3, etc.
-    // Detect by presence of '/' and a domain-like first segment (contains a dot with known TLD).
+    // Detect by presence of '/' and a domain-like first segment with a known
+    // hosting domain. A simple "contains dot" heuristic would misclassify
+    // npm packages like socket.io/client or lodash.get/deep.
     if target_name.contains('/') {
         let first_segment = target_name.split('/').next().unwrap_or("");
-        if first_segment.contains('.') {
-            // Looks like a domain-based Go module path — use full path as package hint
+        if is_go_module_domain(first_segment) {
+            // Domain-based Go module path — use full path as package hint
             return Some(target_name.to_string());
+        }
+        // For non-domain slash paths (e.g., "lodash/merge"), extract first segment
+        if !first_segment.is_empty() {
+            return Some(first_segment.to_string());
         }
     }
 
@@ -350,6 +356,32 @@ pub(crate) fn extract_package_hint(target_name: &str, kind: ReferenceKind) -> Op
         return None;
     }
     Some(target_name.to_string())
+}
+
+/// Check if a string looks like a Go module hosting domain.
+/// Matches common Go module hosts and any domain with a dot + known code TLD.
+fn is_go_module_domain(segment: &str) -> bool {
+    matches!(
+        segment,
+        "github.com"
+            | "gitlab.com"
+            | "bitbucket.org"
+            | "golang.org"
+            | "google.golang.org"
+            | "gopkg.in"
+            | "go.uber.org"
+            | "go.etcd.io"
+            | "k8s.io"
+            | "sigs.k8s.io"
+            | "honnef.co"
+            | "mvdan.cc"
+    ) || (segment.contains('.')
+        && segment.rsplit('.').next().is_some_and(|tld| {
+            matches!(
+                tld,
+                "com" | "org" | "io" | "net" | "dev" | "in" | "cc" | "co"
+            )
+        }))
 }
 
 /// Common Python stdlib modules that should not produce package hints.
