@@ -107,6 +107,20 @@ impl McpServer {
                     ToolResult::text("No matching memories found.")
                 }
                 Ok(results) => {
+                    // Apply git_ref filter (recall_with_impact doesn't take RecallQuery)
+                    let results: Vec<_> = if let Some(ref_filter) = git_ref_filter {
+                        results
+                            .into_iter()
+                            .filter(|r| {
+                                r.search_result.memory.git_ref.as_deref() == Some(ref_filter)
+                            })
+                            .collect()
+                    } else {
+                        results
+                    };
+                    if results.is_empty() {
+                        return ToolResult::text("No matching memories found.");
+                    }
                     let output: Vec<Value> = results
                         .iter()
                         .map(|r| {
@@ -145,6 +159,18 @@ impl McpServer {
                     ToolResult::text("No matching memories found.")
                 }
                 Ok(results) => {
+                    // Apply git_ref filter (recall_with_expansion doesn't take RecallQuery)
+                    let results: Vec<_> = if let Some(ref_filter) = git_ref_filter {
+                        results
+                            .into_iter()
+                            .filter(|er| er.result.memory.git_ref.as_deref() == Some(ref_filter))
+                            .collect()
+                    } else {
+                        results
+                    };
+                    if results.is_empty() {
+                        return ToolResult::text("No matching memories found.");
+                    }
                     let output: Vec<Value> = results
                         .iter()
                         .map(|er| {
