@@ -375,5 +375,18 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "name": "review_diff",
+            "description": "Analyze a unified diff for blast radius: map changed lines to symbols, find direct and transitive dependents, compute risk score, surface relevant memories and potentially missing changes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "diff": { "type": "string", "description": "Unified diff text (e.g., output of `git diff`)" },
+                    "depth": { "type": "integer", "default": 2, "description": "Max graph hops for transitive impact analysis" },
+                    "base_ref": { "type": "string", "description": "Base branch for overlay resolution (e.g., 'main')" }
+                },
+                "required": ["diff"]
+            }
+        }),
     ]
 }

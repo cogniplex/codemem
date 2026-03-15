@@ -763,6 +763,31 @@ impl McpServer {
             Err(e) => ToolResult::tool_error(format!("{e}")),
         }
     }
+
+    // ── Review Tool ────────────────────────────────────────────────────
+
+    pub(crate) fn tool_review_diff(&self, args: &Value) -> ToolResult {
+        let diff = match args.get("diff").and_then(|v| v.as_str()) {
+            Some(d) if !d.is_empty() => d,
+            _ => return ToolResult::tool_error("Missing or empty 'diff' parameter"),
+        };
+        let depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
+
+        // Set base_ref on scope if provided (for overlay resolution)
+        if let Some(base_ref) = args.get("base_ref").and_then(|v| v.as_str()) {
+            if let Some(mut scope) = self.engine.scope() {
+                scope.base_ref = Some(base_ref.to_string());
+                self.engine.set_scope(Some(scope));
+            }
+        }
+
+        match self.engine.blast_radius(diff, depth) {
+            Ok(report) => ToolResult::text(
+                serde_json::to_string_pretty(&report).expect("JSON serialization of literal"),
+            ),
+            Err(e) => ToolResult::tool_error(format!("Review failed: {e}")),
+        }
+    }
 }
 
 #[cfg(test)]
