@@ -175,7 +175,9 @@ impl CodememEngine {
             .search(&query_embedding, k * 3)
             .unwrap_or_default()
             .into_iter()
-            .filter(|(id, _)| id.starts_with("sym:") || id.starts_with("chunk:"))
+            .filter(|(id, _)| {
+                id.starts_with("sym:") || id.starts_with("chunk:") || id.starts_with("doc:")
+            })
             .take(k)
             .collect();
         drop(vec);
@@ -188,7 +190,27 @@ impl CodememEngine {
         for (id, similarity_value) in &raw_results {
             let similarity = *similarity_value as f64;
             if let Ok(Some(node)) = self.storage.get_graph_node(id) {
-                if id.starts_with("chunk:") {
+                if id.starts_with("doc:") {
+                    output.push(CodeSearchResult {
+                        id: id.clone(),
+                        kind: "document".to_string(),
+                        label: node.label,
+                        similarity,
+                        file_path: node.payload.get("file_path").cloned(),
+                        line_start: node.payload.get("line_start").cloned(),
+                        line_end: node.payload.get("line_end").cloned(),
+                        qualified_name: node
+                            .payload
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string),
+                        signature: node.payload.get("format").cloned(),
+                        doc_comment: node.payload.get("content").cloned(),
+                        node_kind: None,
+                        parent_symbol: None,
+                        non_ws_chars: None,
+                    });
+                } else if id.starts_with("chunk:") {
                     output.push(CodeSearchResult {
                         id: id.clone(),
                         kind: "chunk".to_string(),

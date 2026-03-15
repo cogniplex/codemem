@@ -4,7 +4,7 @@
 mod compaction;
 pub mod cross_repo;
 
-use crate::index::{CodeChunk, ResolvedEdge, Symbol};
+use crate::index::{CodeChunk, DocumentNode, ResolvedEdge, Symbol};
 use crate::IndexAndResolveResult;
 use codemem_core::{CodememError, Edge, GraphConfig, GraphNode, NodeKind, RelationshipType};
 use std::collections::{HashMap, HashSet};
@@ -16,9 +16,11 @@ pub struct IndexPersistResult {
     pub packages_created: usize,
     pub symbols_stored: usize,
     pub chunks_stored: usize,
+    pub documents_stored: usize,
     pub edges_resolved: usize,
     pub symbols_embedded: usize,
     pub chunks_embedded: usize,
+    pub documents_embedded: usize,
     pub chunks_pruned: usize,
     pub symbols_pruned: usize,
 }
@@ -59,6 +61,7 @@ pub fn edge_weight_for(rel: &RelationshipType, config: &GraphConfig) -> f64 {
 struct GraphPersistCounts {
     packages_created: usize,
     chunks_stored: usize,
+    documents_stored: usize,
 }
 
 impl super::CodememEngine {
@@ -98,9 +101,11 @@ impl super::CodememEngine {
             packages_created: graph_counts.packages_created,
             symbols_stored: results.symbols.len(),
             chunks_stored: graph_counts.chunks_stored,
+            documents_stored: graph_counts.documents_stored,
             edges_resolved: results.edges.len(),
             symbols_embedded: 0,
             chunks_embedded: 0,
+            documents_embedded: 0,
             chunks_pruned,
             symbols_pruned,
         })
@@ -119,10 +124,11 @@ impl super::CodememEngine {
         // 1. Persist all graph nodes and edges
         let graph_counts = self.persist_graph_nodes(results, namespace)?;
 
-        // 2. Embed symbols and chunks
-        let (symbols_embedded, chunks_embedded) = self.embed_and_persist(
+        // 2. Embed symbols, chunks, and document nodes
+        let (symbols_embedded, chunks_embedded, documents_embedded) = self.embed_and_persist(
             &results.symbols,
             &results.chunks,
+            &results.doc_nodes,
             &results.edges,
             on_progress,
         )?;
@@ -139,9 +145,11 @@ impl super::CodememEngine {
             packages_created: graph_counts.packages_created,
             symbols_stored: results.symbols.len(),
             chunks_stored: graph_counts.chunks_stored,
+            documents_stored: graph_counts.documents_stored,
             edges_resolved: results.edges.len(),
             symbols_embedded,
             chunks_embedded,
+            documents_embedded,
             chunks_pruned,
             symbols_pruned,
         })
@@ -342,11 +350,19 @@ impl super::CodememEngine {
         self.persist_nodes_to_storage_and_graph(&chunk_nodes, &mut **graph);
         self.persist_edges_to_storage_and_graph(&chunk_edges, &mut **graph);
 
+        // ── Document nodes + file→document CONTAINS edges
+        let (doc_nodes, doc_edges) =
+            Self::build_document_nodes(&results.doc_nodes, &ns_string, contains_weight, now);
+        let doc_count = doc_nodes.len();
+        self.persist_nodes_to_storage_and_graph(&doc_nodes, &mut **graph);
+        self.persist_edges_to_storage_and_graph(&doc_edges, &mut **graph);
+
         drop(graph);
 
         Ok(GraphPersistCounts {
             packages_created: created_dirs,
             chunks_stored: chunk_count,
+            documents_stored: doc_count,
         })
     }
 
@@ -754,26 +770,92 @@ impl super::CodememEngine {
         (chunk_nodes, chunk_edges)
     }
 
+    /// Build document graph nodes and file→document CONTAINS edges.
+    fn build_document_nodes(
+        doc_nodes: &[DocumentNode],
+        ns_string: &Option<String>,
+        contains_weight: f64,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> (Vec<GraphNode>, Vec<Edge>) {
+        let mut nodes = Vec::with_capacity(doc_nodes.len());
+        let mut edges = Vec::with_capacity(doc_nodes.len());
+
+        for (idx, doc) in doc_nodes.iter().enumerate() {
+            // Stable ID: prefix + file path + index within file.
+            let doc_id = format!("doc:{}:{}", doc.file_path, idx);
+            let label = format!("{} ({}:{})", doc.name, doc.file_path, doc.line_start);
+
+            let mut payload = HashMap::new();
+            payload.insert(
+                "file_path".to_string(),
+                serde_json::Value::String(doc.file_path.clone()),
+            );
+            payload.insert(
+                "name".to_string(),
+                serde_json::Value::String(doc.name.clone()),
+            );
+            payload.insert(
+                "format".to_string(),
+                serde_json::Value::String(doc.format.to_string()),
+            );
+            payload.insert("line_start".to_string(), serde_json::json!(doc.line_start));
+            payload.insert("line_end".to_string(), serde_json::json!(doc.line_end));
+            payload.insert(
+                "content".to_string(),
+                serde_json::Value::String(doc.content.clone()),
+            );
+
+            nodes.push(GraphNode {
+                id: doc_id.clone(),
+                kind: NodeKind::Document,
+                label,
+                payload,
+                centrality: 0.0,
+                memory_id: None,
+                namespace: ns_string.clone(),
+            });
+
+            let file_node_id = format!("file:{}", doc.file_path);
+            edges.push(Edge {
+                id: format!("contains:{file_node_id}->{doc_id}"),
+                src: file_node_id,
+                dst: doc_id,
+                relationship: RelationshipType::Contains,
+                weight: contains_weight,
+                valid_from: Some(now),
+                valid_to: None,
+                properties: HashMap::new(),
+                created_at: now,
+            });
+        }
+
+        (nodes, edges)
+    }
+
     // ── Embedding Persistence ────────────────────────────────────────────
 
-    /// Embed symbols and chunks, persisting embeddings to SQLite and the
-    /// vector index in batches with progress reporting.
+    /// Embed symbols, chunks, and document nodes, persisting embeddings to
+    /// SQLite and the vector index in batches with progress reporting.
     ///
-    /// Returns (symbols_embedded, chunks_embedded).
+    /// Returns (symbols_embedded, chunks_embedded, documents_embedded).
     fn embed_and_persist(
         &self,
         symbols: &[Symbol],
         chunks: &[CodeChunk],
+        doc_nodes: &[DocumentNode],
         edges: &[ResolvedEdge],
         on_progress: impl Fn(usize, usize),
-    ) -> Result<(usize, usize), CodememError> {
+    ) -> Result<(usize, usize, usize), CodememError> {
         let mut symbols_embedded = 0usize;
         let mut chunks_embedded = 0usize;
+        let mut documents_embedded = 0usize;
 
-        // Quick check: skip expensive text enrichment if embedding provider isn't loaded.
-        // This avoids triggering lazy init during lightweight operations (hooks).
-        if !self.embeddings_ready() {
-            return Ok((0, 0));
+        // Trigger lazy init: if no embedding model is configured this returns None
+        // and we skip embedding. Uses lock_embeddings() (not embeddings_ready()) to
+        // ensure the provider is loaded — embeddings_ready() returns false when the
+        // OnceLock hasn't been initialized yet (e.g. engine created via from_db_path).
+        if self.lock_embeddings()?.is_none() {
+            return Ok((0, 0, 0));
         }
 
         // Phase 1: Collect enriched texts without holding any lock.
@@ -793,13 +875,28 @@ impl super::CodememEngine {
                 (id, text)
             })
             .collect();
+        let doc_texts: Vec<(String, String)> = doc_nodes
+            .iter()
+            .enumerate()
+            .map(|(idx, doc)| {
+                let id = format!("doc:{}:{}", doc.file_path, idx);
+                // Prefix with name so semantic search finds it by heading/resource name.
+                let text = format!("{}\n\n{}", doc.name, doc.content);
+                (id, text)
+            })
+            .collect();
 
         // Phase 2+3: Embed in batches and persist progressively.
         let embed_batch_size = self.config.embedding.batch_size;
 
-        let all_pairs: Vec<(String, String)> = sym_texts.into_iter().chain(chunk_texts).collect();
-        let total = all_pairs.len();
         let sym_count = symbols.len();
+        let chunk_count = chunks.len();
+        let all_pairs: Vec<(String, String)> = sym_texts
+            .into_iter()
+            .chain(chunk_texts)
+            .chain(doc_texts)
+            .collect();
+        let total = all_pairs.len();
         let mut done = 0usize;
 
         for batch in all_pairs.chunks(embed_batch_size) {
@@ -844,10 +941,19 @@ impl super::CodememEngine {
                     }
                     let vector_ms = t2.elapsed().as_millis();
 
-                    let syms_in_batch = batch_len.min(sym_count.saturating_sub(done));
+                    // Tally by type based on position in the all_pairs stream.
+                    let batch_start = done;
+                    let batch_end = done + batch_len;
+                    let syms_in_batch = sym_count.saturating_sub(batch_start).min(batch_len);
+                    let chunks_in_batch = chunk_count
+                        .saturating_sub(batch_start.saturating_sub(sym_count))
+                        .min(batch_len.saturating_sub(syms_in_batch));
+                    let docs_in_batch = batch_len.saturating_sub(syms_in_batch + chunks_in_batch);
+
                     symbols_embedded += syms_in_batch;
-                    chunks_embedded += batch_len - syms_in_batch;
-                    done += batch_len;
+                    chunks_embedded += chunks_in_batch;
+                    documents_embedded += docs_in_batch;
+                    done = batch_end;
 
                     tracing::debug!(
                         "Embed batch {}: embed={embed_ms}ms sqlite={sqlite_ms}ms vector={vector_ms}ms",
@@ -862,6 +968,6 @@ impl super::CodememEngine {
         }
         self.save_index();
 
-        Ok((symbols_embedded, chunks_embedded))
+        Ok((symbols_embedded, chunks_embedded, documents_embedded))
     }
 }
