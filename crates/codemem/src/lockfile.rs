@@ -54,12 +54,21 @@ fn try_create_lock(path: &std::path::Path, namespace: &str) -> Result<IndexLock,
                 ));
             }
 
-            let _ = fs::remove_file(path);
-            write_lock_atomic(path)
+            // Stale lock from a dead process — reclaim atomically.
+            // Use rename-over to avoid a TOCTOU window: write our PID to a
+            // temp file, then atomically rename it over the stale lock.
+            // This prevents two processes from both detecting the stale lock,
+            // deleting it, and both re-creating it.
+            let tmp_path = path.with_extension("lock.tmp");
+            write_lock_to(&tmp_path)
+                .and_then(|()| fs::rename(&tmp_path, path))
                 .map(|()| IndexLock {
                     path: path.to_path_buf(),
                 })
-                .map_err(|e| format!("Failed to acquire lock after stale removal: {e}"))
+                .map_err(|e| {
+                    let _ = fs::remove_file(&tmp_path);
+                    format!("Failed to reclaim stale lock: {e}")
+                })
         }
         Err(e) => Err(format!(
             "Failed to create lock file {}: {e}",
@@ -70,6 +79,18 @@ fn try_create_lock(path: &std::path::Path, namespace: &str) -> Result<IndexLock,
 
 fn write_lock_atomic(path: &std::path::Path) -> std::io::Result<()> {
     let mut f = OpenOptions::new().write(true).create_new(true).open(path)?;
+    write!(f, "{}", std::process::id())?;
+    Ok(())
+}
+
+/// Write PID to a file (overwriting if it exists). Used for the temp file
+/// in the stale-lock reclaim path.
+fn write_lock_to(path: &std::path::Path) -> std::io::Result<()> {
+    let mut f = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
     write!(f, "{}", std::process::id())?;
     Ok(())
 }

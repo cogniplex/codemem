@@ -103,11 +103,11 @@ pub fn parse_diff(diff: &str) -> Vec<DiffHunk> {
             current_file = line.strip_prefix("+++ b/").map(|s| s.to_string());
         } else if line.starts_with("@@ ") {
             // Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
-            if let Some((new_start, _old_start)) = parse_hunk_header(line) {
+            if let Some((new_start, old_start)) = parse_hunk_header(line) {
                 new_line = new_start;
-                old_line = _old_start;
+                old_line = old_start;
             }
-        } else if let Some(ref _file) = current_file {
+        } else if current_file.is_some() {
             if line.starts_with('+') && !line.starts_with("+++") {
                 added_lines.push(new_line);
                 new_line += 1;
@@ -364,9 +364,12 @@ impl CodememEngine {
             }
         }
 
-        // Risk score: Σ(pagerank) × log(transitive_count + 1)
+        // Risk score: Σ(pagerank) + log(transitive_count + 1)
+        // Additive so that diffs touching zero-pagerank symbols (common when
+        // centrality hasn't been computed or symbols have no edges) still get
+        // a nonzero risk score from their dependent count.
         let transitive_count = direct_deps.len() + transitive_deps.len();
-        risk_score *= (transitive_count as f64 + 1.0).ln();
+        risk_score += (transitive_count as f64 + 1.0).ln();
 
         // Drop graph lock before accessing storage
         drop(graph);

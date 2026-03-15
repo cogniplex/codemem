@@ -120,27 +120,38 @@ pub fn forward_link(
             .filter(|entry| entry.package_name == *package_hint && entry.namespace != namespace)
             .collect();
 
+        // Try all matching namespaces and pick the best overall match,
+        // rather than stopping at the first namespace that resolves.
+        let mut best_edge: Option<(CrossRepoEdge, f64)> = None;
         for entry in matching_entries {
             let matches = resolve_fn(&entry.namespace, &pending_ref.target_name);
             if let Some(best) = pick_best_match(&matches) {
-                let edge = CrossRepoEdge {
-                    id: make_edge_id(
-                        namespace,
-                        &pending_ref.source_node,
-                        &entry.namespace,
-                        &best.qualified_name,
-                    ),
-                    source: pending_ref.source_node.clone(),
-                    target: format!("sym:{}", best.qualified_name),
-                    relationship: ref_kind_to_relationship(&pending_ref.ref_kind).to_string(),
-                    confidence: match_confidence_for_symbol(best),
-                    source_namespace: namespace.to_string(),
-                    target_namespace: entry.namespace.clone(),
-                };
-                result.forward_edges.push(edge);
-                result.resolved_ref_ids.push(pending_ref.id.clone());
-                break; // Don't match same ref to multiple namespaces
+                let confidence = match_confidence_for_symbol(best);
+                if best_edge.as_ref().is_none_or(|(_, c)| confidence > *c) {
+                    best_edge = Some((
+                        CrossRepoEdge {
+                            id: make_edge_id(
+                                namespace,
+                                &pending_ref.source_node,
+                                &entry.namespace,
+                                &best.qualified_name,
+                            ),
+                            source: pending_ref.source_node.clone(),
+                            target: format!("sym:{}", best.qualified_name),
+                            relationship: ref_kind_to_relationship(&pending_ref.ref_kind)
+                                .to_string(),
+                            confidence,
+                            source_namespace: namespace.to_string(),
+                            target_namespace: entry.namespace.clone(),
+                        },
+                        confidence,
+                    ));
+                }
             }
+        }
+        if let Some((edge, _)) = best_edge {
+            result.forward_edges.push(edge);
+            result.resolved_ref_ids.push(pending_ref.id.clone());
         }
     }
 
