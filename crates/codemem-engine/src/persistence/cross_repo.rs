@@ -211,10 +211,16 @@ impl super::super::CodememEngine {
         }
 
         // ── Phase 3: API Surface ────────────────────────────────────────────
-        // 6. Detect API endpoints and client calls.
-        let endpoints = api_surface::detect_endpoints(symbols, namespace);
-        result.endpoints_detected = endpoints.len();
-        for ep in &endpoints {
+
+        // 6a. Detect endpoints from decorators/annotations (existing)
+        let mut all_endpoints = api_surface::detect_endpoints(symbols, namespace);
+
+        // 6b. Detect endpoints from call references (Go, Express.js)
+        let ref_endpoints = api_surface::detect_endpoints_from_references(references, namespace);
+        all_endpoints.extend(ref_endpoints);
+
+        result.endpoints_detected = all_endpoints.len();
+        for ep in &all_endpoints {
             if let Err(e) = self.storage.store_api_endpoint(
                 ep.method.as_deref().unwrap_or("ANY"),
                 &ep.path,
@@ -229,6 +235,7 @@ impl super::super::CodememEngine {
             }
         }
 
+        // 7. Detect HTTP client calls
         let client_calls = api_surface::detect_client_calls(references);
         result.client_calls_detected = client_calls.len();
         for call in &client_calls {
@@ -245,7 +252,154 @@ impl super::super::CodememEngine {
             }
         }
 
+        // 8. Detect event channel interactions (Kafka, RabbitMQ, Redis, SQS, etc.)
+        let event_calls = api_surface::detect_event_calls(references, symbols);
+        result.event_channels_detected = event_calls.len();
+        for ec in &event_calls {
+            if let Err(e) = self.storage.store_event_channel(
+                ec.channel.as_deref().unwrap_or("unknown"),
+                &ec.direction,
+                &ec.protocol,
+                &ec.caller,
+                namespace,
+                "",
+            ) {
+                tracing::warn!("Failed to store event channel for {}: {e}", ec.caller);
+            }
+        }
+
+        // ── Phase 4: Cross-service edge matching ──────────────────────────
+
+        // 9a. Match HTTP client calls to detected endpoints across namespaces
+        let all_stored_with_ns = self.get_all_stored_endpoints_with_ns();
+        let all_ep_list: Vec<api_surface::DetectedEndpoint> = all_stored_with_ns
+            .iter()
+            .map(|(ep, _)| ep.clone())
+            .collect();
+        for call in &client_calls {
+            if let Some(url) = &call.url_pattern {
+                if let Some((matched_ep, confidence)) =
+                    api_surface::match_endpoint(url, call.method.as_deref(), &all_ep_list)
+                {
+                    // Find the namespace for this matched endpoint
+                    let ep_ns = all_stored_with_ns
+                        .iter()
+                        .find(|(ep, _)| ep.id == matched_ep.id)
+                        .map(|(_, ns)| ns.as_str());
+                    // Only create cross-namespace edges
+                    if ep_ns != Some(namespace) {
+                        let edge = Edge {
+                            id: format!("http:{}->{}", call.caller, matched_ep.handler),
+                            src: format!("sym:{}", call.caller),
+                            dst: format!("sym:{}", matched_ep.handler),
+                            relationship: RelationshipType::HttpCalls,
+                            weight: confidence * 0.7,
+                            properties: {
+                                let mut p = HashMap::new();
+                                p.insert(
+                                    "cross_namespace".to_string(),
+                                    serde_json::Value::Bool(true),
+                                );
+                                p.insert(
+                                    "path".to_string(),
+                                    serde_json::Value::String(matched_ep.path.clone()),
+                                );
+                                p
+                            },
+                            created_at: chrono::Utc::now(),
+                            valid_from: Some(chrono::Utc::now()),
+                            valid_to: None,
+                        };
+                        if self.storage.insert_graph_edge(&edge).is_ok() {
+                            if let Ok(mut graph) = self.lock_graph() {
+                                let _ = graph.add_edge(edge);
+                            }
+                            result.http_edges_matched += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 9b. Match event producers to consumers across namespaces
+        let all_event_channels = self.storage.list_all_event_channels().unwrap_or_default();
+        let producers: Vec<api_surface::DetectedEventCall> = all_event_channels
+            .iter()
+            .filter(|ec| ec.1 == "publish")
+            .map(|ec| api_surface::DetectedEventCall {
+                caller: ec.3.clone(),
+                channel: Some(ec.0.clone()),
+                direction: "publish".to_string(),
+                protocol: ec.2.clone(),
+                file_path: String::new(),
+                line: 0,
+            })
+            .collect();
+        let consumers: Vec<api_surface::DetectedEventCall> = all_event_channels
+            .iter()
+            .filter(|ec| ec.1 == "subscribe")
+            .map(|ec| api_surface::DetectedEventCall {
+                caller: ec.3.clone(),
+                channel: Some(ec.0.clone()),
+                direction: "subscribe".to_string(),
+                protocol: ec.2.clone(),
+                file_path: String::new(),
+                line: 0,
+            })
+            .collect();
+
+        let event_matches = api_surface::match_event_channels(&producers, &consumers);
+        let now = chrono::Utc::now();
+        for (producer, consumer, channel, protocol, confidence) in &event_matches {
+            // Only create cross-namespace edges (different callers imply different namespaces in practice)
+            if producer == consumer {
+                continue;
+            }
+            let edge = Edge {
+                id: format!("event:{producer}->{consumer}:{protocol}:{channel}"),
+                src: format!("sym:{producer}"),
+                dst: format!("sym:{consumer}"),
+                relationship: RelationshipType::PublishesTo,
+                weight: confidence * 0.6,
+                properties: {
+                    let mut p = HashMap::new();
+                    p.insert(
+                        "channel".to_string(),
+                        serde_json::Value::String(channel.clone()),
+                    );
+                    p.insert(
+                        "protocol".to_string(),
+                        serde_json::Value::String(protocol.clone()),
+                    );
+                    p
+                },
+                created_at: now,
+                valid_from: Some(now),
+                valid_to: None,
+            };
+            if self.storage.insert_graph_edge(&edge).is_ok() {
+                if let Ok(mut graph) = self.lock_graph() {
+                    let _ = graph.add_edge(edge);
+                }
+                result.event_edges_matched += 1;
+            }
+        }
+
         Ok(result)
+    }
+
+    /// Get all stored endpoints across all namespaces, paired with their namespace.
+    fn get_all_stored_endpoints_with_ns(&self) -> Vec<(api_surface::DetectedEndpoint, String)> {
+        let namespaces = self.storage.list_namespaces().unwrap_or_default();
+        let mut all = Vec::new();
+        for ns in &namespaces {
+            if let Ok(eps) = self.get_detected_endpoints(ns) {
+                for ep in eps {
+                    all.push((ep, ns.clone()));
+                }
+            }
+        }
+        all
     }
 
     /// Persist a cross-repo edge into the graph_edges table and in-memory graph.

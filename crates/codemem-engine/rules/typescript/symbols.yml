@@ -13,6 +13,13 @@ symbols:
     is_scope: true
     special: null
 
+  - kind: "abstract_class_declaration"
+    symbol_kind: "class"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: true
+    special: null
+
   - kind: "interface_declaration"
     symbol_kind: "interface"
     name_field: "name"
@@ -55,12 +62,31 @@ symbols:
     is_scope: false
     special: null
 
+  # Arrow functions: const fn = () => {}
   - kind: "lexical_declaration"
     symbol_kind: "function"
     name_field: "name"
     method_when_scoped: false
     is_scope: false
     special: "ts_lexical_arrow"
+
+  # Non-arrow constants: const FOO = 42, const config = { ... }
+  # The ts_lexical_arrow handler returns None for non-arrow values,
+  # falling through to this rule which captures them as constants.
+  - kind: "lexical_declaration"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
+
+  # var declarations (legacy but still common)
+  - kind: "variable_declaration"
+    symbol_kind: "constant"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
 
   - kind: "module"
     symbol_kind: "module"
@@ -78,6 +104,11 @@ symbols:
 
 scope_containers:
   - kind: "class_declaration"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: true
+
+  - kind: "abstract_class_declaration"
     name_field: "name"
     body_field: "body"
     is_method_scope: true

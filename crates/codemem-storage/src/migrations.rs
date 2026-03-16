@@ -74,6 +74,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Scope context (repo + git_ref)",
         sql: include_str!("migrations/013_scope_context.sql"),
     },
+    Migration {
+        version: 14,
+        description: "Event channels",
+        sql: include_str!("migrations/014_event_channels.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.

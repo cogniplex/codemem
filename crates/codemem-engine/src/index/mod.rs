@@ -12,11 +12,13 @@ pub mod parser;
 pub mod resolver;
 pub mod rule_loader;
 pub mod scip;
+pub mod spec_parser;
 pub mod symbol;
 
 pub use api_surface::{
-    detect_client_calls, detect_endpoints, match_endpoint, normalize_path_pattern,
-    ApiSurfaceResult, DetectedClientCall, DetectedEndpoint,
+    detect_client_calls, detect_endpoints, detect_endpoints_from_references, detect_event_calls,
+    match_endpoint, match_event_channels, normalize_path_pattern, ApiSurfaceResult,
+    DetectedClientCall, DetectedEndpoint, DetectedEventCall,
 };
 pub use chunker::{ChunkConfig, CodeChunk};
 pub use indexer::{IndexAndResolveResult, IndexProgress, IndexResult, Indexer};
@@ -28,4 +30,8 @@ pub use manifest::{Dependency, ManifestResult, Workspace};
 pub use parser::{CodeParser, ParseResult};
 pub use resolver::{ReferenceResolver, ResolveResult, ResolvedEdge, UnresolvedRef};
 pub use scip::orchestrate::{OrchestrationResult, ScipLanguage, ScipOrchestrator};
+pub use spec_parser::{
+    parse_asyncapi, parse_openapi, scan_api_specs, AsyncApiParseResult, SpecChannel, SpecEndpoint,
+    SpecFileResult, SpecParseResult,
+};
 pub use symbol::{Reference, ReferenceKind, Symbol, SymbolKind, Visibility};

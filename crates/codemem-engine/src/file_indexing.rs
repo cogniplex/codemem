@@ -6,6 +6,48 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
+/// Check if a file is a spec file (OpenAPI/AsyncAPI) by name or content.
+///
+/// First checks well-known filenames. For other YAML/JSON files, peeks at
+/// the first bytes to look for `"openapi"`, `"swagger"`, or `"asyncapi"` keys.
+fn is_spec_file_with_content(path: &str, content: &[u8]) -> bool {
+    let filename = path.rsplit('/').next().unwrap_or(path);
+    let filename_lower = filename.to_lowercase();
+
+    // Fast path: well-known names
+    if matches!(
+        filename_lower.as_str(),
+        "openapi.yaml"
+            | "openapi.yml"
+            | "openapi.json"
+            | "swagger.yaml"
+            | "swagger.yml"
+            | "swagger.json"
+            | "asyncapi.yaml"
+            | "asyncapi.yml"
+            | "asyncapi.json"
+    ) {
+        return true;
+    }
+
+    // For any YAML/JSON file, peek at content for spec-identifying keys
+    let is_yaml_json = filename_lower.ends_with(".yaml")
+        || filename_lower.ends_with(".yml")
+        || filename_lower.ends_with(".json");
+    if !is_yaml_json {
+        return false;
+    }
+
+    let peek = std::str::from_utf8(&content[..content.len().min(300)]).unwrap_or("");
+    let peek_lower = peek.to_lowercase();
+    peek_lower.contains("\"openapi\"")
+        || peek_lower.contains("\"swagger\"")
+        || peek_lower.contains("\"asyncapi\"")
+        || peek_lower.contains("openapi:")
+        || peek_lower.contains("swagger:")
+        || peek_lower.contains("asyncapi:")
+}
+
 impl CodememEngine {
     // ── Index Persistence ────────────────────────────────────────────────
 
@@ -157,6 +199,20 @@ impl CodememEngine {
             }
             hash
         };
+
+        // Check if this is a spec file (OpenAPI/AsyncAPI). If so, re-parse it
+        // and update endpoints/channels rather than treating it as code.
+        if is_spec_file_with_content(&path_str, &content) {
+            self.reparse_spec_file(path, namespace.unwrap_or(""))?;
+            // Record hash after successful spec parse
+            if let Ok(mut cd_guard) = self.change_detector.lock() {
+                if let Some(cd) = cd_guard.as_mut() {
+                    cd.record_hash(&path_str, hash);
+                    let _ = cd.save_to_storage(&*self.storage, namespace.unwrap_or(""));
+                }
+            }
+            return Ok(());
+        }
 
         let parser = index::CodeParser::new();
 
@@ -552,6 +608,58 @@ impl CodememEngine {
         }
 
         Ok((symbols_cleaned, edges_cleaned))
+    }
+
+    // ── A3c: Spec File Re-parsing ──────────────────────────────────────
+
+    /// Re-parse a spec file (OpenAPI/AsyncAPI) and update stored endpoints/channels.
+    fn reparse_spec_file(&self, path: &Path, namespace: &str) -> Result<(), CodememError> {
+        use crate::index::spec_parser::{parse_asyncapi, parse_openapi, SpecFileResult};
+
+        let result = if let Some(openapi) = parse_openapi(path) {
+            Some(SpecFileResult::OpenApi(openapi))
+        } else {
+            parse_asyncapi(path).map(SpecFileResult::AsyncApi)
+        };
+
+        match result {
+            Some(SpecFileResult::OpenApi(spec)) => {
+                for ep in &spec.endpoints {
+                    let _ = self.storage.store_api_endpoint(
+                        &ep.method,
+                        &ep.path,
+                        ep.operation_id.as_deref().unwrap_or(""),
+                        namespace,
+                    );
+                }
+                tracing::info!(
+                    "Re-parsed OpenAPI spec: {} endpoints from {}",
+                    spec.endpoints.len(),
+                    path.display()
+                );
+            }
+            Some(SpecFileResult::AsyncApi(spec)) => {
+                for ch in &spec.channels {
+                    let _ = self.storage.store_event_channel(
+                        &ch.channel,
+                        &ch.direction,
+                        ch.protocol.as_deref().unwrap_or(""),
+                        ch.operation_id.as_deref().unwrap_or(""),
+                        namespace,
+                        ch.description.as_deref().unwrap_or(""),
+                    );
+                }
+                tracing::info!(
+                    "Re-parsed AsyncAPI spec: {} channels from {}",
+                    spec.channels.len(),
+                    path.display()
+                );
+            }
+            None => {
+                tracing::debug!("Not a recognized spec file: {}", path.display());
+            }
+        }
+        Ok(())
     }
 
     // ── A4: Unified Analyze Pipeline ────────────────────────────────────

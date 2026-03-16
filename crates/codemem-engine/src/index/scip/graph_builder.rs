@@ -320,9 +320,25 @@ pub fn build_graph(
                 edges.push(Edge {
                     id: format!("typedef:{node_id}->{target_node_id}"),
                     src: node_id.clone(),
-                    dst: target_node_id,
+                    dst: target_node_id.clone(),
                     relationship: RelationshipType::TypeDefinition,
                     weight: 0.6,
+                    properties: scip_edge_properties(),
+                    created_at: now,
+                    valid_from: Some(now),
+                    valid_to: None,
+                });
+            }
+            // `is_reference` on a relationship indicates a superclass/supertype
+            // reference (e.g., class Dog extends Animal — Dog's SymbolInformation
+            // has a relationship to Animal with is_reference=true). Map to Inherits.
+            if rel.is_reference && !rel.is_implementation {
+                edges.push(Edge {
+                    id: format!("inherits:{node_id}->{target_node_id}"),
+                    src: node_id.clone(),
+                    dst: target_node_id,
+                    relationship: RelationshipType::Inherits,
+                    weight: 0.8,
                     properties: scip_edge_properties(),
                     created_at: now,
                     valid_from: Some(now),
@@ -507,77 +523,76 @@ pub fn build_graph(
             continue;
         }
 
-        // Some indexers (e.g., scip-go) set all references to READ_ACCESS without
-        // differentiating imports, writes, or calls. When the role is ONLY READ_ACCESS
-        // with no IMPORT or WRITE flags, treat as a generic reference (→ CALLS edge).
+        // Pick the most specific role for each reference. Priority:
+        //   IMPORT > WRITE > READ > generic CALLS
+        // A reference can have multiple role flags (e.g., IMPORT + READ_ACCESS),
+        // but we emit one edge per reference to avoid double-counting in
+        // PageRank — the more specific role subsumes the less specific one.
+        //
+        // scip-go workaround: scip-go sets READ_ACCESS on ALL references
+        // without semantic differentiation. When ONLY READ_ACCESS is set
+        // (no IMPORT, WRITE), fall through to CALLS.
         let semantic_mask = ROLE_IMPORT | ROLE_WRITE_ACCESS | ROLE_READ_ACCESS;
-        let roles = if r.role_bitmask & semantic_mask == ROLE_READ_ACCESS {
-            0 // Falls through to the generic CALLS branch
+        let is_scip_go_generic = r.role_bitmask & semantic_mask == ROLE_READ_ACCESS;
+
+        let (rel, weight) = if is_import_ref(r.role_bitmask) {
+            (RelationshipType::Imports, 0.5)
+        } else if is_write_ref(r.role_bitmask) {
+            (RelationshipType::Writes, 0.4)
+        } else if is_read_ref(r.role_bitmask) && !is_scip_go_generic {
+            (RelationshipType::Reads, 0.3)
         } else {
-            r.role_bitmask
+            (RelationshipType::Calls, 1.0)
         };
 
-        if is_import_ref(roles) {
-            edges.push(Edge {
-                id: format!(
-                    "imports:{source_node_id}->{target_node_id}:{}:{}",
-                    r.file_path, r.line
-                ),
-                src: source_node_id.clone(),
-                dst: target_node_id.clone(),
-                relationship: RelationshipType::Imports,
-                weight: 0.5,
-                properties: scip_edge_properties(),
-                created_at: now,
-                valid_from: Some(now),
-                valid_to: None,
-            });
-        } else if is_write_ref(roles) {
-            edges.push(Edge {
-                id: format!(
-                    "writes:{source_node_id}->{target_node_id}:{}:{}",
-                    r.file_path, r.line
-                ),
-                src: source_node_id.clone(),
-                dst: target_node_id.clone(),
-                relationship: RelationshipType::Writes,
-                weight: 0.4,
-                properties: scip_edge_properties(),
-                created_at: now,
-                valid_from: Some(now),
-                valid_to: None,
-            });
-        } else if is_read_ref(roles) {
-            edges.push(Edge {
-                id: format!(
-                    "reads:{source_node_id}->{target_node_id}:{}:{}",
-                    r.file_path, r.line
-                ),
-                src: source_node_id.clone(),
-                dst: target_node_id.clone(),
-                relationship: RelationshipType::Reads,
-                weight: 0.3,
-                properties: scip_edge_properties(),
-                created_at: now,
-                valid_from: Some(now),
-                valid_to: None,
-            });
-        } else {
-            // Generic reference — treat as CALLS.
-            edges.push(Edge {
-                id: format!(
-                    "calls:{source_node_id}->{target_node_id}:{}:{}",
-                    r.file_path, r.line
-                ),
-                src: source_node_id,
-                dst: target_node_id,
-                relationship: RelationshipType::Calls,
-                weight: 1.0,
-                properties: scip_edge_properties(),
-                created_at: now,
-                valid_from: Some(now),
-                valid_to: None,
-            });
+        let edge_prefix = rel.to_string().to_lowercase();
+        edges.push(Edge {
+            id: format!(
+                "{edge_prefix}:{source_node_id}->{target_node_id}:{}:{}",
+                r.file_path, r.line
+            ),
+            src: source_node_id.clone(),
+            dst: target_node_id.clone(),
+            relationship: rel,
+            weight,
+            properties: scip_edge_properties(),
+            created_at: now,
+            valid_from: Some(now),
+            valid_to: None,
+        });
+
+        // For non-import references to type-like symbols, also create a
+        // DependsOn edge. This captures "function X uses type Y" which is
+        // critical for blast-radius analysis. This is the ONE case where
+        // we emit two edges per reference — the structural relationship
+        // (Calls/Reads/Writes) AND the type dependency are distinct signals.
+        if !is_import_ref(r.role_bitmask) {
+            let is_type_target = matches!(
+                target_kind,
+                Some(
+                    NodeKind::Class
+                        | NodeKind::Trait
+                        | NodeKind::Interface
+                        | NodeKind::Type
+                        | NodeKind::Enum
+                )
+            );
+            if is_type_target {
+                edges.push(Edge {
+                    id: format!(
+                        "depends:{source_node_id}->{target_node_id}:{}:{}",
+                        r.file_path, r.line
+                    ),
+                    src: source_node_id,
+                    dst: target_node_id,
+                    relationship: RelationshipType::DependsOn,
+                    weight: 0.7,
+                    properties: scip_edge_properties(),
+                    created_at: now,
+                    valid_from: Some(now),
+                    valid_to: None,
+                });
+            }
         }
     }
 

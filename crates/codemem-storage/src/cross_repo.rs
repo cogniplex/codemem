@@ -49,6 +49,20 @@ pub struct ApiClientCallEntry {
     pub library: String,
 }
 
+/// A row in the `event_channels` table.
+#[derive(Debug, Clone)]
+pub struct EventChannelEntry {
+    pub id: String,
+    pub namespace: String,
+    pub channel: String,
+    pub direction: String,
+    pub protocol: String,
+    pub message_schema: String,
+    pub description: String,
+    pub handler: String,
+    pub spec_file: String,
+}
+
 impl Storage {
     // ── Package Registry ─────────────────────────────────────────────────
 
@@ -516,6 +530,97 @@ impl Storage {
                     target: row.get(3)?,
                     caller: row.get(4)?,
                     library: row.get(5)?,
+                })
+            })
+            .storage_err()?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row.storage_err()?);
+        }
+        Ok(entries)
+    }
+
+    // ── Cross-namespace Edge Queries ─────────────────────────────────────
+
+    // ── Event Channels ───────────────────────────────────────────────
+
+    /// Insert or update an event channel entry.
+    pub fn upsert_event_channel(&self, entry: &EventChannelEntry) -> Result<(), CodememError> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO event_channels (id, namespace, channel, direction, protocol, message_schema, description, handler, spec_file)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                entry.id,
+                entry.namespace,
+                entry.channel,
+                entry.direction,
+                entry.protocol,
+                entry.message_schema,
+                entry.description,
+                entry.handler,
+                entry.spec_file,
+            ],
+        )
+        .storage_err()?;
+        Ok(())
+    }
+
+    /// Get all event channels for a namespace.
+    pub fn get_event_channels_for_namespace(
+        &self,
+        namespace: &str,
+    ) -> Result<Vec<EventChannelEntry>, CodememError> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, namespace, channel, direction, protocol, message_schema, description, handler, spec_file
+                 FROM event_channels WHERE namespace = ?1",
+            )
+            .storage_err()?;
+        let rows = stmt
+            .query_map(params![namespace], |row| {
+                Ok(EventChannelEntry {
+                    id: row.get(0)?,
+                    namespace: row.get(1)?,
+                    channel: row.get(2)?,
+                    direction: row.get(3)?,
+                    protocol: row.get(4)?,
+                    message_schema: row.get(5)?,
+                    description: row.get(6)?,
+                    handler: row.get(7)?,
+                    spec_file: row.get(8)?,
+                })
+            })
+            .storage_err()?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row.storage_err()?);
+        }
+        Ok(entries)
+    }
+
+    /// Get all event channels across all namespaces.
+    pub fn get_all_event_channels(&self) -> Result<Vec<EventChannelEntry>, CodememError> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, namespace, channel, direction, protocol, message_schema, description, handler, spec_file
+                 FROM event_channels",
+            )
+            .storage_err()?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(EventChannelEntry {
+                    id: row.get(0)?,
+                    namespace: row.get(1)?,
+                    channel: row.get(2)?,
+                    direction: row.get(3)?,
+                    protocol: row.get(4)?,
+                    message_schema: row.get(5)?,
+                    description: row.get(6)?,
+                    handler: row.get(7)?,
+                    spec_file: row.get(8)?,
                 })
             })
             .storage_err()?;

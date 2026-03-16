@@ -89,6 +89,25 @@ impl CodememEngine {
             ctx.push_str(&format!("\nRelated: {}", related.join("; ")));
         }
 
+        // Include typed parameters for better search matching
+        if !sym.parameters.is_empty() {
+            let params: Vec<String> = sym
+                .parameters
+                .iter()
+                .map(|p| {
+                    if let Some(ref ty) = p.type_annotation {
+                        format!("{}: {}", p.name, ty)
+                    } else {
+                        p.name.clone()
+                    }
+                })
+                .collect();
+            ctx.push_str(&format!("\nParams: ({})", params.join(", ")));
+        }
+        if let Some(ref ret) = sym.return_type {
+            ctx.push_str(&format!(" -> {}", ret));
+        }
+
         let mut body = format!("{}: {}", sym.qualified_name, sym.signature);
         if let Some(ref doc) = sym.doc_comment {
             body.push('\n');

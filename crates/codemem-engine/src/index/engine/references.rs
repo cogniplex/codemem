@@ -97,6 +97,56 @@ impl super::AstGrepEngine {
                     }
                 }
             }
+            "python_import_from" => {
+                // `from module import name1, name2` — emit import refs for
+                // both the module AND each imported name so the graph has
+                // edges to the individual symbols, not just the module.
+                let module_name = node
+                    .field("module_name")
+                    .map(|n| n.text().to_string())
+                    .unwrap_or_default();
+                if !module_name.is_empty() {
+                    push_ref(
+                        references,
+                        &source_qn,
+                        module_name.clone(),
+                        ReferenceKind::Import,
+                        file_path,
+                        node.start_pos().line(),
+                    );
+                }
+                // Extract individual imported names from the `name` children
+                for child in node.children() {
+                    let ck = child.kind();
+                    if ck.as_ref() == "dotted_name" || ck.as_ref() == "aliased_import" {
+                        let name_text = if ck.as_ref() == "aliased_import" {
+                            // `from X import Y as Z` — extract `Y` (the `name` field)
+                            child
+                                .field("name")
+                                .map(|n| n.text().to_string())
+                                .unwrap_or_default()
+                        } else {
+                            child.text().to_string()
+                        };
+                        if !name_text.is_empty() && name_text != module_name && name_text != "*" {
+                            // Qualify with module: `flask.Flask` for `from flask import Flask`
+                            let qualified = if module_name.is_empty() {
+                                name_text
+                            } else {
+                                format!("{module_name}.{name_text}")
+                            };
+                            push_ref(
+                                references,
+                                &source_qn,
+                                qualified,
+                                ReferenceKind::Import,
+                                file_path,
+                                child.start_pos().line(),
+                            );
+                        }
+                    }
+                }
+            }
             "python_class_bases" => {
                 if let Some(name_node) = node.field("name") {
                     let class_name = name_node.text().to_string();
@@ -724,6 +774,12 @@ fn decompose_rust_use_path(path: &str) -> Vec<String> {
             }
             return results;
         }
+    }
+
+    // Strip glob `*` — emit the parent module as the import target.
+    // `use std::collections::*` becomes `std::collections`.
+    if let Some(stripped) = path.strip_suffix("::*") {
+        return vec![stripped.to_string()];
     }
 
     // No group: return the path as-is

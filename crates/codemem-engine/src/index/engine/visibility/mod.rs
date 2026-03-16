@@ -135,7 +135,8 @@ impl crate::index::engine::AstGrepEngine {
                         }
                     }
                 }
-                Visibility::Private
+                // Swift's default access level is `internal`, not `private`
+                Visibility::Crate
             }
             "php" => {
                 for child in node.children() {
