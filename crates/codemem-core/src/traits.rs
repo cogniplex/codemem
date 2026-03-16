@@ -865,4 +865,45 @@ pub trait StorageBackend: Send + Sync {
     ) -> Result<Vec<(String, String, String, String)>, CodememError> {
         Ok(Vec::new())
     }
+
+    /// Store a detected event channel.
+    fn store_event_channel(
+        &self,
+        channel: &str,
+        direction: &str,
+        protocol: &str,
+        handler: &str,
+        namespace: &str,
+        description: &str,
+    ) -> Result<(), CodememError> {
+        let _ = (
+            channel,
+            direction,
+            protocol,
+            handler,
+            namespace,
+            description,
+        );
+        Ok(())
+    }
+
+    /// List event channels for a namespace.
+    /// Returns (channel, direction, protocol, handler, description) tuples.
+    #[allow(clippy::type_complexity)]
+    fn list_event_channels(
+        &self,
+        namespace: &str,
+    ) -> Result<Vec<(String, String, String, String, String)>, CodememError> {
+        let _ = namespace;
+        Ok(Vec::new())
+    }
+
+    /// List all event channels across all namespaces.
+    /// Returns (channel, direction, protocol, handler, namespace, description) tuples.
+    #[allow(clippy::type_complexity)]
+    fn list_all_event_channels(
+        &self,
+    ) -> Result<Vec<(String, String, String, String, String, String)>, CodememError> {
+        Ok(Vec::new())
+    }
 }

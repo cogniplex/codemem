@@ -965,6 +965,60 @@ impl StorageBackend for Storage {
             })
             .collect())
     }
+
+    fn store_event_channel(
+        &self,
+        channel: &str,
+        direction: &str,
+        protocol: &str,
+        handler: &str,
+        namespace: &str,
+        description: &str,
+    ) -> Result<(), CodememError> {
+        use crate::cross_repo::EventChannelEntry;
+        let entry = EventChannelEntry {
+            id: format!("ec:{namespace}:{direction}:{channel}"),
+            namespace: namespace.to_string(),
+            channel: channel.to_string(),
+            direction: direction.to_string(),
+            protocol: protocol.to_string(),
+            message_schema: "{}".to_string(),
+            description: description.to_string(),
+            handler: handler.to_string(),
+            spec_file: String::new(),
+        };
+        Storage::upsert_event_channel(self, &entry)
+    }
+
+    fn list_event_channels(
+        &self,
+        namespace: &str,
+    ) -> Result<Vec<(String, String, String, String, String)>, CodememError> {
+        let entries = Storage::get_event_channels_for_namespace(self, namespace)?;
+        Ok(entries
+            .into_iter()
+            .map(|e| (e.channel, e.direction, e.protocol, e.handler, e.description))
+            .collect())
+    }
+
+    fn list_all_event_channels(
+        &self,
+    ) -> Result<Vec<(String, String, String, String, String, String)>, CodememError> {
+        let entries = Storage::get_all_event_channels(self)?;
+        Ok(entries
+            .into_iter()
+            .map(|e| {
+                (
+                    e.channel,
+                    e.direction,
+                    e.protocol,
+                    e.handler,
+                    e.namespace,
+                    e.description,
+                )
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]

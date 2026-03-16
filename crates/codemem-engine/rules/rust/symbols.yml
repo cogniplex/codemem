@@ -17,7 +17,7 @@ symbols:
     symbol_kind: "enum"
     name_field: "name"
     method_when_scoped: false
-    is_scope: false
+    is_scope: true
     special: null
 
   - kind: "trait_item"
@@ -55,6 +55,13 @@ symbols:
     is_scope: true
     special: null
 
+  - kind: "macro_definition"
+    symbol_kind: "function"
+    name_field: "name"
+    method_when_scoped: false
+    is_scope: false
+    special: null
+
 scope_containers:
   - kind: "impl_item"
     name_field: "type"
@@ -67,6 +74,11 @@ scope_containers:
     is_method_scope: true
 
   - kind: "mod_item"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: false
+
+  - kind: "enum_item"
     name_field: "name"
     body_field: "body"
     is_method_scope: false

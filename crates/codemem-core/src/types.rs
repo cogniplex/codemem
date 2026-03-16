@@ -121,6 +121,13 @@ pub enum RelationshipType {
     Writes,
     /// Method → parent method (virtual dispatch) — derived from SCIP `is_implementation` on methods.
     Overrides,
+    // Cross-service relationships (API surface detection)
+    /// Service A's HTTP client call targets Service B's endpoint.
+    HttpCalls,
+    /// Producer publishes to an event channel/topic.
+    PublishesTo,
+    /// Consumer subscribes to an event channel/topic.
+    SubscribesTo,
 }
 
 impl std::fmt::Display for RelationshipType {
@@ -154,6 +161,9 @@ impl std::fmt::Display for RelationshipType {
             Self::Reads => write!(f, "READS"),
             Self::Writes => write!(f, "WRITES"),
             Self::Overrides => write!(f, "OVERRIDES"),
+            Self::HttpCalls => write!(f, "HTTP_CALLS"),
+            Self::PublishesTo => write!(f, "PUBLISHES_TO"),
+            Self::SubscribesTo => write!(f, "SUBSCRIBES_TO"),
         }
     }
 }
@@ -191,6 +201,9 @@ impl std::str::FromStr for RelationshipType {
             "READS" => Ok(Self::Reads),
             "WRITES" => Ok(Self::Writes),
             "OVERRIDES" => Ok(Self::Overrides),
+            "HTTP_CALLS" => Ok(Self::HttpCalls),
+            "PUBLISHES_TO" => Ok(Self::PublishesTo),
+            "SUBSCRIBES_TO" => Ok(Self::SubscribesTo),
             _ => Err(CodememError::InvalidRelationshipType(s.to_string())),
         }
     }

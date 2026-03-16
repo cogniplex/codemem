@@ -57,11 +57,29 @@ pub struct DetectedClientCall {
     pub line: usize,
 }
 
+/// A detected event channel interaction (publish or subscribe).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetectedEventCall {
+    /// Symbol making the event call.
+    pub caller: String,
+    /// Channel/topic name (if extractable from the call target).
+    pub channel: Option<String>,
+    /// "publish" or "subscribe".
+    pub direction: String,
+    /// Protocol: kafka, rabbitmq, redis, sqs, sns, nats.
+    pub protocol: String,
+    /// File path.
+    pub file_path: String,
+    /// Line number.
+    pub line: usize,
+}
+
 /// Result of API surface detection.
 #[derive(Debug, Default)]
 pub struct ApiSurfaceResult {
     pub endpoints: Vec<DetectedEndpoint>,
     pub client_calls: Vec<DetectedClientCall>,
+    pub event_calls: Vec<DetectedEventCall>,
 }
 
 /// Detect API endpoints from extracted symbols.
@@ -482,6 +500,254 @@ fn paths_match_with_params(actual: &str, pattern: &str) -> bool {
         .iter()
         .zip(pattern_parts.iter())
         .all(|(a, p)| a == p || (p.starts_with('{') && p.ends_with('}')))
+}
+
+// ── Feature 4: Go/Express endpoint detection from call references ──────────
+
+/// Route-registration call patterns: (target substring, framework).
+const ROUTE_REGISTRATION_PATTERNS: &[(&str, &str)] = &[
+    // Go stdlib
+    ("http.HandleFunc", "go-http"),
+    ("http.Handle", "go-http"),
+    // Go Gin
+    ("router.GET", "gin"),
+    ("router.POST", "gin"),
+    ("router.PUT", "gin"),
+    ("router.DELETE", "gin"),
+    ("router.PATCH", "gin"),
+    // Go Echo
+    ("e.GET", "echo"),
+    ("e.POST", "echo"),
+    ("e.PUT", "echo"),
+    ("e.DELETE", "echo"),
+    ("e.PATCH", "echo"),
+    // Go Chi / gorilla mux
+    ("mux.Handle", "mux"),
+    ("mux.HandleFunc", "mux"),
+    // Express.js
+    ("app.get", "express"),
+    ("app.post", "express"),
+    ("app.put", "express"),
+    ("app.delete", "express"),
+    ("app.patch", "express"),
+    ("router.get", "express"),
+    ("router.post", "express"),
+    ("router.put", "express"),
+    ("router.delete", "express"),
+    ("router.patch", "express"),
+];
+
+/// Detect API endpoints from call references (Go, Express.js, etc.).
+///
+/// These frameworks register routes via function calls rather than decorators,
+/// so they can't be detected from `Symbol.attributes`. Instead we scan
+/// `Reference` entries for known route-registration call targets.
+pub fn detect_endpoints_from_references(
+    references: &[Reference],
+    namespace: &str,
+) -> Vec<DetectedEndpoint> {
+    let mut endpoints = Vec::new();
+
+    for r in references {
+        if r.kind != ReferenceKind::Call {
+            continue;
+        }
+
+        for &(pattern, _framework) in ROUTE_REGISTRATION_PATTERNS {
+            if r.target_name == pattern
+                || r.target_name.ends_with(&format!(
+                    ".{}",
+                    pattern.split('.').next_back().unwrap_or("")
+                ))
+            {
+                let method = extract_method_from_call_target(&r.target_name);
+                // Path is not available from reference data (would need string
+                // literal analysis). Store handler-based identifier so the
+                // endpoint is at least registered for cross-service matching.
+                let handler_path = format!("handler:{}", r.source_qualified_name);
+                endpoints.push(DetectedEndpoint {
+                    id: format!(
+                        "ep:{namespace}:{}:{handler_path}",
+                        method.as_deref().unwrap_or("ANY")
+                    ),
+                    method,
+                    path: handler_path,
+                    handler: r.source_qualified_name.clone(),
+                    file_path: r.file_path.clone(),
+                    line: r.line,
+                });
+                break;
+            }
+        }
+    }
+
+    endpoints
+}
+
+/// Extract HTTP method from a route-registration call target.
+fn extract_method_from_call_target(target: &str) -> Option<String> {
+    let last_segment = target.rsplit('.').next().unwrap_or(target);
+    match last_segment {
+        "GET" | "get" => Some("GET".to_string()),
+        "POST" | "post" => Some("POST".to_string()),
+        "PUT" | "put" => Some("PUT".to_string()),
+        "DELETE" | "delete" => Some("DELETE".to_string()),
+        "PATCH" | "patch" => Some("PATCH".to_string()),
+        // HandleFunc, Handle — method not determinable from call target
+        _ => None,
+    }
+}
+
+// ── Feature 3: Event framework pattern detection ──────────────────────────
+
+/// Event framework call patterns: (target pattern, protocol, direction).
+const EVENT_PATTERNS: &[(&str, &str, &str)] = &[
+    // Kafka
+    ("producer.send", "kafka", "publish"),
+    ("producer.produce", "kafka", "publish"),
+    ("consumer.subscribe", "kafka", "subscribe"),
+    ("consumer.poll", "kafka", "subscribe"),
+    // RabbitMQ
+    ("channel.basic_publish", "rabbitmq", "publish"),
+    ("channel.basic_consume", "rabbitmq", "subscribe"),
+    ("channel.publish", "rabbitmq", "publish"),
+    ("channel.consume", "rabbitmq", "subscribe"),
+    // Redis pub/sub
+    ("redis.publish", "redis", "publish"),
+    ("redis.subscribe", "redis", "subscribe"),
+    ("client.publish", "redis", "publish"),
+    ("client.subscribe", "redis", "subscribe"),
+    // AWS SQS
+    ("sqs.send_message", "sqs", "publish"),
+    ("sqs.receive_message", "sqs", "subscribe"),
+    ("sqs.sendMessage", "sqs", "publish"),
+    ("sqs.receiveMessage", "sqs", "subscribe"),
+    // AWS SNS
+    ("sns.publish", "sns", "publish"),
+    // NATS
+    ("nc.publish", "nats", "publish"),
+    ("nc.subscribe", "nats", "subscribe"),
+    ("nats.publish", "nats", "publish"),
+    ("nats.subscribe", "nats", "subscribe"),
+    // EventEmitter / generic
+    ("emitter.emit", "event", "publish"),
+    ("emitter.on", "event", "subscribe"),
+];
+
+/// Java/Kotlin annotation patterns that indicate event listeners.
+const EVENT_ANNOTATION_PATTERNS: &[(&str, &str, &str)] = &[
+    ("KafkaListener", "kafka", "subscribe"),
+    ("RabbitListener", "rabbitmq", "subscribe"),
+    ("SqsListener", "sqs", "subscribe"),
+    ("JmsListener", "jms", "subscribe"),
+    ("EventListener", "event", "subscribe"),
+];
+
+/// Detect event channel interactions from call references and symbol annotations.
+pub fn detect_event_calls(references: &[Reference], symbols: &[Symbol]) -> Vec<DetectedEventCall> {
+    let mut events = Vec::new();
+
+    // Scan call references for event framework patterns
+    for r in references {
+        if r.kind != ReferenceKind::Call {
+            continue;
+        }
+
+        for &(pattern, protocol, direction) in EVENT_PATTERNS {
+            if r.target_name == pattern || r.target_name.ends_with(pattern) {
+                events.push(DetectedEventCall {
+                    caller: r.source_qualified_name.clone(),
+                    channel: None, // Would need string literal analysis
+                    direction: direction.to_string(),
+                    protocol: protocol.to_string(),
+                    file_path: r.file_path.clone(),
+                    line: r.line,
+                });
+                break;
+            }
+        }
+    }
+
+    // Scan symbol annotations for event listener patterns (Java/Kotlin style)
+    for sym in symbols {
+        for attr in &sym.attributes {
+            for &(annotation, protocol, direction) in EVENT_ANNOTATION_PATTERNS {
+                if attr.contains(annotation) {
+                    events.push(DetectedEventCall {
+                        caller: sym.qualified_name.clone(),
+                        channel: extract_path_from_decorator(attr),
+                        direction: direction.to_string(),
+                        protocol: protocol.to_string(),
+                        file_path: sym.file_path.clone(),
+                        line: sym.line_start,
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    events
+}
+
+// ── Feature 5: Cross-service edge matching ────────────────────────────────
+
+/// Match event producers to consumers on the same channel and protocol.
+/// Returns pairs of (producer_caller, consumer_caller, channel, protocol, confidence).
+pub fn match_event_channels(
+    producers: &[DetectedEventCall],
+    consumers: &[DetectedEventCall],
+) -> Vec<(String, String, String, String, f64)> {
+    let mut matches = Vec::new();
+
+    for producer in producers {
+        for consumer in consumers {
+            if producer.protocol != consumer.protocol {
+                continue;
+            }
+            // Require at least one side to have a known channel name.
+            // Protocol-only matching (both channels unknown) would create O(n²)
+            // spurious edges between all producers and consumers of the same
+            // protocol within a namespace.
+            match (&producer.channel, &consumer.channel) {
+                (Some(pc), Some(cc)) => {
+                    let confidence = if pc == cc {
+                        0.95
+                    } else if channels_match_pattern(pc, cc) {
+                        0.8
+                    } else {
+                        continue;
+                    };
+                    matches.push((
+                        producer.caller.clone(),
+                        consumer.caller.clone(),
+                        pc.clone(),
+                        producer.protocol.clone(),
+                        confidence,
+                    ));
+                }
+                // One side has a channel, other doesn't — skip (insufficient data)
+                // Both unknown — skip (would be O(n²) noise)
+                _ => continue,
+            }
+        }
+    }
+
+    matches
+}
+
+/// Check if two channel names match, accounting for wildcards.
+/// e.g., "orders.*" matches "orders.created"
+fn channels_match_pattern(a: &str, b: &str) -> bool {
+    if a.contains('*') || a.contains('#') {
+        let prefix = a.trim_end_matches(['*', '#', '.']);
+        b.starts_with(prefix)
+    } else if b.contains('*') || b.contains('#') {
+        let prefix = b.trim_end_matches(['*', '#', '.']);
+        a.starts_with(prefix)
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]

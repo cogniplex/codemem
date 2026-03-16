@@ -6,6 +6,13 @@ symbols:
     is_scope: false
     special: null
 
+  - kind: "async_function_definition"
+    symbol_kind: "function"
+    name_field: "name"
+    method_when_scoped: true
+    is_scope: false
+    special: null
+
   - kind: "class_definition"
     symbol_kind: "class"
     name_field: "name"
@@ -27,6 +34,11 @@ scope_containers:
     is_method_scope: true
 
   - kind: "function_definition"
+    name_field: "name"
+    body_field: "body"
+    is_method_scope: false
+
+  - kind: "async_function_definition"
     name_field: "name"
     body_field: "body"
     is_method_scope: false

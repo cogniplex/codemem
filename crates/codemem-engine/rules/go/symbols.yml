@@ -28,7 +28,7 @@ symbols:
     special: "go_const_declaration"
 
   - kind: "var_declaration"
-    symbol_kind: "constant"
+    symbol_kind: "field"
     name_field: "name"
     method_when_scoped: false
     is_scope: false

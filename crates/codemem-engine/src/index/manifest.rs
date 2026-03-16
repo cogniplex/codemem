@@ -325,13 +325,13 @@ pub fn parse_go_mod(path: &Path) -> Option<ManifestResult> {
 
 /// Parse a single Go require line like `github.com/pkg/errors v0.9.1`
 fn parse_go_require_line(line: &str, manifest_path: &str) -> Option<Dependency> {
-    // Remove inline comments
-    let line = line.split("//").next()?.trim();
-    let mut parts = line.split_whitespace();
+    // Check for indirect marker BEFORE stripping comments (the marker IS a comment)
+    let is_indirect = line.contains("// indirect");
+    // Remove inline comments for name/version extraction
+    let cleaned = line.split("//").next()?.trim();
+    let mut parts = cleaned.split_whitespace();
     let name = parts.next()?;
     let version = parts.next().unwrap_or("");
-    // Skip indirect dependencies marker, but still capture them
-    let is_indirect = line.contains("// indirect");
     Some(Dependency {
         name: name.to_string(),
         version: version.to_string(),

@@ -32,6 +32,10 @@ pub struct CrossRepoPersistResult {
     pub backward_edges_created: usize,
     pub endpoints_detected: usize,
     pub client_calls_detected: usize,
+    pub spec_endpoints_detected: usize,
+    pub event_channels_detected: usize,
+    pub http_edges_matched: usize,
+    pub event_edges_matched: usize,
 }
 
 /// Return the edge weight for a given relationship type, using config overrides
@@ -51,6 +55,8 @@ pub fn edge_weight_for(rel: &RelationshipType, config: &GraphConfig) -> f64 {
         RelationshipType::EvolvedInto | RelationshipType::Summarizes => 0.7,
         RelationshipType::PartOf => 0.4,
         RelationshipType::RelatesTo | RelationshipType::SharesTheme => 0.3,
+        RelationshipType::HttpCalls => 0.7,
+        RelationshipType::PublishesTo | RelationshipType::SubscribesTo => 0.6,
         _ => 0.5,
     }
 }
@@ -596,6 +602,11 @@ impl super::CodememEngine {
                     serde_json::json!(Self::AST_GREP_BASE_CONFIDENCE),
                 );
                 properties.insert("source_layers".to_string(), serde_json::json!(["ast-grep"]));
+                // Scale edge weight by resolution confidence so low-confidence
+                // guesses (simple-name fallback) carry less weight in PageRank
+                // and betweenness centrality than exact matches.
+                let base_weight = edge_weight_for(&edge.relationship, graph_config);
+                let weight = base_weight * edge.resolution_confidence;
                 Edge {
                     id: format!(
                         "ref:{}->{}:{}",
@@ -604,7 +615,7 @@ impl super::CodememEngine {
                     src: format!("sym:{}", edge.source_qualified_name),
                     dst: format!("sym:{}", edge.target_qualified_name),
                     relationship: edge.relationship,
-                    weight: edge_weight_for(&edge.relationship, graph_config),
+                    weight,
                     valid_from: Some(now),
                     valid_to: None,
                     properties,
