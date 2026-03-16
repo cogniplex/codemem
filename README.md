@@ -117,7 +117,7 @@ No SCIP indexer installed? No problem -- codemem works fine without it. You just
 - **8-component hybrid scoring** -- Vector similarity, graph strength, BM25 token overlap, temporal alignment, tag matching, importance, confidence, and recency
 - **Code-aware indexing** -- tree-sitter structural extraction for 14 languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) with manifest parsing (Cargo.toml, package.json, go.mod, pyproject.toml)
 - **Contextual embeddings** -- Metadata and graph context enriched before embedding for higher recall precision
-- **Pluggable embeddings** -- Candle (local BERT, default), Ollama, or any OpenAI-compatible API
+- **Pluggable embeddings** -- Candle (local BERT, default), Ollama, OpenAI-compatible APIs, or Google Gemini
 - **Cross-session intelligence** -- Pattern detection, file hotspot tracking, decision chains, and session continuity
 - **Memory consolidation** -- 5 neuroscience-inspired cycles: Decay (power-law), Creative/REM (semantic KNN), Cluster (cosine + union-find), Summarize (LLM-powered), Forget
 - **Self-editing memory** -- Refine, split, and merge memories with full provenance tracking via temporal graph edges
@@ -187,6 +187,11 @@ export CODEMEM_EMBED_PROVIDER=openai
 export CODEMEM_EMBED_URL=https://api.voyageai.com/v1
 export CODEMEM_EMBED_MODEL=voyage-3
 export CODEMEM_EMBED_API_KEY=pa-...
+
+# Google Gemini
+export CODEMEM_EMBED_PROVIDER=gemini
+export CODEMEM_EMBED_API_KEY=AIza...
+# Optional: export CODEMEM_EMBED_MODEL=text-embedding-004
 ```
 
 ### Observation compression

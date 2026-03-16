@@ -4,7 +4,9 @@
 //! - **Candle** (default): Local BERT models via pure Rust ML (any HF BERT model)
 //! - **Ollama**: Local Ollama server with any embedding model
 //! - **OpenAI**: OpenAI API or any compatible endpoint (Together, Azure, etc.)
+//! - **Gemini**: Google Generative Language API (text-embedding-004)
 
+pub mod gemini;
 pub mod ollama;
 pub mod openai;
 
@@ -611,10 +613,10 @@ fn resolve_model_id(model: &str) -> Result<(String, String), CodememError> {
 ///
 /// | Variable | Values | Default |
 /// |----------|--------|---------|
-/// | `CODEMEM_EMBED_PROVIDER` | `candle`, `ollama`, `openai` | `candle` |
+/// | `CODEMEM_EMBED_PROVIDER` | `candle`, `ollama`, `openai`, `gemini` | `candle` |
 /// | `CODEMEM_EMBED_MODEL` | model name or HF repo | `BAAI/bge-base-en-v1.5` |
 /// | `CODEMEM_EMBED_URL` | base URL | provider default |
-/// | `CODEMEM_EMBED_API_KEY` | API key | also reads `OPENAI_API_KEY` |
+/// | `CODEMEM_EMBED_API_KEY` | API key | also reads `OPENAI_API_KEY` / `GEMINI_API_KEY` / `GOOGLE_API_KEY` |
 /// | `CODEMEM_EMBED_DIMENSIONS` | integer | read from model config |
 /// | `CODEMEM_EMBED_BATCH_SIZE` | integer | `16` |
 /// | `CODEMEM_EMBED_DTYPE` | `f32`, `f16`, `bf16` | `f32` |
@@ -683,6 +685,33 @@ pub fn from_env(
             ));
             Ok(Box::new(CachedProvider::new(inner, cache_capacity)))
         }
+        "gemini" | "google" => {
+            let api_key = std::env::var("CODEMEM_EMBED_API_KEY")
+                .or_else(|_| std::env::var("GEMINI_API_KEY"))
+                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+                .map_err(|_| {
+                    CodememError::Embedding(
+                        "CODEMEM_EMBED_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY required for Gemini embeddings"
+                            .into(),
+                    )
+                })?;
+            let model = std::env::var("CODEMEM_EMBED_MODEL").unwrap_or_else(|_| {
+                config
+                    .filter(|c| !c.model.is_empty())
+                    .map(|c| c.model.clone())
+                    .unwrap_or_else(|| gemini::DEFAULT_MODEL.to_string())
+            });
+            let base_url = std::env::var("CODEMEM_EMBED_URL")
+                .ok()
+                .or_else(|| config.filter(|c| !c.url.is_empty()).map(|c| c.url.clone()));
+            let inner = Box::new(gemini::GeminiProvider::new(
+                &api_key,
+                &model,
+                dimensions,
+                base_url.as_deref(),
+            ));
+            Ok(Box::new(CachedProvider::new(inner, cache_capacity)))
+        }
         "candle" | "" => {
             let model_id = std::env::var("CODEMEM_EMBED_MODEL").unwrap_or_else(|_| {
                 config
@@ -721,7 +750,7 @@ pub fn from_env(
             )))
         }
         other => Err(CodememError::Embedding(format!(
-            "Unknown embedding provider: '{}'. Use 'candle', 'ollama', or 'openai'.",
+            "Unknown embedding provider: '{}'. Use 'candle', 'ollama', 'openai', or 'gemini'.",
             other
         ))),
     }
