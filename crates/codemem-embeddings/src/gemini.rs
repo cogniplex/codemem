@@ -24,7 +24,7 @@ pub struct GeminiProvider {
     api_key: String,
     model: String,
     dimensions: usize,
-    base_url: String,
+    pub(crate) base_url: String,
     client: reqwest::blocking::Client,
 }
 
@@ -47,10 +47,7 @@ impl super::EmbeddingProvider for GeminiProvider {
     }
 
     fn embed(&self, text: &str) -> Result<Vec<f32>, CodememError> {
-        let url = format!(
-            "{}/models/{}:embedContent?key={}",
-            self.base_url, self.model, self.api_key
-        );
+        let url = format!("{}/models/{}:embedContent", self.base_url, self.model);
 
         let mut body = serde_json::json!({
             "model": format!("models/{}", self.model),
@@ -60,7 +57,6 @@ impl super::EmbeddingProvider for GeminiProvider {
             "taskType": "RETRIEVAL_DOCUMENT",
         });
 
-        // text-embedding-004 supports outputDimensionality
         if self.dimensions > 0 {
             body["outputDimensionality"] = serde_json::json!(self.dimensions);
         }
@@ -69,6 +65,7 @@ impl super::EmbeddingProvider for GeminiProvider {
             .client
             .post(&url)
             .header("Content-Type", "application/json")
+            .header("x-goog-api-key", &self.api_key)
             .json(&body)
             .send()
             .map_err(|e| CodememError::Embedding(format!("Gemini request failed: {e}")))?;
@@ -85,7 +82,7 @@ impl super::EmbeddingProvider for GeminiProvider {
             .json()
             .map_err(|e| CodememError::Embedding(format!("Gemini response parse error: {e}")))?;
 
-        let embedding = json
+        let embedding: Vec<f32> = json
             .get("embedding")
             .and_then(|v| v.get("values"))
             .and_then(|v| v.as_array())
@@ -96,6 +93,14 @@ impl super::EmbeddingProvider for GeminiProvider {
             .map(|v| v.as_f64().unwrap_or(0.0) as f32)
             .collect();
 
+        if self.dimensions > 0 && embedding.len() != self.dimensions {
+            return Err(CodememError::Embedding(format!(
+                "Gemini returned {} dimensions, expected {}",
+                embedding.len(),
+                self.dimensions
+            )));
+        }
+
         Ok(embedding)
     }
 
@@ -104,85 +109,95 @@ impl super::EmbeddingProvider for GeminiProvider {
             return Ok(vec![]);
         }
 
-        let url = format!(
-            "{}/models/{}:batchEmbedContents?key={}",
-            self.base_url, self.model, self.api_key
-        );
+        let url = format!("{}/models/{}:batchEmbedContents", self.base_url, self.model);
 
-        let requests: Vec<serde_json::Value> = texts
-            .iter()
-            .map(|text| {
-                let mut req = serde_json::json!({
-                    "model": format!("models/{}", self.model),
-                    "content": {
-                        "parts": [{"text": text}]
-                    },
-                    "taskType": "RETRIEVAL_DOCUMENT",
-                });
-                if self.dimensions > 0 {
-                    req["outputDimensionality"] = serde_json::json!(self.dimensions);
-                }
-                req
-            })
-            .collect();
+        // Gemini batchEmbedContents accepts max 100 requests per call.
+        const MAX_BATCH: usize = 100;
+        let mut all_embeddings = Vec::with_capacity(texts.len());
 
-        let body = serde_json::json!({
-            "requests": requests,
-        });
+        for chunk in texts.chunks(MAX_BATCH) {
+            let requests: Vec<serde_json::Value> = chunk
+                .iter()
+                .map(|text| {
+                    let mut req = serde_json::json!({
+                        "model": format!("models/{}", self.model),
+                        "content": {
+                            "parts": [{"text": text}]
+                        },
+                        "taskType": "RETRIEVAL_DOCUMENT",
+                    });
+                    if self.dimensions > 0 {
+                        req["outputDimensionality"] = serde_json::json!(self.dimensions);
+                    }
+                    req
+                })
+                .collect();
 
-        let response = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .map_err(|e| CodememError::Embedding(format!("Gemini batch request failed: {e}")))?;
+            let body = serde_json::json!({ "requests": requests });
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().unwrap_or_default();
-            return Err(CodememError::Embedding(format!(
-                "Gemini returned status {status}: {body}",
-            )));
-        }
+            let response = self
+                .client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("x-goog-api-key", &self.api_key)
+                .json(&body)
+                .send()
+                .map_err(|e| {
+                    CodememError::Embedding(format!("Gemini batch request failed: {e}"))
+                })?;
 
-        let json: serde_json::Value = response
-            .json()
-            .map_err(|e| CodememError::Embedding(format!("Gemini response parse error: {e}")))?;
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().unwrap_or_default();
+                return Err(CodememError::Embedding(format!(
+                    "Gemini returned status {status}: {body}",
+                )));
+            }
 
-        let embeddings = json
-            .get("embeddings")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| {
-                CodememError::Embedding("Missing 'embeddings' array in Gemini response".into())
+            let json: serde_json::Value = response.json().map_err(|e| {
+                CodememError::Embedding(format!("Gemini response parse error: {e}"))
             })?;
 
-        if embeddings.len() != texts.len() {
-            return Err(CodememError::Embedding(format!(
-                "Gemini returned {} embeddings, expected {}",
-                embeddings.len(),
-                texts.len()
-            )));
-        }
+            let embeddings = json
+                .get("embeddings")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| {
+                    CodememError::Embedding("Missing 'embeddings' array in Gemini response".into())
+                })?;
 
-        embeddings
-            .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                item.get("values")
+            if embeddings.len() != chunk.len() {
+                return Err(CodememError::Embedding(format!(
+                    "Gemini returned {} embeddings, expected {}",
+                    embeddings.len(),
+                    chunk.len()
+                )));
+            }
+
+            for (i, item) in embeddings.iter().enumerate() {
+                let embedding: Vec<f32> = item
+                    .get("values")
                     .and_then(|v| v.as_array())
                     .ok_or_else(|| {
                         CodememError::Embedding(format!(
                             "Missing values in Gemini embedding at index {i}"
                         ))
-                    })
-                    .map(|arr| {
-                        arr.iter()
-                            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-                            .collect()
-                    })
-            })
-            .collect()
+                    })?
+                    .iter()
+                    .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                    .collect();
+
+                if self.dimensions > 0 && embedding.len() != self.dimensions {
+                    return Err(CodememError::Embedding(format!(
+                        "Gemini returned {} dimensions at index {i}, expected {}",
+                        embedding.len(),
+                        self.dimensions
+                    )));
+                }
+                all_embeddings.push(embedding);
+            }
+        }
+
+        Ok(all_embeddings)
     }
 
     fn name(&self) -> &str {
