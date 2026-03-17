@@ -360,6 +360,8 @@ fn recall_finds_entity_connected_memories() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         graph.add_node(code_node).unwrap();
 
@@ -410,6 +412,8 @@ fn resolve_entity_memories_skips_expired_edges() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         graph.add_node(code_node).unwrap();
 

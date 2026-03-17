@@ -57,6 +57,7 @@ pub fn edge_weight_for(rel: &RelationshipType, config: &GraphConfig) -> f64 {
         RelationshipType::RelatesTo | RelationshipType::SharesTheme => 0.3,
         RelationshipType::HttpCalls => 0.7,
         RelationshipType::PublishesTo | RelationshipType::SubscribesTo => 0.6,
+        RelationshipType::ModifiedBy => 0.4,
         _ => 0.5,
     }
 }
@@ -190,6 +191,8 @@ impl super::CodememEngine {
                     centrality: 0.0,
                     memory_id: None,
                     namespace: ns_string.clone(),
+                    valid_from: None,
+                    valid_to: None,
                 }
             })
             .collect();
@@ -422,6 +425,8 @@ impl super::CodememEngine {
                         centrality: 0.0,
                         memory_id: None,
                         namespace: ns_string.clone(),
+                        valid_from: None,
+                        valid_to: None,
                     });
                 }
                 if i == 0 {
@@ -492,6 +497,8 @@ impl super::CodememEngine {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: ns_string.clone(),
+                valid_from: None,
+                valid_to: None,
             });
 
             let file_node_id = format!("file:{}", sym.file_path);
@@ -729,6 +736,8 @@ impl super::CodememEngine {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: ns_string.clone(),
+                valid_from: None,
+                valid_to: None,
             });
 
             let file_node_id = format!("file:{}", chunk.file_path);

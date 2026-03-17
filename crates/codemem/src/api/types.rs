@@ -451,3 +451,17 @@ pub struct MessageResponse {
 pub struct IdResponse {
     pub id: String,
 }
+
+// ── Temporal ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct TemporalChangesQuery {
+    pub from: String,
+    pub to: String,
+    pub namespace: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TemporalSnapshotQuery {
+    pub at: String,
+}

@@ -66,6 +66,8 @@ fn cascade_delete_removes_all_related_data() {
         centrality: 0.0,
         memory_id: Some(memory_id.clone()),
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     storage.insert_graph_node(&node).unwrap();
 
@@ -78,6 +80,8 @@ fn cascade_delete_removes_all_related_data() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     storage.insert_graph_node(&target_node).unwrap();
 
@@ -356,6 +360,8 @@ fn expire_memories_for_file_via_memory_id_and_relates_to() {
         centrality: 0.0,
         memory_id: Some("mem-primary".to_string()),
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     storage.insert_graph_node(&primary_node).unwrap();
 
@@ -379,6 +385,8 @@ fn expire_memories_for_file_via_memory_id_and_relates_to() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     storage.insert_graph_node(&edge_node).unwrap();
 
@@ -391,6 +399,8 @@ fn expire_memories_for_file_via_memory_id_and_relates_to() {
         centrality: 0.0,
         memory_id: Some("mem-edge-linked".to_string()),
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     storage.insert_graph_node(&mem_node).unwrap();
 
@@ -428,6 +438,8 @@ fn expire_memories_for_file_via_memory_id_and_relates_to() {
         centrality: 0.0,
         memory_id: Some("mem-other-file".to_string()),
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     storage.insert_graph_node(&other_node).unwrap();
 
@@ -451,6 +463,8 @@ fn expire_memories_for_file_via_memory_id_and_relates_to() {
         centrality: 0.0,
         memory_id: Some("mem-no-tag".to_string()),
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     storage.insert_graph_node(&no_tag_node).unwrap();
 

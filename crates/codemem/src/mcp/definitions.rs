@@ -148,7 +148,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "max_depth": { "type": "integer", "default": 2 },
                     "algorithm": { "type": "string", "enum": ["bfs", "dfs"], "default": "bfs" },
                     "exclude_kinds": { "type": "array", "items": { "type": "string" } },
-                    "include_relationships": { "type": "array", "items": { "type": "string" } }
+                    "include_relationships": { "type": "array", "items": { "type": "string" } },
+                    "at_time": { "type": "string", "description": "ISO 8601 timestamp — filter out nodes/edges not valid at this time" }
                 },
                 "required": ["start_id"]
             }
@@ -386,6 +387,67 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "base_ref": { "type": "string", "description": "Base branch for overlay resolution (e.g., 'main')" }
                 },
                 "required": ["diff"]
+            }
+        }),
+        // ── Temporal Queries (5 tools) ───────────────────────────────────
+        json!({
+            "name": "what_changed",
+            "description": "List commits and their affected files/symbols in a time range. Requires temporal ingestion to have been run.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "Start of time range (ISO 8601, e.g. '2026-01-01T00:00:00Z')" },
+                    "to": { "type": "string", "description": "End of time range (ISO 8601, e.g. '2026-03-17T00:00:00Z')" },
+                    "namespace": { "type": "string", "description": "Filter by namespace" }
+                },
+                "required": ["from", "to"]
+            }
+        }),
+        json!({
+            "name": "graph_at_time",
+            "description": "Snapshot of the graph at a point in time: count of live nodes/edges, broken down by kind. Nodes/edges with valid_to before the timestamp are excluded.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "at": { "type": "string", "description": "Point in time (ISO 8601, e.g. '2026-02-15T00:00:00Z')" }
+                },
+                "required": ["at"]
+            }
+        }),
+        json!({
+            "name": "find_stale_files",
+            "description": "Find files with high centrality or incoming edges that haven't been modified recently. Requires temporal ingestion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "namespace": { "type": "string", "description": "Filter by namespace" },
+                    "stale_days": { "type": "integer", "default": 90, "description": "Files not modified in this many days are stale" },
+                    "limit": { "type": "integer", "default": 20, "description": "Max results to return" }
+                }
+            }
+        }),
+        json!({
+            "name": "detect_drift",
+            "description": "Detect architectural drift between two time periods: new cross-module edges, hotspot files, coupling increases, added/removed files.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "Start of period (ISO 8601)" },
+                    "to": { "type": "string", "description": "End of period (ISO 8601)" },
+                    "namespace": { "type": "string", "description": "Filter by namespace" }
+                },
+                "required": ["from", "to"]
+            }
+        }),
+        json!({
+            "name": "symbol_history",
+            "description": "Get the commit history for a specific symbol or file node. Returns commits that modified it, with affected files and symbols.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "node_id": { "type": "string", "description": "Graph node ID (e.g. 'sym:MyClass::method' or 'file:src/main.rs')" }
+                },
+                "required": ["node_id"]
             }
         }),
     ]

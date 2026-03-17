@@ -42,6 +42,8 @@ fn file_node(path: &str) -> GraphNode {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 
@@ -57,6 +59,8 @@ fn function_node(id: &str, label: &str, file_path: &str) -> GraphNode {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 
@@ -82,6 +86,8 @@ fn method_node(
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 
@@ -95,6 +101,8 @@ fn endpoint_node(id: &str, label: &str) -> GraphNode {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 
@@ -108,6 +116,8 @@ fn package_node(id: &str, label: &str) -> GraphNode {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 
@@ -123,6 +133,8 @@ fn test_node(id: &str, label: &str, file_path: &str) -> GraphNode {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 
@@ -884,6 +896,8 @@ fn enrich_api_surface_skips_nodes_without_file_path() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         graph.add_node(node).unwrap();
     }

@@ -27,6 +27,7 @@ pub mod tools_consolidation;
 pub mod tools_graph;
 pub mod tools_memory;
 pub mod tools_recall;
+pub mod tools_temporal;
 pub mod types;
 
 #[cfg(test)]
@@ -264,6 +265,13 @@ impl McpServer {
 
             // ── Review ────────────────────────────────────────────────────
             "review_diff" => self.tool_review_diff(args),
+
+            // ── Temporal ─────────────────────────────────────────────────
+            "what_changed" => self.tool_what_changed(args),
+            "graph_at_time" => self.tool_graph_at_time(args),
+            "find_stale_files" => self.tool_find_stale_files(args),
+            "detect_drift" => self.tool_detect_drift(args),
+            "symbol_history" => self.tool_symbol_history(args),
 
             _ => ToolResult::tool_error(format!("Unknown tool: {name}")),
         }

@@ -109,6 +109,8 @@ fn graph_memory_estimate_with_nodes() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         graph.add_node(node).unwrap();
     }
@@ -137,6 +139,8 @@ fn summary_tree_single_node() {
             centrality: 0.5,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         graph.add_node(node).unwrap();
     }
@@ -169,6 +173,8 @@ fn summary_tree_with_children() {
                     centrality: 0.0,
                     memory_id: None,
                     namespace: None,
+                    valid_from: None,
+                    valid_to: None,
                 })
                 .unwrap();
         }
@@ -224,6 +230,8 @@ fn summary_tree_respects_max_depth() {
                     centrality: 0.0,
                     memory_id: None,
                     namespace: None,
+                    valid_from: None,
+                    valid_to: None,
                 })
                 .unwrap();
         }

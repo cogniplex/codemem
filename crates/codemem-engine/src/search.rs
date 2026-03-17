@@ -185,9 +185,14 @@ impl CodememEngine {
         }
 
         let mut output = Vec::new();
+        let now = chrono::Utc::now();
         for (id, similarity_value) in &raw_results {
             let similarity = *similarity_value as f64;
             if let Ok(Some(node)) = self.storage.get_graph_node(id) {
+                // Skip expired nodes (deleted symbols/files)
+                if node.valid_to.is_some_and(|vt| vt <= now) {
+                    continue;
+                }
                 if id.starts_with("chunk:") {
                     output.push(CodeSearchResult {
                         id: id.clone(),

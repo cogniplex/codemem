@@ -154,6 +154,8 @@ pub fn build_graph(
             centrality: 0.0,
             memory_id: None,
             namespace: ns.clone(),
+            valid_from: None,
+            valid_to: None,
         });
 
         // Create containment edges: either hierarchical (nested chain) or flat (file→sym).
@@ -203,6 +205,8 @@ pub fn build_graph(
                             centrality: 0.0,
                             memory_id: None,
                             namespace: ns.clone(),
+                            valid_from: None,
+                            valid_to: None,
                         });
                     }
 
@@ -421,6 +425,8 @@ pub fn build_graph(
                 centrality: 0.0,
                 memory_id: None,
                 namespace: ns.clone(),
+                valid_from: None,
+                valid_to: None,
             });
             ext_nodes_created += 1;
         }
@@ -722,6 +728,8 @@ pub fn build_graph(
             centrality: 0.0,
             memory_id: None,
             namespace: ns.clone(),
+            valid_from: None,
+            valid_to: None,
         });
     }
 

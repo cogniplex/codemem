@@ -69,7 +69,7 @@ impl std::str::FromStr for MemoryType {
 
 // ── Relationship Types ──────────────────────────────────────────────────────
 
-/// 28 relationship types for the knowledge graph.
+/// Relationship types for the knowledge graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RelationshipType {
@@ -128,6 +128,9 @@ pub enum RelationshipType {
     PublishesTo,
     /// Consumer subscribes to an event channel/topic.
     SubscribesTo,
+    // Temporal (git history layer)
+    /// Commit modified a symbol/file.
+    ModifiedBy,
 }
 
 impl std::fmt::Display for RelationshipType {
@@ -164,6 +167,7 @@ impl std::fmt::Display for RelationshipType {
             Self::HttpCalls => write!(f, "HTTP_CALLS"),
             Self::PublishesTo => write!(f, "PUBLISHES_TO"),
             Self::SubscribesTo => write!(f, "SUBSCRIBES_TO"),
+            Self::ModifiedBy => write!(f, "MODIFIED_BY"),
         }
     }
 }
@@ -204,6 +208,7 @@ impl std::str::FromStr for RelationshipType {
             "HTTP_CALLS" => Ok(Self::HttpCalls),
             "PUBLISHES_TO" => Ok(Self::PublishesTo),
             "SUBSCRIBES_TO" => Ok(Self::SubscribesTo),
+            "MODIFIED_BY" => Ok(Self::ModifiedBy),
             _ => Err(CodememError::InvalidRelationshipType(s.to_string())),
         }
     }
@@ -253,6 +258,11 @@ pub enum NodeKind {
     Macro,
     /// JS/TS/Python properties — distinct from struct fields.
     Property,
+    // Temporal (git history layer)
+    /// A git commit.
+    Commit,
+    /// A pull request (detected from merge/squash commit patterns).
+    PullRequest,
 }
 
 impl std::fmt::Display for NodeKind {
@@ -279,6 +289,8 @@ impl std::fmt::Display for NodeKind {
             Self::TypeParameter => write!(f, "type_parameter"),
             Self::Macro => write!(f, "macro"),
             Self::Property => write!(f, "property"),
+            Self::Commit => write!(f, "commit"),
+            Self::PullRequest => write!(f, "pull_request"),
         }
     }
 }
@@ -309,6 +321,8 @@ impl std::str::FromStr for NodeKind {
             "type_parameter" => Ok(Self::TypeParameter),
             "macro" => Ok(Self::Macro),
             "property" => Ok(Self::Property),
+            "commit" => Ok(Self::Commit),
+            "pull_request" => Ok(Self::PullRequest),
             _ => Err(CodememError::InvalidNodeKind(s.to_string())),
         }
     }
@@ -408,6 +422,12 @@ pub struct GraphNode {
     pub centrality: f64,
     pub memory_id: Option<String>,
     pub namespace: Option<String>,
+    /// When this node becomes valid (None = always valid).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_from: Option<DateTime<Utc>>,
+    /// When this node expires (None = never expires).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_to: Option<DateTime<Utc>>,
 }
 
 /// A search result with hybrid scoring.

@@ -16,6 +16,8 @@ fn make_sym_node(id: &str, file_path: &str, line_start: u32, line_end: u32) -> G
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 

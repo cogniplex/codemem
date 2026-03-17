@@ -128,8 +128,8 @@ impl Storage {
         let payload_json = serde_json::to_string(&node.payload)?;
 
         conn.execute(
-            "INSERT OR REPLACE INTO graph_nodes (id, kind, label, payload, centrality, memory_id, namespace)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT OR REPLACE INTO graph_nodes (id, kind, label, payload, centrality, memory_id, namespace, valid_from, valid_to)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 node.id,
                 node.kind.to_string(),
@@ -138,6 +138,8 @@ impl Storage {
                 node.centrality,
                 node.memory_id,
                 node.namespace,
+                node.valid_from.map(|dt| dt.timestamp()),
+                node.valid_to.map(|dt| dt.timestamp()),
             ],
         )
         .storage_err()?;
@@ -149,7 +151,7 @@ impl Storage {
     pub fn get_graph_node(&self, id: &str) -> Result<Option<GraphNode>, CodememError> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT id, kind, label, payload, centrality, memory_id, namespace FROM graph_nodes WHERE id = ?1",
+            "SELECT id, kind, label, payload, centrality, memory_id, namespace, valid_from, valid_to FROM graph_nodes WHERE id = ?1",
             params![id],
             |row| {
                 let kind_str: String = row.get(1)?;
@@ -162,12 +164,14 @@ impl Storage {
                     row.get::<_, f64>(4)?,
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
                 ))
             },
         )
         .optional()
         .storage_err()?
-        .map(|(id, kind_str, label, payload_str, centrality, memory_id, namespace)| {
+        .map(|(id, kind_str, label, payload_str, centrality, memory_id, namespace, valid_from_ts, valid_to_ts)| {
             let kind: NodeKind = kind_str.parse().map_err(|e: CodememError| CodememError::Storage(e.to_string()))?;
             let payload: HashMap<String, serde_json::Value> =
                 serde_json::from_str(&payload_str).unwrap_or_default();
@@ -179,6 +183,8 @@ impl Storage {
                 centrality,
                 memory_id,
                 namespace,
+                valid_from: valid_from_ts.and_then(|ts| chrono::DateTime::from_timestamp(ts, 0)),
+                valid_to: valid_to_ts.and_then(|ts| chrono::DateTime::from_timestamp(ts, 0)),
             })
         })
         .transpose()
@@ -197,7 +203,7 @@ impl Storage {
     pub fn all_graph_nodes(&self) -> Result<Vec<GraphNode>, CodememError> {
         let conn = self.conn()?;
         let mut stmt = conn
-            .prepare("SELECT id, kind, label, payload, centrality, memory_id, namespace FROM graph_nodes")
+            .prepare("SELECT id, kind, label, payload, centrality, memory_id, namespace, valid_from, valid_to FROM graph_nodes")
             .storage_err()?;
 
         let rows = stmt
@@ -212,14 +218,25 @@ impl Storage {
                     row.get::<_, f64>(4)?,
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
                 ))
             })
             .storage_err()?;
 
         let mut nodes = Vec::new();
         for row_result in rows {
-            let (id, kind_str, label, payload_str, centrality, memory_id, namespace) =
-                row_result.storage_err()?;
+            let (
+                id,
+                kind_str,
+                label,
+                payload_str,
+                centrality,
+                memory_id,
+                namespace,
+                valid_from_ts,
+                valid_to_ts,
+            ) = row_result.storage_err()?;
             let kind: NodeKind = match kind_str.parse() {
                 Ok(k) => k,
                 Err(_) => {
@@ -241,6 +258,8 @@ impl Storage {
                 centrality,
                 memory_id,
                 namespace,
+                valid_from: valid_from_ts.and_then(|ts| chrono::DateTime::from_timestamp(ts, 0)),
+                valid_to: valid_to_ts.and_then(|ts| chrono::DateTime::from_timestamp(ts, 0)),
             });
         }
 

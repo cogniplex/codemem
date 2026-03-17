@@ -139,6 +139,8 @@ impl CodememEngine {
                     centrality: 0.0,
                     memory_id: Some(memory.id.clone()),
                     namespace: memory.namespace.clone(),
+                    valid_from: None,
+                    valid_to: None,
                 };
                 if let Err(e) = graph.add_node(node) {
                     tracing::warn!(
@@ -196,6 +198,8 @@ impl CodememEngine {
             centrality: 0.0,
             memory_id: Some(memory.id.clone()),
             namespace: memory.namespace.clone(),
+            valid_from: None,
+            valid_to: None,
         };
         if let Err(e) = self.storage.insert_graph_node(&node) {
             tracing::warn!("Failed to insert graph node for memory {}: {e}", memory.id);

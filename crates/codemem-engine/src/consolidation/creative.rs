@@ -133,6 +133,8 @@ impl CodememEngine {
                         centrality: 0.0,
                         memory_id: Some(nid.clone()),
                         namespace: None,
+                        valid_from: None,
+                        valid_to: None,
                     };
                     pending_nodes.push(node);
                     queued_node_ids.insert(nid.clone());

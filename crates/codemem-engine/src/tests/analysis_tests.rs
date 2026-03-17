@@ -127,6 +127,8 @@ fn recall_with_impact_finds_dependent_files() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         graph.add_node(file_node).unwrap();
 
@@ -315,6 +317,8 @@ fn node_coverage_no_memories() {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: None,
+                valid_from: None,
+                valid_to: None,
             })
             .unwrap();
     }
@@ -344,6 +348,8 @@ fn node_coverage_with_memory_link() {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: None,
+                valid_from: None,
+                valid_to: None,
             })
             .unwrap();
 
@@ -382,6 +388,8 @@ fn node_coverage_multiple_nodes() {
                     centrality: 0.0,
                     memory_id: None,
                     namespace: None,
+                    valid_from: None,
+                    valid_to: None,
                 })
                 .unwrap();
         }

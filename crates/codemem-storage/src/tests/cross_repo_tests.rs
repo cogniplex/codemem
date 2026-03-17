@@ -365,6 +365,8 @@ fn get_cross_namespace_edges_returns_spanning_edges() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("ns-alpha".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     let node_b = GraphNode {
         id: "node:b".to_string(),
@@ -374,6 +376,8 @@ fn get_cross_namespace_edges_returns_spanning_edges() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("ns-beta".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     let node_c = GraphNode {
         id: "node:c".to_string(),
@@ -383,6 +387,8 @@ fn get_cross_namespace_edges_returns_spanning_edges() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("ns-alpha".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
 
     storage.insert_graph_node(&node_a).unwrap();
@@ -444,6 +450,8 @@ fn get_cross_namespace_edges_empty_when_no_cross_edges() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("isolated".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     storage.insert_graph_node(&node).unwrap();
 

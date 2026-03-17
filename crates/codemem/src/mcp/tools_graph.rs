@@ -38,12 +38,19 @@ impl McpServer {
                     .collect()
             });
 
+        let at_time = args
+            .get("at_time")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.to_utc());
+
         match self.engine.graph_traverse(
             start,
             depth,
             algorithm,
             &exclude_kinds,
             include_relationships.as_deref(),
+            at_time,
         ) {
             Ok(nodes) => {
                 let output: Vec<Value> = nodes
@@ -414,7 +421,7 @@ impl McpServer {
             // depth>1: BFS reachability (impact analysis)
             let nodes = match self
                 .engine
-                .graph_traverse(&node_id, depth, "bfs", &[], None)
+                .graph_traverse(&node_id, depth, "bfs", &[], None, None)
             {
                 Ok(n) => n,
                 Err(e) => {

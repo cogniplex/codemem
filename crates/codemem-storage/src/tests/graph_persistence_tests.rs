@@ -34,6 +34,8 @@ fn graph_node_crud() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
 
     storage.insert_graph_node(&node).unwrap();
