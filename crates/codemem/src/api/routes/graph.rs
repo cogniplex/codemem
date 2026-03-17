@@ -12,6 +12,7 @@ use axum::{
     Json,
 };
 use codemem_core::{GraphBackend, NodeKind};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Collect edges whose both endpoints are in `node_ids`, deduplicating by edge ID.
@@ -204,7 +205,7 @@ pub async fn get_communities(
     });
 
     Json(result.unwrap_or_else(|_| CommunitiesResponse {
-        communities: std::collections::HashMap::new(),
+        communities: HashMap::new(),
         num_communities: 0,
     }))
 }
@@ -359,13 +360,13 @@ pub async fn get_graph_browse(
             kind_filtered_nodes.retain(|n| n.label.to_lowercase().contains(&q_lower));
         }
     }
-    let mut kinds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut kinds: HashMap<String, usize> = HashMap::new();
     for node in &kind_filtered_nodes {
         *kinds.entry(node.kind.to_string()).or_insert(0) += 1;
     }
 
     // Compute degree for each node
-    let mut degree_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut degree_map: HashMap<String, usize> = HashMap::new();
     for edge in &all_edges {
         *degree_map.entry(edge.src.clone()).or_insert(0) += 1;
         *degree_map.entry(edge.dst.clone()).or_insert(0) += 1;
@@ -406,4 +407,67 @@ pub async fn get_graph_browse(
         kinds,
         edge_count,
     })
+}
+
+// ── Temporal Endpoints ──────────────────────────────────────────────────
+
+pub async fn get_temporal_changes(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<crate::api::types::TemporalChangesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let from = chrono::DateTime::parse_from_rfc3339(&query.from)
+        .map(|dt| dt.to_utc())
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid 'from' date: {e}")})),
+            )
+        })?;
+    let to = chrono::DateTime::parse_from_rfc3339(&query.to)
+        .map(|dt| dt.to_utc())
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid 'to' date: {e}")})),
+            )
+        })?;
+
+    let entries = state
+        .server
+        .engine
+        .what_changed(from, to, query.namespace.as_deref())
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+
+    Ok(Json(serde_json::json!({
+        "commits": entries.len(),
+        "entries": entries,
+    })))
+}
+
+pub async fn get_temporal_snapshot(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<crate::api::types::TemporalSnapshotQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let at = chrono::DateTime::parse_from_rfc3339(&query.at)
+        .map(|dt| dt.to_utc())
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid 'at' date: {e}")})),
+            )
+        })?;
+
+    let snapshot = state.server.engine.graph_at_time(at).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
+
+    Ok(Json(serde_json::to_value(snapshot).unwrap_or_default()))
 }

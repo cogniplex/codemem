@@ -72,6 +72,8 @@ fn graph_strength_increases_with_code_edges() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     let file_node = GraphNode {
         id: "file:src/main.rs".to_string(),
@@ -81,6 +83,8 @@ fn graph_strength_increases_with_code_edges() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
 
     server

@@ -24,6 +24,8 @@ fn compaction_creates_package_nodes() {
             centrality: 0.0,
             memory_id: None,
             namespace: Some("test".to_string()),
+            valid_from: None,
+            valid_to: None,
         };
         let _ = graph.add_node(node);
         seen_files.insert(fp.to_string());
@@ -43,6 +45,8 @@ fn compaction_creates_package_nodes() {
             centrality: 0.0,
             memory_id: None,
             namespace: Some("test".to_string()),
+            valid_from: None,
+            valid_to: None,
         };
         let _ = graph.add_node(node);
     }
@@ -113,6 +117,8 @@ fn compaction_prunes_low_score_chunks() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("test".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     let _ = graph.add_node(file_node);
 
@@ -137,6 +143,8 @@ fn compaction_prunes_low_score_chunks() {
             centrality: 0.0,
             memory_id: None,
             namespace: Some("test".to_string()),
+            valid_from: None,
+            valid_to: None,
         };
         let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
@@ -198,6 +206,8 @@ fn compaction_preserves_memory_linked_chunks() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("test".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     let _ = graph.add_node(file_node);
 
@@ -221,6 +231,8 @@ fn compaction_preserves_memory_linked_chunks() {
             centrality: 0.0,
             memory_id: None,
             namespace: Some("test".to_string()),
+            valid_from: None,
+            valid_to: None,
         };
         let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
@@ -250,6 +262,8 @@ fn compaction_preserves_memory_linked_chunks() {
         centrality: 0.0,
         memory_id: Some(mem_id.to_string()),
         namespace: Some("test".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     let _ = graph.add_node(mem_node);
 
@@ -296,6 +310,8 @@ fn summary_tree_excludes_chunks_by_default() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     let file = GraphNode {
         id: "file:src/main.rs".to_string(),
@@ -305,6 +321,8 @@ fn summary_tree_excludes_chunks_by_default() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     let chunk = GraphNode {
         id: "chunk:src/main.rs:0".to_string(),
@@ -314,6 +332,8 @@ fn summary_tree_excludes_chunks_by_default() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     let _ = graph.add_node(pkg);
     let _ = graph.add_node(file);
@@ -389,6 +409,8 @@ fn compaction_prunes_low_score_symbols() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("test".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     let _ = graph.add_node(file_node.clone());
     let _ = server.engine.storage().insert_graph_node(&file_node);
@@ -417,6 +439,8 @@ fn compaction_prunes_low_score_symbols() {
             centrality: 0.0,
             memory_id: None,
             namespace: Some("test".to_string()),
+            valid_from: None,
+            valid_to: None,
         };
         let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
@@ -499,6 +523,8 @@ fn compaction_preserves_public_symbols() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("test".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     let _ = graph.add_node(file_node.clone());
     let _ = server.engine.storage().insert_graph_node(&file_node);
@@ -523,6 +549,8 @@ fn compaction_preserves_public_symbols() {
             centrality: 0.0,
             memory_id: None,
             namespace: Some("test".to_string()),
+            valid_from: None,
+            valid_to: None,
         };
         let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
@@ -578,6 +606,8 @@ fn compaction_preserves_structural_anchors() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("test".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     let _ = graph.add_node(file_node.clone());
     let _ = server.engine.storage().insert_graph_node(&file_node);
@@ -608,6 +638,8 @@ fn compaction_preserves_structural_anchors() {
             centrality: 0.0,
             memory_id: None,
             namespace: Some("test".to_string()),
+            valid_from: None,
+            valid_to: None,
         };
         let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);
@@ -647,6 +679,8 @@ fn compaction_preserves_structural_anchors() {
             centrality: 0.0,
             memory_id: None,
             namespace: Some("test".to_string()),
+            valid_from: None,
+            valid_to: None,
         };
         let _ = server.engine.storage().insert_graph_node(&node);
         let _ = graph.add_node(node);

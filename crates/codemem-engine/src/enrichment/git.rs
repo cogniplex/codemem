@@ -279,6 +279,21 @@ impl CodememEngine {
 
         self.save_index();
 
+        // Run temporal graph ingestion (commit/PR nodes, ModifiedBy edges)
+        let temporal = match self.ingest_git_temporal(path, days, namespace) {
+            Ok(r) => json!({
+                "commits_processed": r.commits_processed,
+                "commits_skipped": r.commits_skipped,
+                "pr_nodes_created": r.pr_nodes_created,
+                "modified_by_edges": r.modified_by_edges,
+                "symbols_expired": r.symbols_expired,
+            }),
+            Err(e) => {
+                tracing::warn!("Temporal ingestion failed (non-fatal): {e}");
+                json!({"error": e.to_string()})
+            }
+        };
+
         Ok(EnrichResult {
             insights_stored,
             details: json!({
@@ -287,6 +302,7 @@ impl CodememEngine {
                 "co_change_edges_created": co_change_edges_created,
                 "insights_stored": insights_stored,
                 "unique_authors": author_commit_count.len(),
+                "temporal": temporal,
             }),
         })
     }

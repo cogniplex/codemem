@@ -55,8 +55,11 @@ impl CodememEngine {
             if !seen.insert(candidate_id.clone()) {
                 continue;
             }
-            if graph.get_node(candidate_id).ok().flatten().is_none() {
-                continue;
+            match graph.get_node(candidate_id).ok().flatten() {
+                // Skip if node doesn't exist or is expired
+                None => continue,
+                Some(n) if n.valid_to.is_some_and(|vt| vt <= now) => continue,
+                _ => {}
             }
             let edge = Edge {
                 id: format!("{memory_id}-RELATES_TO-{candidate_id}"),

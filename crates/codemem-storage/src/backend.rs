@@ -422,13 +422,13 @@ impl StorageBackend for Storage {
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction().storage_err()?;
 
-        const COLS: usize = 7;
-        const BATCH: usize = 999 / COLS; // 142
+        const COLS: usize = 9;
+        const BATCH: usize = 999 / COLS; // 111
 
         for chunk in nodes.chunks(BATCH) {
             let placeholders = multi_row_placeholders(COLS, chunk.len());
             let sql = format!(
-                "INSERT OR REPLACE INTO graph_nodes (id, kind, label, payload, centrality, memory_id, namespace) VALUES {placeholders}"
+                "INSERT OR REPLACE INTO graph_nodes (id, kind, label, payload, centrality, memory_id, namespace, valid_from, valid_to) VALUES {placeholders}"
             );
 
             let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
@@ -443,6 +443,8 @@ impl StorageBackend for Storage {
                 param_values.push(Box::new(node.centrality));
                 param_values.push(Box::new(node.memory_id.clone()));
                 param_values.push(Box::new(node.namespace.clone()));
+                param_values.push(Box::new(node.valid_from.map(|dt| dt.timestamp())));
+                param_values.push(Box::new(node.valid_to.map(|dt| dt.timestamp())));
             }
 
             let refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -597,10 +599,11 @@ impl StorageBackend for Storage {
             .replace('_', "\\_");
         let pattern = format!("%{escaped}%");
 
-        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
-            if let Some(ns) = namespace {
-                (
-                    "SELECT id, kind, label, payload, centrality, memory_id, namespace \
+        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ns) =
+            namespace
+        {
+            (
+                    "SELECT id, kind, label, payload, centrality, memory_id, namespace, valid_from, valid_to \
                  FROM graph_nodes WHERE LOWER(label) LIKE ?1 ESCAPE '\\' AND namespace = ?2 \
                  ORDER BY centrality DESC LIMIT ?3"
                         .to_string(),
@@ -610,9 +613,9 @@ impl StorageBackend for Storage {
                         Box::new(limit as i64),
                     ],
                 )
-            } else {
-                (
-                    "SELECT id, kind, label, payload, centrality, memory_id, namespace \
+        } else {
+            (
+                    "SELECT id, kind, label, payload, centrality, memory_id, namespace, valid_from, valid_to \
                  FROM graph_nodes WHERE LOWER(label) LIKE ?1 ESCAPE '\\' \
                  ORDER BY centrality DESC LIMIT ?2"
                         .to_string(),
@@ -621,7 +624,7 @@ impl StorageBackend for Storage {
                         Box::new(limit as i64),
                     ],
                 )
-            };
+        };
 
         let refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
@@ -631,6 +634,8 @@ impl StorageBackend for Storage {
             .query_map(refs.as_slice(), |row| {
                 let kind_str: String = row.get(1)?;
                 let payload_str: String = row.get(3)?;
+                let valid_from_ts: Option<i64> = row.get(7)?;
+                let valid_to_ts: Option<i64> = row.get(8)?;
                 Ok(GraphNode {
                     id: row.get(0)?,
                     kind: kind_str.parse().unwrap_or(NodeKind::Memory),
@@ -639,6 +644,9 @@ impl StorageBackend for Storage {
                     centrality: row.get(4)?,
                     memory_id: row.get(5)?,
                     namespace: row.get(6)?,
+                    valid_from: valid_from_ts
+                        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0)),
+                    valid_to: valid_to_ts.and_then(|ts| chrono::DateTime::from_timestamp(ts, 0)),
                 })
             })
             .storage_err()?

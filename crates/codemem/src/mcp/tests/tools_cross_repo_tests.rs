@@ -98,6 +98,8 @@ fn cross_namespace_edge_query() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("alpha".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
     let node_b = GraphNode {
         id: "sym:beta::Bar".to_string(),
@@ -107,6 +109,8 @@ fn cross_namespace_edge_query() {
         centrality: 0.0,
         memory_id: None,
         namespace: Some("beta".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
 
     server.engine.storage().insert_graph_node(&node_a).unwrap();

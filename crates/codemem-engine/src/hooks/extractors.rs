@@ -41,6 +41,8 @@ pub(super) fn build_file_extraction(
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     });
     let mut metadata = HashMap::new();
     metadata.insert(
@@ -308,6 +310,8 @@ pub(super) fn extract_bash(
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         }
     });
 

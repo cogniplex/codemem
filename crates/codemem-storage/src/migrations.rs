@@ -79,6 +79,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Event channels",
         sql: include_str!("migrations/014_event_channels.sql"),
     },
+    Migration {
+        version: 15,
+        description: "Temporal graph nodes (valid_from, valid_to)",
+        sql: include_str!("migrations/015_temporal_graph_nodes.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.

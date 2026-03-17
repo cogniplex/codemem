@@ -102,6 +102,8 @@ fn betweenness_lazy_compute_on_recall() {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: None,
+                valid_from: None,
+                valid_to: None,
             };
             graph.add_node(node).unwrap();
         }

@@ -26,6 +26,8 @@ fn all_nine_scoring_components_nonzero() {
         centrality: 0.0,
         memory_id: Some(memory_id.to_string()),
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     graph.add_node(mem_node).unwrap();
 
@@ -43,6 +45,8 @@ fn all_nine_scoring_components_nonzero() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         graph.add_node(node).unwrap();
     }
@@ -180,6 +184,8 @@ fn add_memory_node(graph: &mut GraphEngine, id: &str) {
         centrality: 0.0,
         memory_id: Some(id.to_string()),
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     graph.add_node(node).unwrap();
 }
@@ -194,6 +200,8 @@ fn add_code_node(graph: &mut GraphEngine, id: &str, kind: NodeKind) {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     graph.add_node(node).unwrap();
 }

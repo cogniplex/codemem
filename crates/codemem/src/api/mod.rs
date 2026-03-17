@@ -94,6 +94,15 @@ impl ApiServer {
             .route("/api/graph/impact/{id}", get(routes::graph::get_impact))
             .route("/api/graph/reload", post(routes::graph::reload_graph))
             .route("/api/graph/browse", get(routes::graph::get_graph_browse))
+            // Temporal
+            .route(
+                "/api/graph/temporal/changes",
+                get(routes::graph::get_temporal_changes),
+            )
+            .route(
+                "/api/graph/temporal/snapshot",
+                get(routes::graph::get_temporal_snapshot),
+            )
             // Vectors
             .route("/api/vectors", get(routes::vectors::get_vectors))
             // Namespaces

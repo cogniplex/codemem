@@ -13,6 +13,8 @@ fn make_node(i: usize) -> GraphNode {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 

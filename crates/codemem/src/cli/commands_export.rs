@@ -376,6 +376,8 @@ pub(crate) fn cmd_index(root: &std::path::Path, verbose: bool) -> anyhow::Result
                 centrality: 0.0,
                 memory_id: None,
                 namespace: Some(namespace.clone()),
+                valid_from: None,
+                valid_to: None,
             }
         })
         .collect();

@@ -49,6 +49,8 @@ fn auto_link_creates_edge_to_existing_file_node() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         },
     );
 
@@ -86,6 +88,8 @@ fn auto_link_creates_edge_to_existing_symbol_node() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         },
     );
 
@@ -135,6 +139,8 @@ fn auto_link_does_not_duplicate_existing_links() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         },
     );
 
@@ -166,6 +172,8 @@ fn auto_link_return_count_matches_edges_created() {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: None,
+                valid_from: None,
+                valid_to: None,
             },
         );
     }
@@ -434,6 +442,8 @@ fn get_node_memories_finds_at_depth_1() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         },
     );
 
@@ -479,6 +489,8 @@ fn get_node_memories_finds_at_depth_2() {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: None,
+                valid_from: None,
+                valid_to: None,
             },
         );
     }
@@ -541,6 +553,8 @@ fn get_node_memories_depth_limit_respected() {
                 centrality: 0.0,
                 memory_id: None,
                 namespace: None,
+                valid_from: None,
+                valid_to: None,
             },
         );
     }
@@ -598,6 +612,8 @@ fn get_node_memories_skips_chunk_nodes() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         },
     );
 
@@ -611,6 +627,8 @@ fn get_node_memories_skips_chunk_nodes() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         },
     );
 
@@ -669,6 +687,8 @@ fn get_node_memories_relationship_filter() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         },
     );
 

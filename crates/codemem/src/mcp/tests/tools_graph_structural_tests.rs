@@ -67,6 +67,8 @@ fn search_symbols_db_fallback() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     server.engine.storage().insert_graph_node(&node).unwrap();
 
@@ -133,6 +135,8 @@ fn get_symbol_info_db_fallback() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     server.engine.storage().insert_graph_node(&node).unwrap();
 
@@ -194,6 +198,8 @@ fn symbol_from_graph_node_roundtrip() {
         centrality: 0.5,
         memory_id: None,
         namespace: Some("test".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
 
     let sym = symbol_from_graph_node(&node).expect("Should reconstruct symbol");
@@ -251,6 +257,8 @@ fn get_dependencies_for_symbol() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     let node_b = GraphNode {
         id: "sym:module::bar".to_string(),
@@ -260,6 +268,8 @@ fn get_dependencies_for_symbol() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
 
     server.engine.storage().insert_graph_node(&node_a).unwrap();
@@ -309,6 +319,8 @@ fn get_pagerank_with_nodes() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         server.engine.storage().insert_graph_node(&node).unwrap();
         server.engine.lock_graph().unwrap().add_node(node).unwrap();
@@ -366,6 +378,8 @@ fn graph_traverse_with_exclude_kinds() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     let func_node = GraphNode {
         id: "sym:test::run".to_string(),
@@ -375,6 +389,8 @@ fn graph_traverse_with_exclude_kinds() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
     let chunk_node = GraphNode {
         id: "chunk:test.rs:0".to_string(),
@@ -384,6 +400,8 @@ fn graph_traverse_with_exclude_kinds() {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     };
 
     server
@@ -471,6 +489,8 @@ fn graph_traverse_with_include_relationships() {
             centrality: 0.0,
             memory_id: None,
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         server.engine.storage().insert_graph_node(&node).unwrap();
         server.engine.lock_graph().unwrap().add_node(node).unwrap();

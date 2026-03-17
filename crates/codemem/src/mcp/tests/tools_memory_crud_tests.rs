@@ -166,6 +166,8 @@ fn recall_filters_by_namespace() {
             centrality: 0.0,
             memory_id: Some(id),
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         server
             .engine

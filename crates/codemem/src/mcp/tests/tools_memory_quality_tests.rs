@@ -274,6 +274,8 @@ fn recall_public_api_with_min_confidence() {
             centrality: 0.0,
             memory_id: Some(id),
             namespace: None,
+            valid_from: None,
+            valid_to: None,
         };
         server
             .engine

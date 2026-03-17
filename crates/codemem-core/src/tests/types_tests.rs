@@ -418,6 +418,8 @@ fn graph_node_json_roundtrip() {
         centrality: 0.72,
         memory_id: Some("mem-linked".to_string()),
         namespace: Some("api-server".to_string()),
+        valid_from: None,
+        valid_to: None,
     };
 
     let json = serde_json::to_string(&node).unwrap();

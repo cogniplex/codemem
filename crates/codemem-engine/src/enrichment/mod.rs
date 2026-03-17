@@ -16,6 +16,7 @@ mod performance;
 mod quality;
 mod security;
 mod security_scan;
+pub(crate) mod temporal;
 mod test_mapping;
 
 use crate::CodememEngine;

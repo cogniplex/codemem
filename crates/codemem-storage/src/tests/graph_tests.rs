@@ -10,6 +10,8 @@ fn file_node(id: &str, label: &str) -> GraphNode {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 
@@ -293,6 +295,8 @@ fn memory_node(id: &str, label: &str) -> GraphNode {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 
@@ -305,6 +309,8 @@ fn code_node(id: &str, label: &str, kind: NodeKind) -> GraphNode {
         centrality: 0.0,
         memory_id: None,
         namespace: None,
+        valid_from: None,
+        valid_to: None,
     }
 }
 

@@ -331,14 +331,21 @@ impl GraphEngine {
         let mut total_edge_weight = 0.0_f64;
         let mut memory_neighbor_count = 0_usize;
         let mut memory_edge_weight = 0.0_f64;
+        let now = chrono::Utc::now();
 
         // Iterate both outgoing and incoming neighbors
         for direction in &[Direction::Outgoing, Direction::Incoming] {
             for neighbor_idx in self.graph.neighbors_directed(idx, *direction) {
                 if let Some(neighbor_id) = self.graph.node_weight(neighbor_idx) {
-                    let is_code_node = self
-                        .nodes
-                        .get(neighbor_id.as_str())
+                    // Skip expired neighbors (valid_to in the past)
+                    let neighbor_node = self.nodes.get(neighbor_id.as_str());
+                    if let Some(n) = neighbor_node {
+                        if n.valid_to.is_some_and(|vt| vt <= now) {
+                            continue;
+                        }
+                    }
+
+                    let is_code_node = neighbor_node
                         .map(|n| n.kind != NodeKind::Memory)
                         .unwrap_or(false);
 
