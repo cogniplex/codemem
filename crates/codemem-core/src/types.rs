@@ -253,6 +253,8 @@ pub enum NodeKind {
     Macro,
     /// JS/TS/Python properties — distinct from struct fields.
     Property,
+    /// A named section extracted from a document (Markdown heading, YAML resource).
+    Document,
 }
 
 impl std::fmt::Display for NodeKind {
@@ -279,6 +281,7 @@ impl std::fmt::Display for NodeKind {
             Self::TypeParameter => write!(f, "type_parameter"),
             Self::Macro => write!(f, "macro"),
             Self::Property => write!(f, "property"),
+            Self::Document => write!(f, "document"),
         }
     }
 }
@@ -309,6 +312,7 @@ impl std::str::FromStr for NodeKind {
             "type_parameter" => Ok(Self::TypeParameter),
             "macro" => Ok(Self::Macro),
             "property" => Ok(Self::Property),
+            "document" => Ok(Self::Document),
             _ => Err(CodememError::InvalidNodeKind(s.to_string())),
         }
     }

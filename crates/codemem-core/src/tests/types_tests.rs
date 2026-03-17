@@ -93,6 +93,7 @@ fn node_kind_roundtrip() {
         NodeKind::TypeParameter,
         NodeKind::Macro,
         NodeKind::Property,
+        NodeKind::Document,
     ] {
         let s = nk.to_string();
         let parsed: NodeKind = s.parse().unwrap();

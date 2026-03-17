@@ -3,6 +3,7 @@
 
 pub mod api_surface;
 pub mod chunker;
+pub mod document_indexer;
 pub mod engine;
 pub mod incremental;
 pub mod indexer;
@@ -21,6 +22,9 @@ pub use api_surface::{
     DetectedClientCall, DetectedEndpoint, DetectedEventCall,
 };
 pub use chunker::{ChunkConfig, CodeChunk};
+pub use document_indexer::{
+    parse_document, supports_document_extension, DocumentFormat, DocumentNode,
+};
 pub use indexer::{IndexAndResolveResult, IndexProgress, IndexResult, Indexer};
 pub use linker::{
     backward_link, extract_packages, forward_link, match_symbol, CrossRepoEdge, LinkResult,
