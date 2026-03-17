@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.13.0](https://github.com/cogniplex/codemem/compare/v0.12.0...v0.13.0) (2026-03-16)
+
+
+### Features
+
+* diff-aware review pipeline with blast radius analysis ([#46](https://github.com/cogniplex/codemem/issues/46)) ([9285d57](https://github.com/cogniplex/codemem/commit/9285d57f8b1cf2ae8491e1cfb7ea34ec010272ad))
+* memory expiration with opportunistic cleanup ([#41](https://github.com/cogniplex/codemem/issues/41)) ([cf8e995](https://github.com/cogniplex/codemem/commit/cf8e995df43f908ee77dea90520d3483b5a059ca))
+* scope context with repo/branch/user awareness ([#45](https://github.com/cogniplex/codemem/issues/45)) ([d6ec98f](https://github.com/cogniplex/codemem/commit/d6ec98f7f20a4246a0b1ac63b33164710525a244))
+
+
+### Bug Fixes
+
+* 12 correctness, safety, and pipeline fixes from code review ([#47](https://github.com/cogniplex/codemem/issues/47)) ([71d628f](https://github.com/cogniplex/codemem/commit/71d628f3f76c342c0087e107b1faad2682222068))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.12.0 to 0.13.0
+    * codemem-engine bumped from 0.12.0 to 0.13.0
+
 ## [0.12.0](https://github.com/cogniplex/codemem/compare/v0.11.0...v0.12.0) (2026-03-13)
 
 
