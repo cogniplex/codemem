@@ -5,17 +5,18 @@ This document traces the journey of data through Codemem's index and enrichment 
 ## Overview
 
 ```
-Source Files → Index (tree-sitter) → Persist (nodes, edges, embeddings, compaction)
-                                          ↓
-                                     Enrich (14 analyses) → Insight memories
-                                          ↓
-                                     PageRank + Louvain → Annotated graph
+Source Files → Index (tree-sitter + SCIP) → Persist (nodes, edges, embeddings, compaction)
+                                                  ↓
+                                             Enrich (14 analyses) → Insight memories
+                                                  ↓
+                                             Temporal (git commits → graph nodes)
+                                                  ↓
+                                             PageRank + Louvain → Annotated graph
 ```
 
-The pipeline runs via three entry points:
+The pipeline runs via two entry points:
 - **CLI**: `codemem analyze` (full pipeline) or `codemem index` (indexing only)
-- **MCP tool**: `analyze_codebase` (full pipeline) or `index_codebase` (indexing only)
-- **MCP tool**: `enrich_codebase` (enrichment only, after indexing)
+- **CLI**: `codemem review` (diff-aware blast radius analysis, reads diff from stdin)
 
 ---
 
@@ -54,7 +55,21 @@ Package manifests are parsed to create Package nodes and DEPENDS_ON edges:
 - `go.mod` (Go)
 - `pyproject.toml` (Python, PEP 621 + Poetry)
 
-### 1e. Reference Resolution
+### 1e. SCIP Enrichment (optional)
+
+When SCIP indexers are installed and enabled (`[scip] enabled = true` in config), codemem runs them to produce compiler-grade cross-references. The process:
+
+1. **Language detection**: Scan manifest files (Cargo.toml, package.json, go.mod, pyproject.toml) to identify languages
+2. **Indexer discovery**: Check PATH for the corresponding SCIP indexer (rust-analyzer, scip-typescript, etc.)
+3. **Index generation**: Run the indexer to produce a `.scip` protobuf file
+4. **Edge fusion**: SCIP edges (confidence 0.15) are fused with ast-grep pattern edges (confidence 0.10). When both sources identify the same edge, their confidence scores add (0.25 total). SCIP-only edges supersede ast-grep duplicates
+5. **Containment hierarchy**: File → module → class → method containment tree built from SCIP's nested symbol structure
+6. **External nodes**: Dependency symbols (from `ext:` references) create External nodes with package manager metadata
+7. **Caching**: `.scip` files cached at `~/.codemem/scip-cache/{namespace}/` with configurable TTL (default 24h)
+
+Intra-class edges are collapsed into parent metadata when `collapse_intra_class_edges = true` (default). Fan-out limits prevent hub symbols from creating excessive edges.
+
+### 1f. Reference Resolution
 
 References are resolved against the symbol table to create typed edges:
 - `CALLS` (function/method invocations)
@@ -180,6 +195,24 @@ Before storing, each insight is checked for semantic near-duplicates (cosine > 0
 
 ---
 
+## Step 3.5: Temporal Graph
+
+**Entry**: `temporal::ingest_temporal_layer()` in `codemem-engine/src/enrichment/temporal.rs`
+
+Integrated into `enrich_git_history()`, the temporal layer records git history as first-class graph nodes:
+
+1. **Commit parsing**: `git log` output is parsed with parent hashes and subjects
+2. **Commit nodes**: Each commit becomes a `Commit` node (kind: Commit) with author, date, and subject metadata
+3. **ModifiedBy edges**: File-level edges for all commits; symbol-level edges for recent commits (30-day cutoff)
+4. **PR detection**: Squash/merge commit patterns are detected and annotated
+5. **Bot compaction**: Dependabot, Renovate, and lock-file-only commits are flagged
+6. **Deleted symbol expiry**: Files/symbols removed in recent commits get `valid_to` set, marking them as expired
+7. **Incremental ingestion**: A sentinel node tracks the last-processed commit, avoiding duplicate work
+
+All graph nodes carry `valid_from` and `valid_to` timestamps. Expired nodes (where `valid_to < now`) are automatically skipped in recall scoring, graph linking, and code search. The `graph_traverse` tool accepts an `at_time` parameter for point-in-time filtered traversal.
+
+---
+
 ## Step 4: Graph Analysis
 
 After enrichment, the full pipeline computes:
@@ -209,10 +242,14 @@ codemem analyze /path/to/project
   │   ├─ Walk files (skip .gitignore, binaries)
   │   ├─ Parse ASTs (14 languages via tree-sitter)
   │   ├─ Extract symbols, references, chunks
-  │   └─ Parse manifests (Cargo.toml, package.json, etc.)
+  │   ├─ Parse manifests (Cargo.toml, package.json, etc.)
+  │   └─ SCIP enrichment (if indexers installed)
+  │       ├─ Auto-detect languages + indexers
+  │       ├─ Run indexers → .scip protobuf
+  │       └─ Fuse edges (ast-grep 0.10 + SCIP 0.15 = 0.25)
   │
   ├─ Step 2: Persist
-  │   ├─ Upsert graph nodes (file, sym, pkg, chunk)
+  │   ├─ Upsert graph nodes (file, sym, pkg, chunk, commit)
   │   ├─ Resolve references → typed edges
   │   ├─ Embed symbols + chunks (batched, contextual)
   │   └─ Compact: prune low-value chunks + symbols
@@ -224,6 +261,12 @@ codemem analyze /path/to/project
   │   ├─ Architecture, test_mapping, API surface
   │   ├─ Doc coverage, quality stratification
   │   └─ Each → Insight memories tagged static-analysis
+  │
+  ├─ Step 3.5: Temporal Graph
+  │   ├─ Parse git log → Commit nodes
+  │   ├─ Create ModifiedBy edges (file + symbol level)
+  │   ├─ Detect squash/merge PRs, compact bot commits
+  │   └─ Set valid_to on deleted files/symbols
   │
   └─ Step 4: Graph Analysis
       ├─ PageRank (top-10 displayed)
