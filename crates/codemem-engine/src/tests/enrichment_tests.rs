@@ -1917,3 +1917,93 @@ fn temporal_edge_insertion_creates_placeholder_nodes() {
         "placeholder should be persisted to storage"
     );
 }
+
+// ── expire_deleted_symbols: delete-then-recreate bug ─────────────────
+
+#[test]
+fn expire_deleted_symbols_skips_files_that_exist_on_disk() {
+    // The fix filters out deleted-file paths that currently exist on disk.
+    // We test this by creating a temp dir with a git repo containing a file,
+    // then adding a File graph node and calling expire_deleted_symbols.
+    // Since the file exists on disk, it should NOT be expired even if
+    // git log --diff-filter=D reports a past deletion.
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let tmp_path = tmp.path();
+
+    // Create a file that simulates a "resurrected" file
+    let src_dir = tmp_path.join("src");
+    std::fs::create_dir_all(&src_dir).expect("create src dir");
+    std::fs::write(src_dir.join("resurrected.rs"), "fn main() {}").expect("write resurrected.rs");
+
+    // Initialize a git repo so git log commands don't fail
+    std::process::Command::new("git")
+        .args(["-C", tmp_path.to_str().expect("tmp path to str"), "init"])
+        .output()
+        .expect("git init");
+    std::process::Command::new("git")
+        .args([
+            "-C",
+            tmp_path.to_str().expect("tmp path to str"),
+            "add",
+            ".",
+        ])
+        .output()
+        .expect("git add");
+    std::process::Command::new("git")
+        .args([
+            "-C",
+            tmp_path.to_str().expect("tmp path to str"),
+            "commit",
+            "-m",
+            "initial",
+        ])
+        .output()
+        .expect("git commit");
+
+    let engine = CodememEngine::for_testing();
+
+    // Insert a File graph node with valid_to: None (alive)
+    let file_node = GraphNode {
+        id: "file:src/resurrected.rs".to_string(),
+        kind: NodeKind::File,
+        label: "src/resurrected.rs".to_string(),
+        payload: HashMap::new(),
+        centrality: 0.0,
+        memory_id: None,
+        namespace: Some("test".to_string()),
+        valid_from: None,
+        valid_to: None,
+    };
+    engine
+        .storage
+        .insert_graph_node(&file_node)
+        .expect("insert file node to storage");
+    {
+        let mut graph = engine.lock_graph().expect("lock graph for setup");
+        graph.add_node(file_node).expect("add file node to graph");
+    }
+
+    // Call expire_deleted_symbols — git log won't find deletions in this
+    // fresh repo, AND the new filter would catch it if it did.
+    let result = engine.expire_deleted_symbols(
+        tmp_path.to_str().expect("tmp path to str"),
+        &[], // empty commits list
+        "test",
+    );
+    assert_eq!(
+        result.expect("expire_deleted_symbols should succeed"),
+        0,
+        "no files should be expired when the file exists on disk"
+    );
+
+    // Verify the node still has valid_to: None
+    let graph = engine.lock_graph().expect("lock graph for assertion");
+    let node = graph
+        .get_node("file:src/resurrected.rs")
+        .expect("get file node")
+        .expect("file node should still exist");
+    assert!(
+        node.valid_to.is_none(),
+        "resurrected file should NOT have valid_to set"
+    );
+}

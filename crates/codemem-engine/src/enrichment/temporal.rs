@@ -25,7 +25,7 @@ pub struct TemporalIngestResult {
 }
 
 /// Parsed commit from git log.
-struct ParsedCommit {
+pub(crate) struct ParsedCommit {
     hash: String,
     short_hash: String,
     parents: Vec<String>,
@@ -559,7 +559,7 @@ impl CodememEngine {
     /// Uses `git log --diff-filter=D` to find deleted files, then collects
     /// expired nodes before writing — avoids holding the graph lock during
     /// storage writes (deadlock risk).
-    fn expire_deleted_symbols(
+    pub(crate) fn expire_deleted_symbols(
         &self,
         path: &str,
         commits: &[ParsedCommit],
@@ -615,6 +615,20 @@ impl CodememEngine {
                 deletions.push((date, files));
             }
         }
+
+        if deletions.is_empty() {
+            return Ok(0);
+        }
+
+        // Filter out files that currently exist in the working tree
+        // (they were deleted then re-created, so should not be expired)
+        for (_date, deleted_files) in &mut deletions {
+            deleted_files.retain(|f| {
+                let full_path = std::path::Path::new(path).join(f);
+                !full_path.exists()
+            });
+        }
+        deletions.retain(|(_, files)| !files.is_empty());
 
         if deletions.is_empty() {
             return Ok(0);
