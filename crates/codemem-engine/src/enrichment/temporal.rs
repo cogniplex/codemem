@@ -423,9 +423,17 @@ impl CodememEngine {
                     let parents: Vec<String> =
                         parts[1].split_whitespace().map(|s| s.to_string()).collect();
                     let author = parts[2].to_string();
-                    let date = chrono::DateTime::parse_from_rfc3339(parts[3])
-                        .map(|dt| dt.with_timezone(&chrono::Utc))
-                        .unwrap_or_else(|_| chrono::Utc::now());
+                    let date = match chrono::DateTime::parse_from_rfc3339(parts[3]) {
+                        Ok(dt) => dt.with_timezone(&chrono::Utc),
+                        Err(e) => {
+                            tracing::warn!(
+                                "Skipping commit {}: unparseable date {:?}: {e}",
+                                &parts[0][..parts[0].len().min(7)],
+                                parts[3]
+                            );
+                            continue;
+                        }
+                    };
                     let subject = parts[4].to_string();
                     let files: Vec<String> = lines
                         .filter(|l| !l.trim().is_empty())
