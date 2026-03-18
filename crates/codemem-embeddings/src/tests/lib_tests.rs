@@ -505,6 +505,42 @@ fn from_env_openai_missing_api_key() {
 }
 
 #[test]
+fn from_env_gemini_provider() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "gemini") };
+    unsafe { std::env::set_var("CODEMEM_EMBED_API_KEY", "test-gemini-key") };
+    let result = from_env(None);
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_API_KEY") };
+    let provider = result.expect("from_env should succeed for gemini");
+    assert_eq!(provider.name(), "gemini");
+}
+
+#[test]
+fn from_env_google_alias() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "google") };
+    unsafe { std::env::set_var("CODEMEM_EMBED_API_KEY", "test-google-key") };
+    let result = from_env(None);
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_API_KEY") };
+    let provider = result.expect("'google' alias should create gemini provider");
+    assert_eq!(provider.name(), "gemini");
+}
+
+#[test]
+fn from_env_gemini_missing_api_key() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "gemini") };
+    unsafe { std::env::remove_var("CODEMEM_EMBED_API_KEY") };
+    unsafe { std::env::remove_var("GEMINI_API_KEY") };
+    unsafe { std::env::remove_var("GOOGLE_API_KEY") };
+    let result = from_env(None);
+    unsafe { std::env::remove_var("CODEMEM_EMBED_PROVIDER") };
+    assert!(result.is_err(), "gemini without API key should fail");
+}
+
+#[test]
 fn from_env_with_config_ollama_url() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     unsafe { std::env::set_var("CODEMEM_EMBED_PROVIDER", "ollama") };
