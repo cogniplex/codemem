@@ -162,18 +162,10 @@ impl CodememEngine {
             });
         }
 
-        // Collect all nodes and edges from the graph.
-        let (all_nodes, all_edges) = {
-            let graph = self.lock_graph()?;
-            let nodes = graph.get_all_nodes();
-            let mut edges = Vec::new();
-            for node in &nodes {
-                if let Ok(node_edges) = graph.get_edges(&node.id) {
-                    edges.extend(node_edges);
-                }
-            }
-            (nodes, edges)
-        };
+        // Collect all nodes from the in-memory graph and all edges from storage.
+        // Using storage.all_graph_edges() avoids N+1 per-node get_edges calls.
+        let all_nodes = self.lock_graph()?.get_all_nodes();
+        let all_edges = self.storage.all_graph_edges()?;
 
         let dead_entries = find_dead_code(&all_nodes, &all_edges, config);
 

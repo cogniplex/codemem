@@ -386,6 +386,9 @@ pub struct DeadCodeConfig {
     pub enabled: bool,
     /// Decorator/attribute names that exempt a symbol from dead code detection
     /// (e.g., route handlers, test fixtures, CLI commands).
+    /// This is a cross-language union — Python-specific entries like `pytest.fixture`
+    /// coexist with Rust-specific entries like `tokio::test`. Decorator names don't
+    /// collide across languages, so a single flat list works.
     pub exempt_decorators: Vec<String>,
     /// Symbol kind strings that are exempt (e.g., "constructor", "test").
     pub exempt_kinds: Vec<String>,

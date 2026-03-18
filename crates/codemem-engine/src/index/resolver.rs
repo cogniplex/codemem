@@ -212,36 +212,40 @@ impl ReferenceResolver {
         None
     }
 
+    /// Map a reference kind to a relationship type and apply kind-specific
+    /// confidence adjustments (e.g., Callback caps at 0.6).
+    fn resolve_edge(&self, r: &Reference) -> Option<ResolvedEdge> {
+        let (target, confidence) = self.resolve_with_confidence(r)?;
+        let relationship = match r.kind {
+            ReferenceKind::Call | ReferenceKind::Callback => RelationshipType::Calls,
+            ReferenceKind::Import => RelationshipType::Imports,
+            ReferenceKind::Inherits => RelationshipType::Inherits,
+            ReferenceKind::Implements => RelationshipType::Implements,
+            ReferenceKind::TypeUsage => RelationshipType::DependsOn,
+        };
+        // Callback references are speculative — cap confidence.
+        let confidence = if r.kind == ReferenceKind::Callback {
+            confidence.min(0.6)
+        } else {
+            confidence
+        };
+        Some(ResolvedEdge {
+            source_qualified_name: r.source_qualified_name.clone(),
+            target_qualified_name: target.qualified_name.clone(),
+            relationship,
+            file_path: r.file_path.clone(),
+            line: r.line,
+            resolution_confidence: confidence,
+        })
+    }
+
     /// Resolve all references into edges.
     ///
     /// Only produces edges for successfully resolved references.
     pub fn resolve_all(&self, references: &[Reference]) -> Vec<ResolvedEdge> {
         references
             .iter()
-            .filter_map(|r| {
-                let (target, confidence) = self.resolve_with_confidence(r)?;
-                let relationship = match r.kind {
-                    ReferenceKind::Call | ReferenceKind::Callback => RelationshipType::Calls,
-                    ReferenceKind::Import => RelationshipType::Imports,
-                    ReferenceKind::Inherits => RelationshipType::Inherits,
-                    ReferenceKind::Implements => RelationshipType::Implements,
-                    ReferenceKind::TypeUsage => RelationshipType::DependsOn,
-                };
-                let confidence = if r.kind == ReferenceKind::Callback {
-                    confidence.min(0.6)
-                } else {
-                    confidence
-                };
-
-                Some(ResolvedEdge {
-                    source_qualified_name: r.source_qualified_name.clone(),
-                    target_qualified_name: target.qualified_name.clone(),
-                    relationship,
-                    file_path: r.file_path.clone(),
-                    line: r.line,
-                    resolution_confidence: confidence,
-                })
-            })
+            .filter_map(|r| self.resolve_edge(r))
             .collect()
     }
 
@@ -254,40 +258,18 @@ impl ReferenceResolver {
         let mut unresolved = Vec::new();
 
         for r in references {
-            match self.resolve_with_confidence(r) {
-                Some((target, confidence)) => {
-                    let relationship = match r.kind {
-                        ReferenceKind::Call | ReferenceKind::Callback => RelationshipType::Calls,
-                        ReferenceKind::Import => RelationshipType::Imports,
-                        ReferenceKind::Inherits => RelationshipType::Inherits,
-                        ReferenceKind::Implements => RelationshipType::Implements,
-                        ReferenceKind::TypeUsage => RelationshipType::DependsOn,
-                    };
-                    let confidence = if r.kind == ReferenceKind::Callback {
-                        confidence.min(0.6)
-                    } else {
-                        confidence
-                    };
-                    edges.push(ResolvedEdge {
-                        source_qualified_name: r.source_qualified_name.clone(),
-                        target_qualified_name: target.qualified_name.clone(),
-                        relationship,
-                        file_path: r.file_path.clone(),
-                        line: r.line,
-                        resolution_confidence: confidence,
-                    });
-                }
-                None => {
-                    let package_hint = extract_package_hint(&r.target_name, r.kind);
-                    unresolved.push(UnresolvedRef {
-                        source_node: r.source_qualified_name.clone(),
-                        target_name: r.target_name.clone(),
-                        package_hint,
-                        ref_kind: r.kind.to_string(),
-                        file_path: r.file_path.clone(),
-                        line: r.line,
-                    });
-                }
+            if let Some(edge) = self.resolve_edge(r) {
+                edges.push(edge);
+            } else {
+                let package_hint = extract_package_hint(&r.target_name, r.kind);
+                unresolved.push(UnresolvedRef {
+                    source_node: r.source_qualified_name.clone(),
+                    target_name: r.target_name.clone(),
+                    package_hint,
+                    ref_kind: r.kind.to_string(),
+                    file_path: r.file_path.clone(),
+                    line: r.line,
+                });
             }
         }
 

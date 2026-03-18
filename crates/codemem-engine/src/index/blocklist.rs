@@ -208,12 +208,9 @@ static BLOCKLISTS: LazyLock<HashMap<&'static str, HashSet<&'static str>>> = Lazy
             "values",
             "entries",
             "isArray",
-            "from",
-            "of",
-            "resolve",
-            "reject",
-            "race",
-            "all",
+            // NOTE: "from", "of", "resolve", "reject", "all", "now" removed —
+            // too ambiguous as simple names (e.g., MyClass.from(), Promise.resolve()
+            // can't be distinguished from user-defined methods at the simple-name level).
             "allSettled",
             "floor",
             "ceil",
@@ -224,7 +221,6 @@ static BLOCKLISTS: LazyLock<HashMap<&'static str, HashSet<&'static str>>> = Lazy
             "max",
             "pow",
             "sqrt",
-            "now",
             "toISOString",
             "toJSON",
             "push",
@@ -378,9 +374,9 @@ static BLOCKLISTS: LazyLock<HashMap<&'static str, HashSet<&'static str>>> = Lazy
     m.insert(
         "java",
         HashSet::from([
-            "System.out.println",
-            "System.out.print",
-            "System.err.println",
+            // NOTE: "System.out.println" etc. removed — after splitting on "."
+            // (Java's scope separator), only the simple name "println" remains,
+            // which is already in this list.
             "toString",
             "equals",
             "hashCode",
