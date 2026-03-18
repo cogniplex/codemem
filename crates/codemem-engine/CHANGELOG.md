@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.15.0](https://github.com/cogniplex/codemem/compare/v0.14.0...v0.15.0) (2026-03-18)
+
+
+### Features
+
+* graph quality improvements — blocklist, callbacks, dead code ([#58](https://github.com/cogniplex/codemem/issues/58)) ([42e1486](https://github.com/cogniplex/codemem/commit/42e1486f4d65da0b707738989fcbaa2687645a5d))
+
+
+### Bug Fixes
+
+* post-review fixes for temporal graph, Gemini provider, and migration safety ([#56](https://github.com/cogniplex/codemem/issues/56)) ([f345dc6](https://github.com/cogniplex/codemem/commit/f345dc65550d2281d204856b1757a901f0a1f338))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.14.0 to 0.15.0
+    * codemem-storage bumped from 0.14.0 to 0.14.1
+    * codemem-embeddings bumped from 0.13.0 to 0.13.1
+
 ## [0.14.0](https://github.com/cogniplex/codemem/compare/v0.13.0...v0.14.0) (2026-03-18)
 
 
