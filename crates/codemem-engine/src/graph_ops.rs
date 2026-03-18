@@ -518,13 +518,12 @@ impl CodememEngine {
 
     /// Get the history of commits that modified a specific symbol or file.
     pub fn symbol_history(&self, node_id: &str) -> Result<Vec<ChangeEntry>, CodememError> {
-        let all_edges = self.storage.all_graph_edges()?;
-
-        // Find all ModifiedBy edges from this node to commit nodes
-        let commit_ids: HashSet<&str> = all_edges
+        // Phase 1: Find commit IDs via targeted edge query (not full scan)
+        let node_edges = self.storage.get_edges_for_node(node_id)?;
+        let commit_ids: HashSet<String> = node_edges
             .iter()
             .filter(|e| e.src == node_id && e.relationship == RelationshipType::ModifiedBy)
-            .map(|e| e.dst.as_str())
+            .map(|e| e.dst.clone())
             .collect();
 
         if commit_ids.is_empty() {
@@ -537,27 +536,19 @@ impl CodememEngine {
             graph
                 .get_all_nodes()
                 .into_iter()
-                .filter(|n| commit_ids.contains(n.id.as_str()))
+                .filter(|n| commit_ids.contains(&n.id))
                 .collect()
         };
 
-        // Index ModifiedBy edges by dst to populate changed_files/symbols
-        let mut edges_by_dst: HashMap<&str, Vec<&Edge>> = HashMap::new();
-        for edge in &all_edges {
-            if edge.relationship == RelationshipType::ModifiedBy
-                && commit_ids.contains(edge.dst.as_str())
-            {
-                edges_by_dst.entry(&edge.dst).or_default().push(edge);
-            }
-        }
-
+        // Phase 2: For each commit, find sibling files/symbols via targeted query
         let mut entries = Vec::new();
         for node in &commit_nodes {
+            let commit_edges = self.storage.get_edges_for_node(&node.id)?;
             let mut changed_files = Vec::new();
             let mut changed_symbols = Vec::new();
 
-            if let Some(commit_edges) = edges_by_dst.get(node.id.as_str()) {
-                for edge in commit_edges {
+            for edge in &commit_edges {
+                if edge.relationship == RelationshipType::ModifiedBy && edge.dst == node.id {
                     if edge.src.starts_with("file:") {
                         changed_files.push(
                             edge.src
