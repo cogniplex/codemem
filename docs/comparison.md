@@ -12,10 +12,12 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **GitHub stars** | -- | ~32k | ~48k | ~17k | ~23k | ~21k | ~13k | ~6k | ~1k | ~4k |
 | **Startup** | <100ms | ~2s | Seconds | Seconds | Seconds | Seconds | Seconds | Seconds | 10-30s | Seconds |
 | **Offline** | Yes | Partial | Partial | No | No | Partial | Partial | No | No | Partial (Ollama) |
-| **Embedding** | Pluggable: Candle (local), Ollama, OpenAI-compatible (768-dim) | Chroma (via uvx) | Pluggable (24+ providers) | Built-in | Pluggable (OpenAI, etc.) | Configurable | Pluggable | OpenAI/Voyage/Ollama | Qdrant + Voyage AI | OpenAI, Gemini, Ollama |
+| **Embedding** | Pluggable: Candle (local), Ollama, OpenAI-compatible, Gemini (768-dim) | Chroma (via uvx) | Pluggable (24+ providers) | Built-in | Pluggable (OpenAI, etc.) | Configurable | Pluggable | OpenAI/Voyage/Ollama | Qdrant + Voyage AI | OpenAI, Gemini, Ollama |
 | **Code-aware** | Yes (ast-grep + CST chunking) | No | No | Partial (code connector) | No | Yes (Letta Code) | Partial (codify) | Yes (AST splitting) | No | No |
 | **MCP tools** | 32 | 3 | Yes (OpenMemory MCP) | Yes (plugin) | Yes (Graphiti MCP) | Yes | Yes (cognee-mcp) | 4 | 4 | Yes |
-| **Graph** | Built-in (petgraph, 25 algos) | No | Neo4j (optional) | No | Neo4j/FalkorDB/Kuzu | No | Neo4j/FalkorDB/Kuzu | No | FalkorDB | Temporal KG |
+| **Graph** | Built-in (petgraph, 25 algos) + temporal layer | No | Neo4j (optional) | No | Neo4j/FalkorDB/Kuzu | No | Neo4j/FalkorDB/Kuzu | No | FalkorDB | Temporal KG |
+| **Temporal** | Commit nodes, ModifiedBy edges, valid_from/valid_to, 5 temporal tools | No | No | No | Bi-temporal KG (first-class) | No | No | No | No | Adaptive decay |
+| **Code review** | Diff-aware blast radius analysis | No | No | No | No | No | No | No | No | No |
 | **Compression** | Pluggable LLM (optional) | AI-powered (always on) | No | No | No | No | No | No | No | No |
 | **Consolidation** | 5 cycles (decay/creative/cluster/summarize/forget) | No | Auto-extraction | Contradiction handling | Temporal updates | Self-editing memory | ECL pipeline | No | HippoRAG-inspired | Adaptive decay |
 | **Self-editing** | Yes (refine/split/merge) | No | No | No | No | Yes (core feature) | No | No | No | No |
@@ -33,7 +35,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **Storage** | Single SQLite file + HNSW index | Triple-store: vector DB (24+ providers) + graph DB (Neo4j/Memgraph) + relational DB |
 | **Auto-capture** | 9 lifecycle hooks capture Read/Grep/Edit/Write automatically + trigger-based auto-insights | Manual `add()` calls only |
 | **Code awareness** | 14 language extractors, CST-aware chunking, structural indexing | General-purpose fact extraction from conversations |
-| **Recall scoring** | 8-component hybrid (vector + graph strength via PageRank/betweenness + BM25 + temporal + tags + importance + confidence + recency) | Vector similarity + optional graph traversal + reranking (Cohere, etc.) |
+| **Recall scoring** | 9-component hybrid (vector + graph strength + BM25 + scope context + temporal + tags + importance + confidence + recency) | Vector similarity + optional graph traversal + reranking (Cohere, etc.) |
 | **Memory scoping** | Namespace-scoped (per project directory) | Multi-level: User, Session, Agent state |
 | **Contextual embeddings** | Yes (metadata + graph context enrichment at ingestion) | No |
 | **Local-only** | Yes, fully offline with Candle BERT | Requires external embedding API; local via Ollama possible |
@@ -52,7 +54,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **Benchmarks** | Inspired by AutoMem/HippoRAG research | #1 on LongMemEval, LoCoMo, ConvoMem |
 | **Modalities** | Code-focused (text + code indexing) | Multi-modal (PDFs, images/OCR, video transcription, code) |
 | **Connectors** | Lifecycle hooks (automatic) | Google Drive, Gmail, Notion, OneDrive, GitHub (real-time sync) |
-| **Recall** | 8-component hybrid scoring | Auto-extraction + contradiction detection + forgetting, ~50ms |
+| **Recall** | 9-component hybrid scoring | Auto-extraction + contradiction detection + forgetting, ~50ms |
 | **Offline** | Yes, fully local | No (cloud API required) |
 | **Dependencies** | None | Cloud account or self-hosted setup |
 
@@ -66,16 +68,16 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 
 | Aspect | Codemem | Zep/Graphiti |
 |--------|--------|-------------|
-| **Graph model** | 24 relationship types, 25 algorithms (PageRank, Louvain, betweenness, SCC) | Temporal knowledge graph with bi-temporal data model |
-| **Graph backends** | In-process (petgraph + SQLite) | Neo4j, FalkorDB, Kuzu, Amazon Neptune |
-| **Time handling** | Temporal edges (valid_from/valid_to) + recency scoring (5%) + temporal alignment (10%) | First-class bi-temporal relationships (event time + ingestion time), point-in-time queries |
-| **Retrieval** | 8-component hybrid scoring | Hybrid: semantic embeddings + BM25 + graph traversal |
+| **Graph model** | 25 relationship types, 25 algorithms (PageRank, Louvain, betweenness, SCC) + temporal layer | Temporal knowledge graph with bi-temporal data model |
+| **Graph backends** | In-process (petgraph + SQLite), trait abstractions for future Postgres/Neo4j | Neo4j, FalkorDB, Kuzu, Amazon Neptune |
+| **Time handling** | Commit nodes + ModifiedBy edges + valid_from/valid_to on all nodes. 5 temporal tools (what_changed, graph_at_time, find_stale_files, detect_drift, symbol_history). Point-in-time graph snapshots via `at_time` parameter | First-class bi-temporal relationships (event time + ingestion time), point-in-time queries |
+| **Retrieval** | 9-component hybrid scoring | Hybrid: semantic embeddings + BM25 + graph traversal |
 | **Updates** | Explicit store/update/consolidate with provenance tracking | Real-time incremental graph updates (no batch recomputation) |
 | **Custom entities** | 7 memory types + 13 node kinds | Custom entity definitions via Pydantic models |
 
-**When to choose Zep**: Temporal reasoning is critical, you need bi-temporal event-timeline queries, building conversational agents that track how facts change over time, need cloud-scale graph backends.
+**When to choose Zep**: Bi-temporal event-timeline queries with event time + ingestion time distinction, building conversational agents, need cloud-scale graph backends (Neo4j, Neptune).
 
-**When to choose Codemem**: Code-specific memory, single-binary deployment, graph algorithms beyond traversal (PageRank, community detection, impact analysis), offline operation.
+**When to choose Codemem**: Code-specific temporal intelligence (commit nodes, symbol history, architectural drift detection), diff-aware blast radius analysis, single-binary deployment, graph algorithms beyond traversal (PageRank, community detection, impact analysis), offline operation.
 
 ### Codemem vs Letta (MemGPT)
 
@@ -123,7 +125,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **Embedding** | Pluggable: Candle (local, default), Ollama, OpenAI-compatible | External API required (OpenAI/Voyage/Ollama/Gemini) |
 | **Search** | Hybrid (vector + graph + BM25 + temporal + tags + ...) | Hybrid (BM25 + dense vector) |
 | **Vector store** | Embedded usearch HNSW | Zilliz Cloud (required) |
-| **Graph** | 25 algorithms, 24 relationship types | None |
+| **Graph** | 25 algorithms, 25 relationship types | None |
 
 **When to choose claude-context**: Need only code search (not persistent memory), already use Zilliz Cloud, want ~40% token reduction from smart retrieval.
 
@@ -140,7 +142,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 | **Hooks** | 9 lifecycle hooks + trigger-based auto-insights | 5 lifecycle hooks |
 | **Knowledge graph** | petgraph with 25 algorithms (PageRank, Louvain, betweenness, SCC) | None |
 | **Code intelligence** | ast-grep indexing (14 languages), CST-aware chunking, structural relationships | None (stores raw text observations) |
-| **Scoring** | 8-component hybrid (vector + graph + BM25 + temporal + tags + importance + confidence + recency) | FTS5 keyword + Chroma vector (separate) |
+| **Scoring** | 9-component hybrid (vector + graph + BM25 + temporal + tags + importance + confidence + recency) | FTS5 keyword + Chroma vector (separate) |
 | **Embeddings** | Pluggable: Candle BERT (Metal/CUDA, default), Ollama, OpenAI-compatible | Chroma (external process via uvx) |
 | **BM25** | Okapi BM25 with code-aware tokenizer (camelCase/snake_case splitting) | SQLite FTS5 (not code-aware) |
 | **Observation compression** | Pluggable LLM (Ollama/OpenAI/Anthropic), optional | Claude Agent SDK (always on) |
@@ -164,7 +166,7 @@ A comprehensive comparison of Codemem against other memory and context tools in 
 |--------|--------|---------|
 | **Benchmark** | Inspired by AutoMem's LoCoMo research | 90.53% LoCoMo accuracy (SOTA at time of publication) |
 | **Architecture** | Single binary (SQLite + usearch + petgraph) | Flask API + FalkorDB + Qdrant |
-| **Scoring** | 8-component hybrid | 8-component hybrid (semantic, lexical, graph, temporal, importance) |
+| **Scoring** | 9-component hybrid | 9-component hybrid (semantic, lexical, graph, temporal, importance) |
 | **Consolidation** | 5 neuroscience-inspired cycles | Zettelkasten-inspired clustering |
 | **Enrichment** | Just-in-time + git history + security + performance enrichment | Just-in-time enrichment on recall |
 | **Embeddings** | Pluggable: Candle (local), Ollama, OpenAI-compatible | Qdrant + Voyage AI |
@@ -183,9 +185,9 @@ Codemem was directly inspired by AutoMem's research. The key difference is packa
 
 | Aspect | Codemem | OpenMemory MCP |
 |--------|--------|----------------|
-| **Memory model** | 7 typed memories + 24 relationship types | 5 sectors: Episodic, Semantic, Procedural, Emotional, Reflective |
+| **Memory model** | 7 typed memories + 25 relationship types | 5 sectors: Episodic, Semantic, Procedural, Emotional, Reflective |
 | **Graph** | petgraph with 25 algorithms | Temporal knowledge graph with valid_from/valid_to |
-| **Scoring** | 8-component hybrid | Composite: salience + recency + coactivation |
+| **Scoring** | 9-component hybrid | Composite: salience + recency + coactivation |
 | **Decay** | Power-law consolidation cycle (configurable) | Adaptive decay per sector |
 | **Explainability** | Score breakdown per component | "Waypoint" traces for recall |
 | **Migration** | N/A | Import from Mem0, Zep, Supermemory |

@@ -98,6 +98,9 @@ Store a new memory with auto-embedding, type classification, and graph linking. 
 | `namespace` | string | no | -- | Project scope (e.g. working directory path) |
 | `links` | string[] | no | `[]` | IDs of existing graph nodes to create RELATES_TO edges to |
 | `auto_link` | boolean | no | `true` | Auto-link to code nodes mentioned in content |
+| `expires_at` | string | no | -- | ISO 8601 expiration timestamp (e.g. `"2026-03-21T00:00:00Z"`) |
+| `ttl_hours` | integer | no | -- | Time-to-live in hours (alternative to `expires_at`) |
+| `git_ref` | string | no | -- | Git ref (branch/tag) to scope this memory to |
 
 ```json
 {
@@ -116,7 +119,7 @@ Store a new memory with auto-embedding, type classification, and graph linking. 
 
 ### recall
 
-Unified memory search: 8-component hybrid scoring with optional graph expansion and impact analysis.
+Unified memory search: 9-component hybrid scoring with optional graph expansion and impact analysis.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -130,6 +133,7 @@ Unified memory search: 8-component hybrid scoring with optional graph expansion 
 | `expand` | boolean | no | `false` | Enable graph expansion to discover related memories |
 | `expansion_depth` | integer | no | `1` | Max graph hops for expansion (when `expand=true`) |
 | `include_impact` | boolean | no | `false` | Include PageRank, centrality, connected decisions, dependent files |
+| `git_ref` | string | no | -- | Filter results to memories with this git ref (branch/tag) |
 
 ```json
 {
@@ -266,7 +270,7 @@ Merge multiple memories into a single summary memory linked via SUMMARIZES edges
 
 ---
 
-## Graph & Structure (12 tools)
+## Graph & Structure (10 tools)
 
 ### graph_traverse
 
@@ -279,6 +283,7 @@ Multi-hop graph traversal from a start node with optional filtering by node kind
 | `algorithm` | string | no | `"bfs"` | Traversal algorithm: `bfs` or `dfs` |
 | `exclude_kinds` | string[] | no | -- | Node kinds to exclude from results and traversal |
 | `include_relationships` | string[] | no | -- | Only follow edges of these relationship types |
+| `at_time` | string | no | -- | ISO 8601 timestamp -- filter out nodes/edges not valid at this time |
 
 ```json
 {
@@ -331,25 +336,6 @@ Unified status: database stats, health check, and operational metrics. Replaces 
   "name": "codemem_status",
   "arguments": {
     "include": ["stats", "health"]
-  }
-}
-```
-
----
-
-### index_codebase
-
-Index a codebase directory to extract symbols and references using tree-sitter. Supports 14 languages.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | yes | -- | Absolute path to the codebase directory to index |
-
-```json
-{
-  "name": "index_codebase",
-  "arguments": {
-    "path": "/Users/dev/myproject"
   }
 }
 ```
@@ -696,110 +682,135 @@ Get session context: recent memories, pending analyses, active patterns, and foc
 
 ---
 
-## Enrichment (5 tools)
+## Code Review (1 tool)
 
-### enrich_codebase
+### review_diff
 
-Composite enrichment: runs all 14 enrichment analyses in one call (or a selected subset). Analyses: `git`, `security`, `performance`, `complexity`, `code_smells`, `security_scan`, `architecture`, `test_mapping`, `api_surface`, `doc_coverage`, `hot_complex`, `blame`, `quality`, `change_impact` (requires `file_path`).
+Analyze a unified diff for blast radius: map changed lines to symbols, find direct and transitive dependents, compute risk score, surface relevant memories and potentially missing changes.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `path` | string | yes | -- | Absolute path to the git repository root |
-| `days` | integer | no | `90` | Number of days of git history to analyze |
-| `namespace` | string | no | -- | Namespace scope |
-| `analyses` | string[] | no | all 14 | Which analyses to run (empty = all except change_impact) |
-| `file_path` | string | no | -- | Required for `change_impact` analysis |
+| `diff` | string | yes | -- | Unified diff text (e.g., output of `git diff`) |
+| `depth` | integer | no | `2` | Max graph hops for transitive impact analysis |
+| `base_ref` | string | no | -- | Base branch for overlay resolution (e.g., `"main"`) |
 
 ```json
 {
-  "name": "enrich_codebase",
+  "name": "review_diff",
   "arguments": {
-    "path": "/Users/dev/myproject",
-    "days": 180,
-    "analyses": ["git", "security"]
+    "diff": "diff --git a/src/auth.rs ...",
+    "depth": 2,
+    "base_ref": "main"
+  }
+}
+```
+
+**Response** includes: `changed_symbols`, `direct_dependents`, `transitive_dependents`, `affected_files`, `affected_modules`, `risk_score`, `missing_changes`, `relevant_memories`.
+
+---
+
+## Temporal Queries (5 tools)
+
+These tools require temporal ingestion to have been run (included in `codemem analyze`). Commits become graph nodes with `ModifiedBy` edges to the files/symbols they changed. All nodes carry `valid_from`/`valid_to` timestamps.
+
+### what_changed
+
+List commits and their affected files/symbols in a time range.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `from` | string | yes | -- | Start of time range (ISO 8601, e.g. `"2026-01-01T00:00:00Z"`) |
+| `to` | string | yes | -- | End of time range (ISO 8601) |
+| `namespace` | string | no | -- | Filter by namespace |
+
+```json
+{
+  "name": "what_changed",
+  "arguments": {
+    "from": "2026-03-01T00:00:00Z",
+    "to": "2026-03-17T00:00:00Z"
   }
 }
 ```
 
 ---
 
-### analyze_codebase
+### graph_at_time
 
-Full pipeline: index -> enrich (all 14 analyses) -> PageRank -> clusters -> summary. One-shot command to fully analyze a codebase.
+Snapshot of the graph at a point in time: count of live nodes/edges, broken down by kind. Nodes/edges with `valid_to` before the timestamp are excluded.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `path` | string | yes | -- | Absolute path to the codebase |
-| `namespace` | string | no | -- | Namespace scope |
-| `days` | integer | no | `90` | Days of git history |
+| `at` | string | yes | -- | Point in time (ISO 8601) |
 
 ```json
 {
-  "name": "analyze_codebase",
+  "name": "graph_at_time",
   "arguments": {
-    "path": "/Users/dev/myproject"
+    "at": "2026-02-15T00:00:00Z"
   }
 }
 ```
 
 ---
 
-### enrich_git_history
+### find_stale_files
 
-Enrich the knowledge graph with git history: commit counts, churn rate, CO_CHANGED edges, activity insights.
+Find files with high centrality or incoming edges that haven't been modified recently. Useful for identifying tech debt and neglected critical files.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `path` | string | yes | -- | Absolute path to the git repository root |
-| `days` | integer | no | `90` | Number of days of git history to analyze |
-| `namespace` | string | no | -- | Namespace scope |
+| `namespace` | string | no | -- | Filter by namespace |
+| `stale_days` | integer | no | `90` | Files not modified in this many days are considered stale |
+| `limit` | integer | no | `20` | Max results to return |
 
 ```json
 {
-  "name": "enrich_git_history",
+  "name": "find_stale_files",
   "arguments": {
-    "path": "/Users/dev/myproject",
-    "days": 180
+    "stale_days": 60,
+    "limit": 10
   }
 }
 ```
 
 ---
 
-### enrich_security
+### detect_drift
 
-Analyze graph nodes for security-related patterns: auth checks, validation, trust boundaries.
+Detect architectural drift between two time periods: new cross-module edges, hotspot files, coupling increases, added/removed files.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `namespace` | string | no | -- | Namespace scope |
+| `from` | string | yes | -- | Start of period (ISO 8601) |
+| `to` | string | yes | -- | End of period (ISO 8601) |
+| `namespace` | string | no | -- | Filter by namespace |
 
 ```json
 {
-  "name": "enrich_security",
+  "name": "detect_drift",
   "arguments": {
-    "namespace": "/Users/dev/myproject"
+    "from": "2026-01-01T00:00:00Z",
+    "to": "2026-03-01T00:00:00Z"
   }
 }
 ```
 
 ---
 
-### enrich_performance
+### symbol_history
 
-Analyze graph nodes for performance hotspots using centrality and connectivity metrics.
+Get the commit history for a specific symbol or file node. Returns commits that modified it, with affected files and symbols.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `namespace` | string | no | -- | Namespace scope |
-| `top` | integer | no | `10` | Number of top performance hotspots to return |
+| `node_id` | string | yes | -- | Graph node ID (e.g. `"sym:MyClass::method"` or `"file:src/main.rs"`) |
 
 ```json
 {
-  "name": "enrich_performance",
+  "name": "symbol_history",
   "arguments": {
-    "namespace": "/Users/dev/myproject",
-    "top": 20
+    "node_id": "sym:AuthService::validate"
   }
 }
 ```
@@ -808,7 +819,7 @@ Analyze graph nodes for performance hotspots using centrality and connectivity m
 
 ## Reference Tables
 
-### Relationship Types (24)
+### Relationship Types (25)
 
 | Type | Category | Description |
 |------|----------|-------------|
@@ -836,6 +847,7 @@ Analyze graph nodes for performance hotspots using centrality and connectivity m
 | `SHARES_THEME` | Semantic | High similarity across types (consolidation) |
 | `SUMMARIZES` | Knowledge | Summary of |
 | `CO_CHANGED` | Temporal | Files that frequently change together in git commits |
+| `MODIFIED_BY` | Temporal | Commit modified this file/symbol |
 
 ### Memory Types (7)
 
@@ -849,13 +861,14 @@ Analyze graph nodes for performance hotspots using centrality and connectivity m
 | `insight` | A non-obvious finding or realization |
 | `context` | General contextual information (default) |
 
-### Hybrid Scoring Components (8)
+### Hybrid Scoring Components (9)
 
 | Component | Default Weight | Description |
 |-----------|---------------|-------------|
 | Vector similarity | 0.25 | Cosine similarity between query and memory embeddings |
 | Graph strength | 0.20 | Multi-factor: PageRank (40%) + betweenness centrality (30%) + normalized degree (20%) + cluster bonus (10%) |
 | BM25 token overlap | 0.15 | Okapi BM25 scoring with code-aware tokenizer (camelCase/snake_case splitting) |
+| Scope context | 0.10 | Branch/repo/user awareness -- boosts memories matching current scope |
 | Temporal | 0.10 | Temporal alignment with query context |
 | Importance | 0.10 | The memory's stored importance score |
 | Confidence | 0.10 | The memory's confidence score |
@@ -863,3 +876,23 @@ Analyze graph nodes for performance hotspots using centrality and connectivity m
 | Recency | 0.05 | Boost for recently accessed/created memories |
 
 Weights are configurable via `codemem config set scoring.<key> <value>` and persist in `~/.codemem/config.toml`.
+
+### Node Kinds (15)
+
+| Kind | Prefix | Description |
+|------|--------|-------------|
+| `File` | `file:` | Source file |
+| `Function` | `sym:` | Standalone function |
+| `Method` | `sym:` | Method on a struct/class |
+| `Class` | `sym:` | Class definition |
+| `Struct` | `sym:` | Struct definition |
+| `Enum` | `sym:` | Enum definition |
+| `Interface` | `sym:` | Interface/trait definition |
+| `Type` | `sym:` | Type alias |
+| `Constant` | `sym:` | Constant or static variable |
+| `Module` | `sym:` | Module/namespace |
+| `Test` | `sym:` | Test function |
+| `Package` | `pkg:` | Package/crate from manifest |
+| `Chunk` | `chunk:` | Code chunk for embedding |
+| `Commit` | `commit:` | Git commit (temporal layer) |
+| `PullRequest` | `pr:` | Pull request (temporal layer) |

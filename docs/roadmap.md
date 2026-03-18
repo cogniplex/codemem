@@ -23,9 +23,9 @@ The AI memory space is crowded and well-funded (Mem0 $24M, Cognee $7.5M, Superme
 - **Code-aware structural intelligence** — 14 language extractors with CST-aware chunking
 - **Deep graph algorithms** — 25 algorithms (PageRank, Louvain, betweenness, SCC) built-in
 - **Self-editing memory** — refine/split/merge with provenance tracking
-- **8-component hybrid scoring** — vector + graph strength + BM25 + temporal + tags + importance + confidence + recency
+- **9-component hybrid scoring** — vector + graph strength + BM25 + temporal + tags + importance + confidence + recency
 
-Gaps to close: no published benchmarks, no multi-modal support, no team/hosted mode, local-only scaling limits on large monorepos (redundant indexing across developer machines), no community infrastructure.
+Gaps to close: no multi-modal support, no team/hosted mode, local-only scaling limits on large monorepos (redundant indexing across developer machines), no community infrastructure.
 
 ## Adoption Funnel
 
@@ -121,10 +121,10 @@ Focus on tests that catch real problems, not coverage numbers:
 
 ### Incremental Indexing
 
-The #1 UX pain point for daily use. Currently, re-indexing means re-scanning the entire codebase.
+~~The #1 UX pain point for daily use. Currently, re-indexing means re-scanning the entire codebase.~~ ✅ Done
 
-- File watching + diff-based re-index — only process changed files
-- Track file content hashes to skip unchanged files on startup
+- ~~File watching + diff-based re-index — only process changed files~~ ✅ Done — `codemem watch` + `ChangeDetector` with file hash tracking
+- ~~Track file content hashes to skip unchanged files on startup~~ ✅ Done — namespace-scoped SHA-256 hashes, `--force` flag to override
 - Dependents-aware: when `foo.rs` changes, re-resolve references in files that import from it
 - Target: re-index a single file change in < 1 second
 
@@ -183,7 +183,7 @@ SurrealDB is architecturally elegant but practically risky for a core dependency
 
 **Implementation plan:**
 
-1. Audit and extend `StorageBackend`, `VectorBackend`, `GraphBackend` traits in codemem-core to cover all raw backend calls
+1. ~~Audit and extend `StorageBackend`, `VectorBackend`, `GraphBackend` traits in codemem-core to cover all raw backend calls~~ ✅ Done — trait-object backends with 15+ new GraphBackend methods, 3+ VectorBackend methods, and factory pattern
 2. New `codemem-postgres` crate implementing all three traits
 3. Migration tooling: SQLite -> Postgres data migration
 4. Graph algorithms: keep petgraph as compute layer, materialize subgraphs from Postgres on demand (Postgres doesn't have PageRank built-in)
@@ -243,13 +243,19 @@ codemem serve --postgres postgres://user:pass@host:5432/codemem
 
 ---
 
-## Phase 4: LSP and Expand (v2.x+)
+## Phase 4: Expand (v2.x+)
 
-**Goal**: Replace pattern-based parsing with editor-grade intelligence, broaden beyond code-only memory.
+**Goal**: Broaden beyond code-only memory.
 
-### LSP-Based Symbol Resolution
+### SCIP-Based Symbol Resolution ✅ Done
 
-Replace ast-grep with Language Server Protocol — only after proving demand and having engineering bandwidth. LSP is high-effort, high-reward, but not urgent.
+~~Replace ast-grep with Language Server Protocol~~ Replaced with SCIP (Source Code Intelligence Protocol) — compiler-grade cross-references with zero false positives. See [ADR-008: SCIP over LSP](adr/008-scip-over-lsp.md).
+
+SCIP was chosen over LSP because: (1) offline batch processing fits the index-then-query model better than LSP's interactive protocol, (2) SCIP indexers produce deterministic output suitable for caching, (3) no need to manage language server lifecycle/memory.
+
+### LSP Considerations (deferred)
+
+LSP remains an option for future interactive features (e.g., IDE extensions) but is not needed for the batch indexing pipeline now that SCIP provides compiler-grade edges.
 
 **What LSP gives over ast-grep:**
 

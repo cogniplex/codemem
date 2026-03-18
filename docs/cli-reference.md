@@ -10,13 +10,21 @@ These environment variables affect all commands that use embeddings (`search`, `
 
 | Variable | Values | Default |
 |----------|--------|---------|
-| `CODEMEM_EMBED_PROVIDER` | `candle`, `ollama`, `openai` | `candle` |
+| `CODEMEM_EMBED_PROVIDER` | `candle`, `ollama`, `openai`, `gemini` | `candle` |
 | `CODEMEM_EMBED_MODEL` | model name | provider default |
 | `CODEMEM_EMBED_URL` | base URL override | provider default |
 | `CODEMEM_EMBED_API_KEY` | API key | also reads `OPENAI_API_KEY` |
 | `CODEMEM_EMBED_DIMENSIONS` | integer | `768` |
 
-The `openai` provider works with any OpenAI-compatible API (Voyage AI, Together, Azure, etc.) via `CODEMEM_EMBED_URL`.
+The `openai` provider works with any OpenAI-compatible API (Voyage AI, Together, Azure, etc.) via `CODEMEM_EMBED_URL`. The `gemini` provider also accepts `GEMINI_API_KEY` or `GOOGLE_API_KEY` as fallbacks.
+
+### Additional Embedding Config
+
+| Variable | Values | Default |
+|----------|--------|---------|
+| `CODEMEM_EMBED_BATCH_SIZE` | integer | `16` |
+| `CODEMEM_EMBED_DTYPE` | `f32`, `f16`, `bf16` | `f32` |
+| `CODEMEM_EMBED_CACHE_SIZE` | integer | `10000` |
 
 ### Observation Compression
 
@@ -59,7 +67,7 @@ codemem init --path ~/projects/my-monorepo
 
 ## `codemem search`
 
-Search stored memories using 8-component hybrid scoring (vector similarity, graph strength, token overlap, temporal, tags, importance, confidence, recency).
+Search stored memories using 9-component hybrid scoring (vector similarity, graph strength, token overlap, temporal, tags, importance, confidence, recency).
 
 **Syntax**
 
@@ -104,18 +112,54 @@ codemem stats
 
 ## `codemem serve`
 
-Start the MCP server using JSON-RPC over stdio. This is the primary interface used by AI coding assistants to interact with Codemem's 32 MCP tools (plus legacy aliases for backwards compatibility).
+Start the MCP server using JSON-RPC over stdio (default). Composable with `--api` for REST API + embedded frontend, and `--http` for HTTP-based MCP transport.
 
 **Syntax**
 
 ```
-codemem serve
+codemem serve [--api] [--http] [--port <port>]
 ```
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--api` | Enable REST API + embedded frontend on HTTP |
+| `--http` | Use HTTP transport for MCP (instead of stdio) |
+| `--port <port>` | HTTP server port (default: 4242, used when `--api` or `--http` is set) |
 
 **Example**
 
 ```bash
-codemem serve
+codemem serve              # JSON-RPC stdio (default)
+codemem serve --api        # REST API + UI on port 4242
+codemem serve --http       # MCP over HTTP on port 4242
+```
+
+---
+
+## `codemem ui`
+
+Open the control plane UI. Alias for `codemem serve --api` with auto-browser-open.
+
+**Syntax**
+
+```
+codemem ui [--port <port>] [--no-open]
+```
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--port <port>` | HTTP server port (default: 4242) |
+| `--no-open` | Don't open browser automatically |
+
+**Example**
+
+```bash
+codemem ui
+codemem ui --port 8080 --no-open
 ```
 
 ---
@@ -197,12 +241,12 @@ codemem index --path ~/projects/my-app --verbose
 
 ## `codemem analyze`
 
-Run the full analysis pipeline on a codebase: index (tree-sitter structural extraction) → enrich (git history, security, performance) → PageRank (identify important nodes) → Louvain clustering (detect architectural modules). This is the CLI equivalent of the `analyze_codebase` MCP tool.
+Run the full analysis pipeline on a codebase: index (tree-sitter) → SCIP enrichment (if indexers installed) → enrich (git history, security, performance, etc.) → temporal graph (commits, ModifiedBy edges) → PageRank → Louvain clustering.
 
 **Syntax**
 
 ```
-codemem analyze [--path <dir>] [--namespace <ns>] [--days <num>]
+codemem analyze [--path <dir>] [--namespace <ns>] [--days <num>] [--skip-scip] [--skip-embed] [--skip-enrich] [--force]
 ```
 
 **Flags**
@@ -212,12 +256,17 @@ codemem analyze [--path <dir>] [--namespace <ns>] [--days <num>]
 | `--path <dir>` | Directory to analyze (defaults to current directory) |
 | `--namespace <ns>` | Namespace for storing results (defaults to directory basename) |
 | `--days <num>` | Days of git history to analyze (default: 90) |
+| `--skip-scip` | Skip SCIP indexing (fast, ast-grep only) |
+| `--skip-embed` | Skip embedding phase (store graph without vectorizing) |
+| `--skip-enrich` | Skip enrichment phase (no git/complexity/security analysis) |
+| `--force` | Force re-index even when file SHAs haven't changed |
 
 **Example**
 
 ```bash
 codemem analyze
 codemem analyze --path ~/projects/my-app --namespace my-app --days 180
+codemem analyze --skip-scip --skip-enrich   # Fast: ast-grep index + PageRank only
 ```
 
 **Output**
@@ -227,6 +276,43 @@ Prints a summary including:
 - Enrichment results (git history insights, security findings, performance hotspots)
 - Top 10 important nodes by PageRank score
 - Cluster count from Louvain community detection
+
+---
+
+## `codemem review`
+
+Review a diff: map changed lines to graph symbols, compute multi-hop blast radius with risk scoring, surface relevant memories and potentially missing changes. Reads unified diff from stdin.
+
+**Syntax**
+
+```
+codemem review [--base <ref>] [--depth <num>] [--format <fmt>]
+```
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--base <ref>` | Base ref for scope context (default: `main`) |
+| `--depth <num>` | Traversal depth for transitive impact analysis (default: 2) |
+| `--format <fmt>` | Output format: `json` (default) or `text` (human-readable) |
+
+**Example**
+
+```bash
+git diff main..HEAD | codemem review --format text
+git diff --cached | codemem review --depth 3
+```
+
+**Output** (text format):
+
+```
+Risk Score: 7.2 (high)
+Changed Symbols: 3
+Direct Dependents: 12
+Transitive Dependents: 47
+Potentially Missing Changes: 1
+```
 
 ---
 
