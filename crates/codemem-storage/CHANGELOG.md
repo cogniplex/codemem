@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0](https://github.com/cogniplex/codemem/compare/v0.13.0...v0.14.0) (2026-03-18)
+
+
+### Features
+
+* temporal graph layer — commit/PR nodes, ModifiedBy edges, temporal queries ([#52](https://github.com/cogniplex/codemem/issues/52)) ([3679b22](https://github.com/cogniplex/codemem/commit/3679b2221bf1ac7c8bcbd179e35d9726908e494b))
+
+
+### Bug Fixes
+
+* deduplicate content_hash before adding UNIQUE index in migration 006 ([#54](https://github.com/cogniplex/codemem/issues/54)) ([26aecb6](https://github.com/cogniplex/codemem/commit/26aecb6f89a82ebf6b968bec3029ab4a6fae26a7)), closes [#53](https://github.com/cogniplex/codemem/issues/53)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.13.0 to 0.14.0
+
 ## [0.13.0](https://github.com/cogniplex/codemem/compare/v0.12.0...v0.13.0) (2026-03-16)
 
 

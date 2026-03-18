@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.0](https://github.com/cogniplex/codemem/compare/v0.12.0...v0.13.0) (2026-03-18)
+
+
+### Features
+
+* add Google Gemini embedding provider ([#50](https://github.com/cogniplex/codemem/issues/50)) ([007f0d4](https://github.com/cogniplex/codemem/commit/007f0d45bbc6fc84e629ae0c668840e26206d515))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.13.0 to 0.14.0
+
 ## [0.12.0](https://github.com/cogniplex/codemem/compare/v0.11.1...v0.12.0) (2026-03-16)
 
 
