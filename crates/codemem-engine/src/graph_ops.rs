@@ -6,7 +6,7 @@
 use crate::CodememEngine;
 use chrono::{DateTime, Utc};
 use codemem_core::{CodememError, Edge, GraphNode, NodeKind, RelationshipType};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // ── Result Types ─────────────────────────────────────────────────────────────
 
@@ -56,6 +56,22 @@ pub struct StaleFile {
     pub centrality: f64,
     pub last_modified: Option<String>,
     pub incoming_edges: usize,
+}
+
+/// Result of test impact analysis.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TestImpactResult {
+    pub direct_tests: Vec<TestHit>,
+    pub transitive_tests: Vec<TestHit>,
+    pub analyzed_symbols: Vec<String>,
+}
+
+/// A test discovered by impact analysis.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TestHit {
+    pub test_symbol: String,
+    pub file_path: String,
+    pub depth: usize,
 }
 
 /// Report on architectural drift between two time periods.
@@ -601,4 +617,167 @@ impl CodememEngine {
         entries.sort_by(|a, b| b.date.cmp(&a.date));
         Ok(entries)
     }
+
+    // ── Test Impact Analysis ─────────────────────────────────────────
+
+    /// Find tests affected by changes to the given symbols.
+    ///
+    /// Performs manual BFS traversal of **callers** (reverse direction) from each
+    /// changed symbol, up to `max_depth` hops, following only `Calls` edges.
+    /// Discovered test nodes are split into direct (depth <= 2) and transitive
+    /// (depth 3+).
+    pub fn test_impact(
+        &self,
+        changed_symbol_ids: &[&str],
+        max_depth: usize,
+    ) -> Result<TestImpactResult, CodememError> {
+        let graph = self.lock_graph()?;
+
+        // Collect all edges once for efficient lookup.
+        // Build a reverse index: dst -> Vec<(src, relationship)>
+        let all_nodes = graph.get_all_nodes();
+        let mut callers_of: HashMap<&str, Vec<&str>> = HashMap::new();
+        // We need owned edges to build the index
+        let mut all_edges_vec: Vec<Edge> = Vec::new();
+        for node in &all_nodes {
+            if let Ok(edges) = graph.get_edges(&node.id) {
+                all_edges_vec.extend(edges);
+            }
+        }
+
+        // Build caller index: for each node, who calls it?
+        // Edge semantics: src CALLS dst, so callers of dst are src nodes.
+        for edge in &all_edges_vec {
+            if edge.relationship == RelationshipType::Calls {
+                callers_of
+                    .entry(edge.dst.as_str())
+                    .or_default()
+                    .push(edge.src.as_str());
+            }
+        }
+
+        // Build node lookup
+        let node_map: HashMap<&str, &GraphNode> =
+            all_nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+
+        // Track best (minimum) depth for each discovered test
+        let mut test_depths: HashMap<String, usize> = HashMap::new();
+        let mut test_files: HashMap<String, String> = HashMap::new();
+
+        for &symbol_id in changed_symbol_ids {
+            // BFS from symbol_id, following callers (reverse Calls edges)
+            let mut visited: HashSet<&str> = HashSet::new();
+            let mut queue: VecDeque<(&str, usize)> = VecDeque::new();
+
+            visited.insert(symbol_id);
+            queue.push_back((symbol_id, 0));
+
+            while let Some((current_id, depth)) = queue.pop_front() {
+                if depth >= max_depth {
+                    continue;
+                }
+
+                // Find all callers of current_id
+                if let Some(callers) = callers_of.get(current_id) {
+                    for &caller_id in callers {
+                        if visited.contains(caller_id) {
+                            continue;
+                        }
+                        visited.insert(caller_id);
+
+                        let next_depth = depth + 1;
+
+                        // Check if this node is a test
+                        if let Some(node) = node_map.get(caller_id) {
+                            if is_test_node(node) {
+                                let file_path = node
+                                    .payload
+                                    .get("file_path")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+
+                                let entry = test_depths
+                                    .entry(caller_id.to_string())
+                                    .or_insert(next_depth);
+                                if next_depth < *entry {
+                                    *entry = next_depth;
+                                }
+                                test_files.entry(caller_id.to_string()).or_insert(file_path);
+                            }
+                        }
+
+                        // Continue BFS regardless of whether it's a test
+                        queue.push_back((caller_id, next_depth));
+                    }
+                }
+            }
+        }
+
+        // Split into direct (depth <= 2) and transitive (depth 3+)
+        let mut direct_tests = Vec::new();
+        let mut transitive_tests = Vec::new();
+
+        for (test_id, depth) in &test_depths {
+            let hit = TestHit {
+                test_symbol: test_id.clone(),
+                file_path: test_files.get(test_id).cloned().unwrap_or_default(),
+                depth: *depth,
+            };
+            if *depth <= 2 {
+                direct_tests.push(hit);
+            } else {
+                transitive_tests.push(hit);
+            }
+        }
+
+        // Sort by depth for deterministic output
+        direct_tests.sort_by_key(|h| h.depth);
+        transitive_tests.sort_by_key(|h| h.depth);
+
+        Ok(TestImpactResult {
+            direct_tests,
+            transitive_tests,
+            analyzed_symbols: changed_symbol_ids.iter().map(|s| s.to_string()).collect(),
+        })
+    }
+}
+
+/// Check if a graph node represents a test.
+fn is_test_node(node: &GraphNode) -> bool {
+    // Check node kind
+    if node.kind == NodeKind::Test {
+        return true;
+    }
+    // Check payload fields
+    if node.payload.get("is_test") == Some(&serde_json::json!(true)) {
+        return true;
+    }
+    if node.payload.get("kind").and_then(|v| v.as_str()) == Some("test") {
+        return true;
+    }
+    // Check file path from payload
+    if let Some(path) = node.payload.get("file_path").and_then(|v| v.as_str()) {
+        if is_test_file(path) {
+            return true;
+        }
+    }
+    // Check node label as file path fallback
+    if is_test_file(&node.label) {
+        return true;
+    }
+    false
+}
+
+/// Check if a file path matches common test file patterns.
+fn is_test_file(path: &str) -> bool {
+    let p = path.to_lowercase();
+    p.contains("/tests/")
+        || p.contains("/__tests__/")
+        || p.contains("/test_")
+        || p.contains("_test.")
+        || p.contains(".test.")
+        || p.contains(".spec.")
+        || p.starts_with("test_")
+        || p.starts_with("tests/")
 }

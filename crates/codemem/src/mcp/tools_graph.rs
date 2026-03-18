@@ -7,6 +7,17 @@ use super::McpServer;
 use codemem_core::{NodeKind, RelationshipType};
 use serde_json::{json, Value};
 
+/// Format a confidence tag for edge display.
+fn confidence_tag(weight: f64) -> &'static str {
+    if weight >= 0.9 {
+        ""
+    } else if weight >= 0.5 {
+        " (~)"
+    } else {
+        " (?)"
+    }
+}
+
 impl McpServer {
     pub(crate) fn tool_graph_traverse(&self, args: &Value) -> ToolResult {
         let start = match args.get("start_id").and_then(|v| v.as_str()) {
@@ -349,6 +360,7 @@ impl McpServer {
                         "target": e.dst,
                         "relationship": e.relationship.to_string(),
                         "weight": e.weight,
+                        "confidence": confidence_tag(e.weight),
                     })
                 })
                 .collect();
@@ -397,6 +409,7 @@ impl McpServer {
                     "target": e.dst,
                     "relationship": e.relationship.to_string(),
                     "weight": e.weight,
+                    "confidence": confidence_tag(e.weight),
                 })
             })
             .collect();
@@ -581,6 +594,7 @@ impl McpServer {
                     "dst": e.dst,
                     "relationship": e.relationship.to_string(),
                     "weight": e.weight,
+                    "confidence": confidence_tag(e.weight),
                     "src_namespace": e.properties.get("src_namespace"),
                     "dst_namespace": e.properties.get("dst_namespace"),
                 })
@@ -773,6 +787,21 @@ impl McpServer {
 
     // ── Review Tool ────────────────────────────────────────────────────
 
+    pub(crate) fn tool_test_impact(&self, args: &Value) -> ToolResult {
+        let symbols = match args.get("symbols").and_then(|v| v.as_array()) {
+            Some(arr) => arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>(),
+            None => return ToolResult::tool_error("Missing 'symbols' array"),
+        };
+        let max_depth = args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(4) as usize;
+
+        match self.engine.test_impact(&symbols, max_depth) {
+            Ok(result) => {
+                ToolResult::text(serde_json::to_string_pretty(&result).expect("JSON serialization"))
+            }
+            Err(e) => ToolResult::tool_error(format!("Test impact analysis failed: {e}")),
+        }
+    }
+
     pub(crate) fn tool_review_diff(&self, args: &Value) -> ToolResult {
         let diff = match args.get("diff").and_then(|v| v.as_str()) {
             Some(d) if !d.is_empty() => d,
@@ -794,6 +823,22 @@ impl McpServer {
             ),
             Err(e) => ToolResult::tool_error(format!("Review failed: {e}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod confidence_tests {
+    use super::confidence_tag;
+
+    #[test]
+    fn confidence_tag_thresholds() {
+        assert_eq!(confidence_tag(1.0), "");
+        assert_eq!(confidence_tag(0.9), "");
+        assert_eq!(confidence_tag(0.7), " (~)");
+        assert_eq!(confidence_tag(0.5), " (~)");
+        assert_eq!(confidence_tag(0.49), " (?)");
+        assert_eq!(confidence_tag(0.3), " (?)");
+        assert_eq!(confidence_tag(0.0), " (?)");
     }
 }
 

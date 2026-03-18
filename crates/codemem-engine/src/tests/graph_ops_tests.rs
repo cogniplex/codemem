@@ -1,6 +1,7 @@
 use crate::CodememEngine;
 use chrono::{Duration, Utc};
 use codemem_core::{Edge, GraphNode, NodeKind, RelationshipType};
+use serde_json::json;
 use std::collections::HashMap;
 
 #[test]
@@ -150,4 +151,195 @@ fn symbol_history_returns_commits_with_all_changed_files() {
         "should contain sibling file b: {:?}",
         entry.changed_files
     );
+}
+
+// ── Test Impact Analysis ─────────────────────────────────────────────────
+
+/// Helper: create a symbol node with optional is_test flag.
+fn make_symbol_node(id: &str, label: &str, is_test: bool) -> GraphNode {
+    let mut payload = HashMap::new();
+    if is_test {
+        payload.insert("is_test".to_string(), json!(true));
+    }
+    payload.insert("file_path".to_string(), json!(format!("src/{label}.rs")));
+    GraphNode {
+        id: id.to_string(),
+        kind: if is_test {
+            NodeKind::Test
+        } else {
+            NodeKind::Function
+        },
+        label: label.to_string(),
+        payload,
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+/// Helper: create a Calls edge from caller to callee.
+fn make_calls_edge(caller_id: &str, callee_id: &str) -> Edge {
+    Edge {
+        id: format!("calls:{caller_id}:{callee_id}"),
+        src: caller_id.to_string(),
+        dst: callee_id.to_string(),
+        relationship: RelationshipType::Calls,
+        weight: 1.0,
+        properties: HashMap::new(),
+        created_at: Utc::now(),
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+#[test]
+fn test_impact_classifies_direct_and_transitive() {
+    let engine = CodememEngine::for_testing();
+
+    // Build call chain:
+    //   test_validate -> validate          (depth 1 from validate)
+    //   test_login -> login -> validate    (depth 2 from validate)
+    //   test_middleware -> middleware -> login -> validate  (depth 3 from validate)
+    let validate = make_symbol_node("sym:validate", "validate", false);
+    let login = make_symbol_node("sym:login", "login", false);
+    let middleware = make_symbol_node("sym:middleware", "middleware", false);
+    let test_validate = make_symbol_node("sym:test_validate", "test_validate", true);
+    let test_login = make_symbol_node("sym:test_login", "test_login", true);
+    let test_middleware = make_symbol_node("sym:test_middleware", "test_middleware", true);
+
+    let edge1 = make_calls_edge("sym:test_validate", "sym:validate");
+    let edge2 = make_calls_edge("sym:login", "sym:validate");
+    let edge3 = make_calls_edge("sym:test_login", "sym:login");
+    let edge4 = make_calls_edge("sym:middleware", "sym:login");
+    let edge5 = make_calls_edge("sym:test_middleware", "sym:middleware");
+
+    {
+        let mut graph = engine.lock_graph().expect("lock graph");
+        graph.add_node(validate).expect("add validate");
+        graph.add_node(login).expect("add login");
+        graph.add_node(middleware).expect("add middleware");
+        graph
+            .add_node(test_validate.clone())
+            .expect("add test_validate");
+        graph.add_node(test_login.clone()).expect("add test_login");
+        graph
+            .add_node(test_middleware.clone())
+            .expect("add test_middleware");
+        graph.add_edge(edge1).expect("add edge1");
+        graph.add_edge(edge2).expect("add edge2");
+        graph.add_edge(edge3).expect("add edge3");
+        graph.add_edge(edge4).expect("add edge4");
+        graph.add_edge(edge5).expect("add edge5");
+    }
+
+    let result = engine
+        .test_impact(&["sym:validate"], 4)
+        .expect("test_impact should succeed");
+
+    // test_validate: depth 1 (direct)
+    // test_login: depth 2 (direct)
+    // test_middleware: depth 3 (transitive)
+    assert_eq!(
+        result.direct_tests.len(),
+        2,
+        "expected 2 direct tests, got: {:?}",
+        result.direct_tests
+    );
+    assert_eq!(
+        result.transitive_tests.len(),
+        1,
+        "expected 1 transitive test, got: {:?}",
+        result.transitive_tests
+    );
+
+    // Check specific depths
+    let direct_ids: Vec<&str> = result
+        .direct_tests
+        .iter()
+        .map(|h| h.test_symbol.as_str())
+        .collect();
+    assert!(
+        direct_ids.contains(&"sym:test_validate"),
+        "test_validate should be direct"
+    );
+    assert!(
+        direct_ids.contains(&"sym:test_login"),
+        "test_login should be direct"
+    );
+
+    let transitive_ids: Vec<&str> = result
+        .transitive_tests
+        .iter()
+        .map(|h| h.test_symbol.as_str())
+        .collect();
+    assert!(
+        transitive_ids.contains(&"sym:test_middleware"),
+        "test_middleware should be transitive"
+    );
+
+    // Check depths
+    let tv = result
+        .direct_tests
+        .iter()
+        .find(|h| h.test_symbol == "sym:test_validate")
+        .unwrap();
+    assert_eq!(tv.depth, 1, "test_validate should be at depth 1");
+
+    let tl = result
+        .direct_tests
+        .iter()
+        .find(|h| h.test_symbol == "sym:test_login")
+        .unwrap();
+    assert_eq!(tl.depth, 2, "test_login should be at depth 2");
+
+    let tm = &result.transitive_tests[0];
+    assert_eq!(tm.depth, 3, "test_middleware should be at depth 3");
+}
+
+#[test]
+fn test_impact_deduplicates_across_symbols() {
+    let engine = CodememEngine::for_testing();
+
+    // Both sym:a and sym:b are called by test_both
+    let a = make_symbol_node("sym:a", "a", false);
+    let b = make_symbol_node("sym:b", "b", false);
+    let test_both = make_symbol_node("sym:test_both", "test_both", true);
+
+    let edge1 = make_calls_edge("sym:test_both", "sym:a");
+    let edge2 = make_calls_edge("sym:test_both", "sym:b");
+
+    {
+        let mut graph = engine.lock_graph().expect("lock graph");
+        graph.add_node(a).expect("add a");
+        graph.add_node(b).expect("add b");
+        graph.add_node(test_both).expect("add test_both");
+        graph.add_edge(edge1).expect("add edge1");
+        graph.add_edge(edge2).expect("add edge2");
+    }
+
+    let result = engine
+        .test_impact(&["sym:a", "sym:b"], 4)
+        .expect("test_impact");
+
+    // test_both should appear only once despite being reachable from both symbols
+    assert_eq!(
+        result.direct_tests.len(),
+        1,
+        "should deduplicate: {:?}",
+        result.direct_tests
+    );
+    assert_eq!(result.direct_tests[0].test_symbol, "sym:test_both");
+    assert_eq!(result.direct_tests[0].depth, 1);
+}
+
+#[test]
+fn test_impact_empty_graph() {
+    let engine = CodememEngine::for_testing();
+    let result = engine
+        .test_impact(&["sym:nonexistent"], 4)
+        .expect("test_impact on empty graph");
+    assert!(result.direct_tests.is_empty());
+    assert!(result.transitive_tests.is_empty());
 }

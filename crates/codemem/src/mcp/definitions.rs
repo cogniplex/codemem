@@ -450,5 +450,17 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 "required": ["node_id"]
             }
         }),
+        json!({
+            "name": "test_impact",
+            "description": "Find tests affected by changes to symbols. BFS callers up to depth 4, splits into direct and transitive.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "symbols": { "type": "array", "items": { "type": "string" }, "description": "Symbol IDs to analyze" },
+                    "max_depth": { "type": "integer", "description": "Max BFS depth (default 4)" }
+                },
+                "required": ["symbols"]
+            }
+        }),
     ]
 }

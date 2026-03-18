@@ -1,6 +1,6 @@
 //! codemem-mcp: MCP server for Codemem (JSON-RPC 2.0 over stdio).
 //!
-//! Implements 27 tools:
+//! Implements 28 tools:
 //! store_memory, recall, delete_memory, associate_memories, refine_memory,
 //! split_memory, merge_memories, graph_traverse, summary_tree,
 //! codemem_status, search_code, get_symbol_info,
@@ -263,8 +263,9 @@ impl McpServer {
             "session_checkpoint" => self.tool_session_checkpoint(args),
             "session_context" => self.tool_session_context(args),
 
-            // ── Review ────────────────────────────────────────────────────
+            // ── Review & Impact ────────────────────────────────────────────
             "review_diff" => self.tool_review_diff(args),
+            "test_impact" => self.tool_test_impact(args),
 
             // ── Temporal ─────────────────────────────────────────────────
             "what_changed" => self.tool_what_changed(args),
