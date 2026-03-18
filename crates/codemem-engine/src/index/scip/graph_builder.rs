@@ -492,6 +492,11 @@ pub fn build_graph(
             continue;
         }
 
+        // R5: Filter noise calls using the blocklist.
+        if crate::index::blocklist::is_blocked_call_scip(&r.scip_symbol) {
+            continue;
+        }
+
         // Resolve the referenced symbol to a node ID.
         let mut target_node_id = if let Some(qname) = symbol_to_qname.get(r.scip_symbol.as_str()) {
             format!("sym:{qname}")

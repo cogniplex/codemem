@@ -798,6 +798,66 @@ fn test_intra_class_edge_collapsing() {
 }
 
 #[test]
+fn test_blocklist_filters_builtin_calls() {
+    // A reference to a blocked builtin (e.g., `clone` in Rust via scip-cargo)
+    // should be filtered out, while a reference to a user-defined symbol should
+    // pass through.
+    let scip = ScipReadResult {
+        project_root: String::new(),
+        definitions: vec![
+            make_def(
+                "rust-analyzer cargo foo 1.0 bar/caller().",
+                "bar::caller",
+                "src/bar.rs",
+                NodeKind::Function,
+                1,
+                50,
+            ),
+            make_def(
+                "rust-analyzer cargo foo 1.0 bar/callee().",
+                "bar::callee",
+                "src/bar.rs",
+                NodeKind::Function,
+                60,
+                80,
+            ),
+        ],
+        references: vec![
+            // Reference to a user-defined symbol → should produce a CALLS edge.
+            make_ref(
+                "rust-analyzer cargo foo 1.0 bar/callee().",
+                "src/bar.rs",
+                10,
+                0,
+            ),
+            // Reference to a blocked builtin (clone) via scip-cargo format →
+            // should be filtered out by the blocklist.
+            make_ref(
+                "scip-cargo std 1.0 core/Clone#clone().",
+                "src/bar.rs",
+                20,
+                0,
+            ),
+        ],
+        externals: vec![],
+        covered_files: vec!["src/bar.rs".to_string()],
+    };
+
+    let result = build_graph(&scip, None, &ScipConfig::default());
+    let calls: Vec<_> = result
+        .edges
+        .iter()
+        .filter(|e| e.relationship == RelationshipType::Calls)
+        .collect();
+    // Only the user-defined call should survive; the blocked builtin should be filtered.
+    assert_eq!(calls.len(), 1, "blocked builtin call should be filtered");
+    assert_eq!(
+        calls[0].dst, "sym:bar::callee",
+        "only the user-defined callee should have an edge"
+    );
+}
+
+#[test]
 fn test_intra_module_edges_not_collapsed() {
     // Two functions in the same module calling each other should NOT be collapsed.
     let scip = ScipReadResult {
