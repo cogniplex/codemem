@@ -374,6 +374,50 @@ pub struct EnrichmentConfig {
     pub insight_confidence: f64,
     /// Cosine similarity threshold for deduplicating insights.
     pub dedup_similarity_threshold: f64,
+    /// Dead code detection settings.
+    pub dead_code: DeadCodeConfig,
+}
+
+/// Dead code detection configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeadCodeConfig {
+    /// Whether dead code detection is enabled.
+    pub enabled: bool,
+    /// Decorator/attribute names that exempt a symbol from dead code detection
+    /// (e.g., route handlers, test fixtures, CLI commands).
+    pub exempt_decorators: Vec<String>,
+    /// Symbol kind strings that are exempt (e.g., "constructor", "test").
+    pub exempt_kinds: Vec<String>,
+    /// Minimum number of symbol nodes before dead code analysis runs
+    /// (avoids false positives on tiny graphs).
+    pub min_symbols: usize,
+}
+
+impl Default for DeadCodeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            exempt_decorators: vec![
+                "app.route".into(),
+                "route".into(),
+                "pytest.fixture".into(),
+                "fixture".into(),
+                "click.command".into(),
+                "celery.task".into(),
+                "property".into(),
+                "staticmethod".into(),
+                "classmethod".into(),
+                "override".into(),
+                "abstractmethod".into(),
+                "test".into(),
+                "tokio::test".into(),
+                "async_trait".into(),
+            ],
+            exempt_kinds: vec!["constructor".into(), "test".into()],
+            min_symbols: 10,
+        }
+    }
 }
 
 impl Default for EnrichmentConfig {
@@ -385,6 +429,7 @@ impl Default for EnrichmentConfig {
             perf_min_symbol_count: 30,
             insight_confidence: 0.5,
             dedup_similarity_threshold: 0.90,
+            dead_code: DeadCodeConfig::default(),
         }
     }
 }

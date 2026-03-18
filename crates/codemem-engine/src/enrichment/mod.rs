@@ -9,6 +9,7 @@ mod blame;
 mod change_impact;
 mod code_smells;
 mod complexity;
+pub(crate) mod dead_code;
 mod doc_coverage;
 mod git;
 mod hot_complex;
