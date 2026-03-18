@@ -95,7 +95,7 @@ pub use index::{
 // Re-export key domain types for convenience
 pub use bm25::Bm25Index;
 pub use metrics::InMemoryMetrics;
-pub use review::{BlastRadiusReport, DiffSymbolMapping};
+pub use review::{BlastRadiusReport, DiffSymbolMapping, MissingCoChange};
 
 // Re-export enrichment types
 pub use enrichment::{EnrichResult, EnrichmentPipelineResult};
