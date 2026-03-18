@@ -81,6 +81,10 @@ mod memory_expiry_tests;
 #[path = "tests/scope_tests.rs"]
 mod scope_tests;
 
+#[cfg(test)]
+#[path = "tests/graph_ops_tests.rs"]
+mod graph_ops_tests;
+
 // Re-export key index types at crate root for convenience
 pub use index::{
     ChunkConfig, CodeChunk, CodeParser, Dependency, IndexAndResolveResult, IndexProgress,

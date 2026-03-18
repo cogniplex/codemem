@@ -25,7 +25,7 @@ pub struct TemporalIngestResult {
 }
 
 /// Parsed commit from git log.
-struct ParsedCommit {
+pub(crate) struct ParsedCommit {
     hash: String,
     short_hash: String,
     parents: Vec<String>,
@@ -294,14 +294,14 @@ impl CodememEngine {
         self.storage.insert_graph_nodes_batch(&commit_nodes)?;
         self.storage.insert_graph_edges_batch(&edges)?;
 
+        // Single lock scope for both nodes and edges to ensure atomic
+        // visibility to concurrent readers.
         {
             let mut graph = self.lock_graph()?;
             for node in commit_nodes {
                 let _ = graph.add_node(node);
             }
-            for edge in edges {
-                let _ = graph.add_edge(edge);
-            }
+            self.add_edges_with_placeholders(&mut **graph, &edges)?;
         }
 
         // Record last ingested commit for incremental runs
@@ -310,6 +310,84 @@ impl CodememEngine {
         }
 
         Ok(result)
+    }
+
+    /// Ensure all edge endpoints exist in the in-memory graph, creating placeholder
+    /// nodes as needed, then add the edges. Logs warnings for any remaining failures.
+    ///
+    /// Placeholder nodes are also persisted to storage so they survive restarts.
+    /// Callers must hold the graph lock; this avoids a double-lock window where
+    /// concurrent readers could see nodes without their edges.
+    pub(crate) fn add_edges_with_placeholders(
+        &self,
+        graph: &mut dyn codemem_core::GraphBackend,
+        edges: &[Edge],
+    ) -> Result<(), CodememError> {
+        let mut warn_count = 0u32;
+        let mut total_failures = 0u32;
+
+        for edge in edges {
+            // Ensure src node exists
+            for endpoint_id in [&edge.src, &edge.dst] {
+                if graph.get_node(endpoint_id)?.is_none() {
+                    let kind = if endpoint_id.starts_with("file:") {
+                        NodeKind::File
+                    } else if endpoint_id.starts_with("sym:") {
+                        NodeKind::Function
+                    } else if endpoint_id.starts_with("commit:") {
+                        NodeKind::Commit
+                    } else if endpoint_id.starts_with("pr:") {
+                        NodeKind::PullRequest
+                    } else {
+                        NodeKind::External
+                    };
+
+                    let label = endpoint_id
+                        .find(':')
+                        .map(|i| &endpoint_id[i + 1..])
+                        .unwrap_or(endpoint_id)
+                        .to_string();
+
+                    let placeholder = GraphNode {
+                        id: endpoint_id.clone(),
+                        kind,
+                        label,
+                        payload: HashMap::new(),
+                        centrality: 0.0,
+                        memory_id: None,
+                        namespace: None,
+                        valid_from: None,
+                        valid_to: None,
+                    };
+                    // Persist to storage so placeholder survives restarts
+                    let _ = self.storage.insert_graph_node(&placeholder);
+                    let _ = graph.add_node(placeholder);
+                }
+            }
+
+            if let Err(e) = graph.add_edge(edge.clone()) {
+                total_failures += 1;
+                if warn_count < 5 {
+                    tracing::warn!(
+                        "Failed to add edge {} ({} -> {}): {e}",
+                        edge.id,
+                        edge.src,
+                        edge.dst
+                    );
+                    warn_count += 1;
+                }
+            }
+        }
+
+        if total_failures > 0 && total_failures > warn_count {
+            tracing::warn!(
+                "... and {} more edge insertion failures (total: {})",
+                total_failures - warn_count,
+                total_failures
+            );
+        }
+
+        Ok(())
     }
 
     /// Parse git log output into structured commits.
@@ -345,9 +423,17 @@ impl CodememEngine {
                     let parents: Vec<String> =
                         parts[1].split_whitespace().map(|s| s.to_string()).collect();
                     let author = parts[2].to_string();
-                    let date = chrono::DateTime::parse_from_rfc3339(parts[3])
-                        .map(|dt| dt.with_timezone(&chrono::Utc))
-                        .unwrap_or_else(|_| chrono::Utc::now());
+                    let date = match chrono::DateTime::parse_from_rfc3339(parts[3]) {
+                        Ok(dt) => dt.with_timezone(&chrono::Utc),
+                        Err(e) => {
+                            tracing::warn!(
+                                "Skipping commit {}: unparseable date {:?}: {e}",
+                                &parts[0][..parts[0].len().min(7)],
+                                parts[3]
+                            );
+                            continue;
+                        }
+                    };
                     let subject = parts[4].to_string();
                     let files: Vec<String> = lines
                         .filter(|l| !l.trim().is_empty())
@@ -481,7 +567,7 @@ impl CodememEngine {
     /// Uses `git log --diff-filter=D` to find deleted files, then collects
     /// expired nodes before writing — avoids holding the graph lock during
     /// storage writes (deadlock risk).
-    fn expire_deleted_symbols(
+    pub(crate) fn expire_deleted_symbols(
         &self,
         path: &str,
         commits: &[ParsedCommit],
@@ -537,6 +623,20 @@ impl CodememEngine {
                 deletions.push((date, files));
             }
         }
+
+        if deletions.is_empty() {
+            return Ok(0);
+        }
+
+        // Filter out files that currently exist in the working tree
+        // (they were deleted then re-created, so should not be expired)
+        for (_date, deleted_files) in &mut deletions {
+            deleted_files.retain(|f| {
+                let full_path = std::path::Path::new(path).join(f);
+                !full_path.exists()
+            });
+        }
+        deletions.retain(|(_, files)| !files.is_empty());
 
         if deletions.is_empty() {
             return Ok(0);

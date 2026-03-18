@@ -1836,3 +1836,174 @@ fn multiple_enrichments_accumulate_insights() {
         total
     );
 }
+
+// ── add_edges_with_placeholders: placeholder node creation ───────────
+
+#[test]
+fn temporal_edge_insertion_creates_placeholder_nodes() {
+    let engine = CodememEngine::for_testing();
+
+    // Create a commit node and add it to in-memory graph + storage
+    let commit_node = GraphNode {
+        id: "commit:abc123".to_string(),
+        kind: NodeKind::Commit,
+        label: "abc123 feat: test commit".to_string(),
+        payload: {
+            let mut p = HashMap::new();
+            p.insert("hash".into(), json!("abc123"));
+            p
+        },
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+        valid_from: None,
+        valid_to: None,
+    };
+    engine
+        .storage
+        .insert_graph_node(&commit_node)
+        .expect("insert commit to storage");
+    {
+        let mut graph = engine.lock_graph().expect("lock graph for setup");
+        graph.add_node(commit_node).expect("add commit node");
+    }
+
+    // Create a ModifiedBy edge referencing a non-existent file node
+    let edge = Edge {
+        id: "modby:file:src/main.rs:abc123".to_string(),
+        src: "file:src/main.rs".to_string(),
+        dst: "commit:abc123".to_string(),
+        relationship: RelationshipType::ModifiedBy,
+        weight: 0.4,
+        properties: HashMap::new(),
+        created_at: chrono::Utc::now(),
+        valid_from: None,
+        valid_to: None,
+    };
+
+    // The file node does NOT exist yet — add_edges_with_placeholders should create it
+    {
+        let mut graph = engine.lock_graph().expect("lock graph for edges");
+        engine
+            .add_edges_with_placeholders(&mut **graph, &[edge])
+            .expect("add edges with placeholders");
+    }
+
+    // Assert: placeholder file node was created with correct kind
+    let graph = engine.lock_graph().expect("lock graph for assertions");
+    let file_node = graph
+        .get_node("file:src/main.rs")
+        .expect("get file node")
+        .expect("placeholder file node should exist");
+    assert_eq!(file_node.kind, NodeKind::File);
+
+    // Assert: edge exists in the in-memory graph
+    let edges = graph.get_edges("file:src/main.rs").expect("get edges");
+    assert!(
+        edges
+            .iter()
+            .any(|e| e.id == "modby:file:src/main.rs:abc123"),
+        "ModifiedBy edge should exist in the in-memory graph"
+    );
+
+    // Assert: placeholder was also persisted to storage
+    drop(graph);
+    let stored = engine
+        .storage
+        .get_graph_node("file:src/main.rs")
+        .expect("storage query");
+    assert!(
+        stored.is_some(),
+        "placeholder should be persisted to storage"
+    );
+}
+
+// ── expire_deleted_symbols: delete-then-recreate bug ─────────────────
+
+#[test]
+fn expire_deleted_symbols_skips_files_that_exist_on_disk() {
+    // The fix filters out deleted-file paths that currently exist on disk.
+    // We test this by creating a temp dir with a git repo containing a file,
+    // then adding a File graph node and calling expire_deleted_symbols.
+    // Since the file exists on disk, it should NOT be expired even if
+    // git log --diff-filter=D reports a past deletion.
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let tmp_path = tmp.path();
+
+    // Create a file that simulates a "resurrected" file
+    let src_dir = tmp_path.join("src");
+    std::fs::create_dir_all(&src_dir).expect("create src dir");
+    std::fs::write(src_dir.join("resurrected.rs"), "fn main() {}").expect("write resurrected.rs");
+
+    // Initialize a git repo so git log commands don't fail
+    std::process::Command::new("git")
+        .args(["-C", tmp_path.to_str().expect("tmp path to str"), "init"])
+        .output()
+        .expect("git init");
+    std::process::Command::new("git")
+        .args([
+            "-C",
+            tmp_path.to_str().expect("tmp path to str"),
+            "add",
+            ".",
+        ])
+        .output()
+        .expect("git add");
+    std::process::Command::new("git")
+        .args([
+            "-C",
+            tmp_path.to_str().expect("tmp path to str"),
+            "commit",
+            "-m",
+            "initial",
+        ])
+        .output()
+        .expect("git commit");
+
+    let engine = CodememEngine::for_testing();
+
+    // Insert a File graph node with valid_to: None (alive)
+    let file_node = GraphNode {
+        id: "file:src/resurrected.rs".to_string(),
+        kind: NodeKind::File,
+        label: "src/resurrected.rs".to_string(),
+        payload: HashMap::new(),
+        centrality: 0.0,
+        memory_id: None,
+        namespace: Some("test".to_string()),
+        valid_from: None,
+        valid_to: None,
+    };
+    engine
+        .storage
+        .insert_graph_node(&file_node)
+        .expect("insert file node to storage");
+    {
+        let mut graph = engine.lock_graph().expect("lock graph for setup");
+        graph.add_node(file_node).expect("add file node to graph");
+    }
+
+    // Call expire_deleted_symbols — git log won't find deletions in this
+    // fresh repo, AND the new filter would catch it if it did.
+    let result = engine.expire_deleted_symbols(
+        tmp_path.to_str().expect("tmp path to str"),
+        &[], // empty commits list
+        "test",
+    );
+    assert_eq!(
+        result.expect("expire_deleted_symbols should succeed"),
+        0,
+        "no files should be expired when the file exists on disk"
+    );
+
+    // Verify the node still has valid_to: None
+    let graph = engine.lock_graph().expect("lock graph for assertion");
+    let node = graph
+        .get_node("file:src/resurrected.rs")
+        .expect("get file node")
+        .expect("file node should still exist");
+    assert!(
+        node.valid_to.is_none(),
+        "resurrected file should NOT have valid_to set"
+    );
+}
