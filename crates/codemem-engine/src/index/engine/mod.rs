@@ -132,8 +132,8 @@ impl AstGrepEngine {
 
         // R5: Filter out noise calls (builtins, stdlib methods)
         references.retain(|r| {
-            if r.kind != ReferenceKind::Call {
-                return true; // only filter calls, not imports/inherits
+            if !matches!(r.kind, ReferenceKind::Call | ReferenceKind::Callback) {
+                return true; // only filter calls/callbacks, not imports/inherits
             }
             let simple = r
                 .target_name
