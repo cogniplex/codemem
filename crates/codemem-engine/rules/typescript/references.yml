@@ -9,6 +9,11 @@ references:
     name_field: "function"
     special: null
 
+  - kind: "call_expression"
+    reference_kind: "callback"
+    name_field: null
+    special: "callback_args"
+
   - kind: "class_declaration"
     reference_kind: "inherits"
     name_field: null

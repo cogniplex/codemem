@@ -205,6 +205,90 @@ fn package_hint_single_word_import() {
 }
 
 #[test]
+fn callback_references_capped_at_0_6() {
+    let mut resolver = ReferenceResolver::new();
+    let sym = Symbol {
+        name: "transform".to_string(),
+        qualified_name: "utils.transform".to_string(),
+        kind: SymbolKind::Function,
+        signature: "def transform(x)".to_string(),
+        visibility: Visibility::Public,
+        file_path: "utils.py".to_string(),
+        line_start: 1,
+        line_end: 3,
+        doc_comment: None,
+        parent: None,
+        parameters: Vec::new(),
+        return_type: None,
+        is_async: false,
+        attributes: Vec::new(),
+        throws: Vec::new(),
+        generic_params: None,
+        is_abstract: false,
+    };
+    resolver.add_symbols(&[sym]);
+
+    let references = vec![Reference {
+        source_qualified_name: "main".to_string(),
+        target_name: "transform".to_string(),
+        kind: ReferenceKind::Callback,
+        file_path: "utils.py".to_string(),
+        line: 10,
+    }];
+
+    let edges = resolver.resolve_all(&references);
+    assert_eq!(edges.len(), 1, "callback reference should resolve");
+    assert!(
+        edges[0].resolution_confidence <= 0.6,
+        "callback confidence should be capped at 0.6, got: {}",
+        edges[0].resolution_confidence
+    );
+    assert_eq!(edges[0].relationship, RelationshipType::Calls);
+}
+
+#[test]
+fn callback_references_capped_in_resolve_all_with_unresolved() {
+    let mut resolver = ReferenceResolver::new();
+    let sym = Symbol {
+        name: "transform".to_string(),
+        qualified_name: "utils.transform".to_string(),
+        kind: SymbolKind::Function,
+        signature: "def transform(x)".to_string(),
+        visibility: Visibility::Public,
+        file_path: "utils.py".to_string(),
+        line_start: 1,
+        line_end: 3,
+        doc_comment: None,
+        parent: None,
+        parameters: Vec::new(),
+        return_type: None,
+        is_async: false,
+        attributes: Vec::new(),
+        throws: Vec::new(),
+        generic_params: None,
+        is_abstract: false,
+    };
+    resolver.add_symbols(&[sym]);
+
+    let references = vec![Reference {
+        source_qualified_name: "main".to_string(),
+        target_name: "transform".to_string(),
+        kind: ReferenceKind::Callback,
+        file_path: "utils.py".to_string(),
+        line: 10,
+    }];
+
+    let result = resolver.resolve_all_with_unresolved(&references);
+    assert_eq!(result.edges.len(), 1, "callback reference should resolve");
+    assert!(
+        result.edges[0].resolution_confidence <= 0.6,
+        "callback confidence should be capped at 0.6, got: {}",
+        result.edges[0].resolution_confidence
+    );
+    assert_eq!(result.edges[0].relationship, RelationshipType::Calls);
+}
+
+#[test]
 fn resolve_all_with_unresolved_splits_correctly() {
     let mut resolver = ReferenceResolver::new();
     let sym = make_symbol("known_fn", "mod::known_fn", "lib.rs");

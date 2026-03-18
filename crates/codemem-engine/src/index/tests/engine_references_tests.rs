@@ -557,3 +557,116 @@ output "result" {
         );
     }
 }
+
+// ── Callback / Higher-Order Function Detection ─────────────────────
+
+#[test]
+fn python_callback_args_extracted() {
+    let engine = AstGrepEngine::new();
+    let source = r#"
+def transform(x):
+    return x * 2
+
+def is_valid(x):
+    return x > 0
+
+def main():
+    result = map(transform, items)
+    filtered = filter(is_valid, data)
+"#;
+    let refs = extract_refs(&engine, "py", source);
+    let callbacks: Vec<&str> = refs
+        .iter()
+        .filter(|r| r.kind == ReferenceKind::Callback)
+        .map(|r| r.target_name.as_str())
+        .collect();
+    assert!(
+        callbacks.contains(&"transform"),
+        "missing transform callback, got: {callbacks:?}"
+    );
+    assert!(
+        callbacks.contains(&"is_valid"),
+        "missing is_valid callback, got: {callbacks:?}"
+    );
+    // "items" and "data" should be filtered out by the blocklist
+    assert!(
+        !callbacks.contains(&"items"),
+        "items should be filtered out, got: {callbacks:?}"
+    );
+    assert!(
+        !callbacks.contains(&"data"),
+        "data should be filtered out, got: {callbacks:?}"
+    );
+}
+
+#[test]
+fn typescript_callback_args_extracted() {
+    let engine = AstGrepEngine::new();
+    let source = r#"
+function processItem(item: any) { return item; }
+function validateAuth(req: any, res: any, next: any) { next(); }
+function handleRequest(req: any, res: any) { res.send("ok"); }
+
+const items = [1, 2, 3];
+const mapped = items.map(processItem);
+app.get("/api", validateAuth, handleRequest);
+"#;
+    let refs = extract_refs(&engine, "ts", source);
+    let callbacks: Vec<&str> = refs
+        .iter()
+        .filter(|r| r.kind == ReferenceKind::Callback)
+        .map(|r| r.target_name.as_str())
+        .collect();
+    assert!(
+        callbacks.contains(&"processItem"),
+        "missing processItem callback, got: {callbacks:?}"
+    );
+    assert!(
+        callbacks.contains(&"validateAuth"),
+        "missing validateAuth callback, got: {callbacks:?}"
+    );
+    assert!(
+        callbacks.contains(&"handleRequest"),
+        "missing handleRequest callback, got: {callbacks:?}"
+    );
+}
+
+// ── Blocklist Integration ───────────────────────────────────────────
+
+#[test]
+fn python_builtin_calls_filtered() {
+    let engine = AstGrepEngine::new();
+    let source = r#"
+def process():
+    print("hello")
+    n = len(items)
+    data = get_data()
+    result = transform(data)
+"#;
+    let refs = extract_refs(&engine, "py", source);
+    let call_names: Vec<&str> = refs
+        .iter()
+        .filter(|r| r.kind == ReferenceKind::Call)
+        .map(|r| r.target_name.as_str())
+        .collect();
+
+    // Builtins should be filtered out
+    assert!(
+        !call_names.contains(&"print"),
+        "print should be filtered, got: {call_names:?}"
+    );
+    assert!(
+        !call_names.contains(&"len"),
+        "len should be filtered, got: {call_names:?}"
+    );
+
+    // User functions should be kept
+    assert!(
+        call_names.contains(&"get_data"),
+        "get_data should be kept, got: {call_names:?}"
+    );
+    assert!(
+        call_names.contains(&"transform"),
+        "transform should be kept, got: {call_names:?}"
+    );
+}

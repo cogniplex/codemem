@@ -134,6 +134,7 @@ pub struct Reference {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ReferenceKind {
     Call,
+    Callback,
     Import,
     Inherits,
     Implements,
@@ -351,6 +352,7 @@ impl std::fmt::Display for ReferenceKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Call => write!(f, "call"),
+            Self::Callback => write!(f, "callback"),
             Self::Import => write!(f, "import"),
             Self::Inherits => write!(f, "inherits"),
             Self::Implements => write!(f, "implements"),

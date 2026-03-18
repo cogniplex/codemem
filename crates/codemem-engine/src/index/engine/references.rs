@@ -567,6 +567,28 @@ impl super::AstGrepEngine {
                     }
                 }
             }
+            "callback_args" => {
+                if let Some(args_node) = node.field("arguments") {
+                    let line = node.start_pos().line();
+                    for child in args_node.children() {
+                        let kind = child.kind();
+                        if kind.as_ref() == "identifier" {
+                            let name = child.text().to_string();
+                            if !is_likely_callback_arg(&name) {
+                                continue;
+                            }
+                            push_ref(
+                                references,
+                                &source_qn,
+                                name,
+                                ReferenceKind::Callback,
+                                file_path,
+                                line,
+                            );
+                        }
+                    }
+                }
+            }
             "hcl_function_call" => {
                 if let Some(name_node) = node.field("function") {
                     push_ref(
@@ -724,6 +746,40 @@ impl super::AstGrepEngine {
             }
         }
     }
+}
+
+/// Returns true if a bare identifier is likely a callback argument rather than
+/// a common variable name (data, items, etc.) or language keyword/builtin.
+fn is_likely_callback_arg(name: &str) -> bool {
+    if name.len() <= 1 {
+        return false;
+    }
+    !matches!(
+        name,
+        "self"
+            | "this"
+            | "cls"
+            | "args"
+            | "kwargs"
+            | "data"
+            | "items"
+            | "result"
+            | "results"
+            | "err"
+            | "error"
+            | "ctx"
+            | "context"
+            | "req"
+            | "res"
+            | "request"
+            | "response"
+            | "true"
+            | "false"
+            | "null"
+            | "None"
+            | "undefined"
+            | "nil"
+    )
 }
 
 /// R1: Decompose a Rust `use` path into individual fully-qualified paths.

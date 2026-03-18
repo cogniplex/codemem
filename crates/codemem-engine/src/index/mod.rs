@@ -2,6 +2,7 @@
 //! reference resolution, cross-repo linking, and API surface detection.
 
 pub mod api_surface;
+pub mod blocklist;
 pub mod chunker;
 pub mod engine;
 pub mod incremental;
