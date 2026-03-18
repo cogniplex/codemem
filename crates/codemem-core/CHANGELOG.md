@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/cogniplex/codemem/compare/v0.14.0...v0.15.0) (2026-03-18)
+
+
+### Features
+
+* graph quality improvements — blocklist, callbacks, dead code ([#58](https://github.com/cogniplex/codemem/issues/58)) ([42e1486](https://github.com/cogniplex/codemem/commit/42e1486f4d65da0b707738989fcbaa2687645a5d))
+
 ## [0.14.0](https://github.com/cogniplex/codemem/compare/v0.13.0...v0.14.0) (2026-03-18)
 
 
