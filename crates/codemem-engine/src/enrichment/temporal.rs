@@ -299,10 +299,8 @@ impl CodememEngine {
             for node in commit_nodes {
                 let _ = graph.add_node(node);
             }
-            for edge in edges {
-                let _ = graph.add_edge(edge);
-            }
         }
+        self.ensure_edge_endpoints_and_add(&edges)?;
 
         // Record last ingested commit for incremental runs
         if let Some(latest) = real_commits.first() {
@@ -310,6 +308,75 @@ impl CodememEngine {
         }
 
         Ok(result)
+    }
+
+    /// Ensure all edge endpoints exist in the in-memory graph, creating placeholder
+    /// nodes as needed, then add the edges. Logs warnings for any remaining failures.
+    pub(crate) fn ensure_edge_endpoints_and_add(&self, edges: &[Edge]) -> Result<(), CodememError> {
+        let mut graph = self.lock_graph()?;
+        let mut warn_count = 0u32;
+        let mut total_failures = 0u32;
+
+        for edge in edges {
+            // Ensure src node exists
+            for endpoint_id in [&edge.src, &edge.dst] {
+                if graph.get_node(endpoint_id)?.is_none() {
+                    let kind = if endpoint_id.starts_with("file:") {
+                        NodeKind::File
+                    } else if endpoint_id.starts_with("sym:") {
+                        NodeKind::Function
+                    } else if endpoint_id.starts_with("commit:") {
+                        NodeKind::Commit
+                    } else if endpoint_id.starts_with("pr:") {
+                        NodeKind::PullRequest
+                    } else {
+                        NodeKind::External
+                    };
+
+                    let label = endpoint_id
+                        .find(':')
+                        .map(|i| &endpoint_id[i + 1..])
+                        .unwrap_or(endpoint_id)
+                        .to_string();
+
+                    let placeholder = GraphNode {
+                        id: endpoint_id.clone(),
+                        kind,
+                        label,
+                        payload: HashMap::new(),
+                        centrality: 0.0,
+                        memory_id: None,
+                        namespace: None,
+                        valid_from: None,
+                        valid_to: None,
+                    };
+                    let _ = graph.add_node(placeholder);
+                }
+            }
+
+            if let Err(e) = graph.add_edge(edge.clone()) {
+                total_failures += 1;
+                if warn_count < 5 {
+                    tracing::warn!(
+                        "Failed to add edge {} ({} -> {}): {e}",
+                        edge.id,
+                        edge.src,
+                        edge.dst
+                    );
+                    warn_count += 1;
+                }
+            }
+        }
+
+        if total_failures > 0 && total_failures > warn_count {
+            tracing::warn!(
+                "... and {} more edge insertion failures (total: {})",
+                total_failures - warn_count,
+                total_failures
+            );
+        }
+
+        Ok(())
     }
 
     /// Parse git log output into structured commits.

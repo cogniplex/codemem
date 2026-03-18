@@ -1836,3 +1836,65 @@ fn multiple_enrichments_accumulate_insights() {
         total
     );
 }
+
+// ── ensure_edge_endpoints_and_add: placeholder node creation ─────────
+
+#[test]
+fn temporal_edge_insertion_creates_placeholder_nodes() {
+    let engine = CodememEngine::for_testing();
+
+    // Create a commit node and add it to in-memory graph + storage
+    let commit_node = GraphNode {
+        id: "commit:abc123".to_string(),
+        kind: NodeKind::Commit,
+        label: "abc123 feat: test commit".to_string(),
+        payload: {
+            let mut p = HashMap::new();
+            p.insert("hash".into(), json!("abc123"));
+            p
+        },
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+        valid_from: None,
+        valid_to: None,
+    };
+    engine.storage.insert_graph_node(&commit_node).unwrap();
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        graph.add_node(commit_node).unwrap();
+    }
+
+    // Create a ModifiedBy edge referencing a non-existent file node
+    let edge = Edge {
+        id: "modby:file:src/main.rs:abc123".to_string(),
+        src: "file:src/main.rs".to_string(),
+        dst: "commit:abc123".to_string(),
+        relationship: RelationshipType::ModifiedBy,
+        weight: 0.4,
+        properties: HashMap::new(),
+        created_at: chrono::Utc::now(),
+        valid_from: None,
+        valid_to: None,
+    };
+
+    // The file node does NOT exist yet — ensure_edge_endpoints_and_add should create it
+    engine.ensure_edge_endpoints_and_add(&[edge]).unwrap();
+
+    // Assert: placeholder file node was created with correct kind
+    let graph = engine.lock_graph().unwrap();
+    let file_node = graph
+        .get_node("file:src/main.rs")
+        .unwrap()
+        .expect("placeholder file node should exist");
+    assert_eq!(file_node.kind, NodeKind::File);
+
+    // Assert: edge exists in the in-memory graph
+    let edges = graph.get_edges("file:src/main.rs").unwrap();
+    assert!(
+        edges
+            .iter()
+            .any(|e| e.id == "modby:file:src/main.rs:abc123"),
+        "ModifiedBy edge should exist in the in-memory graph"
+    );
+}
