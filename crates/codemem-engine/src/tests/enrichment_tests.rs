@@ -1837,7 +1837,7 @@ fn multiple_enrichments_accumulate_insights() {
     );
 }
 
-// ── ensure_edge_endpoints_and_add: placeholder node creation ─────────
+// ── add_edges_with_placeholders: placeholder node creation ───────────
 
 #[test]
 fn temporal_edge_insertion_creates_placeholder_nodes() {
@@ -1859,10 +1859,13 @@ fn temporal_edge_insertion_creates_placeholder_nodes() {
         valid_from: None,
         valid_to: None,
     };
-    engine.storage.insert_graph_node(&commit_node).unwrap();
+    engine
+        .storage
+        .insert_graph_node(&commit_node)
+        .expect("insert commit to storage");
     {
-        let mut graph = engine.lock_graph().unwrap();
-        graph.add_node(commit_node).unwrap();
+        let mut graph = engine.lock_graph().expect("lock graph for setup");
+        graph.add_node(commit_node).expect("add commit node");
     }
 
     // Create a ModifiedBy edge referencing a non-existent file node
@@ -1878,23 +1881,39 @@ fn temporal_edge_insertion_creates_placeholder_nodes() {
         valid_to: None,
     };
 
-    // The file node does NOT exist yet — ensure_edge_endpoints_and_add should create it
-    engine.ensure_edge_endpoints_and_add(&[edge]).unwrap();
+    // The file node does NOT exist yet — add_edges_with_placeholders should create it
+    {
+        let mut graph = engine.lock_graph().expect("lock graph for edges");
+        engine
+            .add_edges_with_placeholders(&mut **graph, &[edge])
+            .expect("add edges with placeholders");
+    }
 
     // Assert: placeholder file node was created with correct kind
-    let graph = engine.lock_graph().unwrap();
+    let graph = engine.lock_graph().expect("lock graph for assertions");
     let file_node = graph
         .get_node("file:src/main.rs")
-        .unwrap()
+        .expect("get file node")
         .expect("placeholder file node should exist");
     assert_eq!(file_node.kind, NodeKind::File);
 
     // Assert: edge exists in the in-memory graph
-    let edges = graph.get_edges("file:src/main.rs").unwrap();
+    let edges = graph.get_edges("file:src/main.rs").expect("get edges");
     assert!(
         edges
             .iter()
             .any(|e| e.id == "modby:file:src/main.rs:abc123"),
         "ModifiedBy edge should exist in the in-memory graph"
+    );
+
+    // Assert: placeholder was also persisted to storage
+    drop(graph);
+    let stored = engine
+        .storage
+        .get_graph_node("file:src/main.rs")
+        .expect("storage query");
+    assert!(
+        stored.is_some(),
+        "placeholder should be persisted to storage"
     );
 }

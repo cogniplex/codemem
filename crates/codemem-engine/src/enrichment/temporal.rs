@@ -294,13 +294,15 @@ impl CodememEngine {
         self.storage.insert_graph_nodes_batch(&commit_nodes)?;
         self.storage.insert_graph_edges_batch(&edges)?;
 
+        // Single lock scope for both nodes and edges to ensure atomic
+        // visibility to concurrent readers.
         {
             let mut graph = self.lock_graph()?;
             for node in commit_nodes {
                 let _ = graph.add_node(node);
             }
+            self.add_edges_with_placeholders(&mut **graph, &edges)?;
         }
-        self.ensure_edge_endpoints_and_add(&edges)?;
 
         // Record last ingested commit for incremental runs
         if let Some(latest) = real_commits.first() {
@@ -312,8 +314,15 @@ impl CodememEngine {
 
     /// Ensure all edge endpoints exist in the in-memory graph, creating placeholder
     /// nodes as needed, then add the edges. Logs warnings for any remaining failures.
-    pub(crate) fn ensure_edge_endpoints_and_add(&self, edges: &[Edge]) -> Result<(), CodememError> {
-        let mut graph = self.lock_graph()?;
+    ///
+    /// Placeholder nodes are also persisted to storage so they survive restarts.
+    /// Callers must hold the graph lock; this avoids a double-lock window where
+    /// concurrent readers could see nodes without their edges.
+    pub(crate) fn add_edges_with_placeholders(
+        &self,
+        graph: &mut dyn codemem_core::GraphBackend,
+        edges: &[Edge],
+    ) -> Result<(), CodememError> {
         let mut warn_count = 0u32;
         let mut total_failures = 0u32;
 
@@ -350,6 +359,8 @@ impl CodememEngine {
                         valid_from: None,
                         valid_to: None,
                     };
+                    // Persist to storage so placeholder survives restarts
+                    let _ = self.storage.insert_graph_node(&placeholder);
                     let _ = graph.add_node(placeholder);
                 }
             }
