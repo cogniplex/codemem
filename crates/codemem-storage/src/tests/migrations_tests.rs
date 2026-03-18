@@ -190,3 +190,123 @@ fn coalesce_expression_index_exists_on_migrated_db() {
         "idx_memories_hash_ns should use COALESCE expression, got: {sql}"
     );
 }
+
+/// Regression test for issue #53: upgrading from v0.7.0 to v0.8.0 fails
+/// when existing data contains duplicate content_hash values.
+#[test]
+fn migration_006_deduplicates_before_unique_index() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+    // Run migrations 1-5 only (simulating a v0.7.0 database)
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            description TEXT NOT NULL,
+            applied_at INTEGER NOT NULL
+        );",
+    )
+    .unwrap();
+
+    for migration in &MIGRATIONS[..5] {
+        conn.execute_batch(migration.sql).unwrap();
+        conn.execute(
+            "INSERT INTO schema_version (version, description, applied_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![migration.version, migration.description, 1000],
+        )
+        .unwrap();
+    }
+
+    // Insert rows with duplicate content_hash values (valid before migration 006)
+    let now = chrono::Utc::now().timestamp();
+    for (id, hash, updated) in [
+        ("m1", Some("hash_dup"), now - 100),
+        ("m2", Some("hash_dup"), now), // newer, should be kept
+        ("m3", Some("hash_dup"), now - 200),
+        ("m4", Some("hash_unique"), now),
+        ("m5", None::<&str>, now), // NULL hash — should survive
+        ("m6", None::<&str>, now), // another NULL hash — should also survive
+    ]
+    .iter()
+    {
+        conn.execute(
+            "INSERT INTO memories (id, content, memory_type, content_hash, importance, confidence,
+             access_count, tags, metadata, namespace, created_at, updated_at, last_accessed_at)
+             VALUES (?1, 'test', 'fact', ?2, 0.5, 1.0, 0, '[]', '{}', 'ns', ?3, ?3, ?3)",
+            rusqlite::params![id, hash, updated],
+        )
+        .unwrap();
+    }
+
+    // Add embeddings for all memories (including ones that will be deduped)
+    for id in &["m1", "m2", "m3", "m4", "m5", "m6"] {
+        conn.execute(
+            "INSERT INTO memory_embeddings (memory_id, embedding, model) VALUES (?1, X'00', 'test')",
+            rusqlite::params![id],
+        )
+        .unwrap();
+    }
+
+    // Now run remaining migrations — should NOT fail
+    run_migrations(&conn).unwrap();
+
+    // Verify deduplication: only m2 (newest dup) + m4 (unique) + m5 + m6 (NULLs) remain
+    let remaining: Vec<String> = conn
+        .prepare("SELECT id FROM memories ORDER BY id")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    assert!(
+        !remaining.contains(&"m1".to_string()),
+        "m1 (older dup) should have been removed"
+    );
+    assert!(
+        remaining.contains(&"m2".to_string()),
+        "m2 (newest dup) should be kept"
+    );
+    assert!(
+        !remaining.contains(&"m3".to_string()),
+        "m3 (oldest dup) should have been removed"
+    );
+    assert!(
+        remaining.contains(&"m4".to_string()),
+        "m4 (unique hash) should be kept"
+    );
+    assert!(
+        remaining.contains(&"m5".to_string()),
+        "m5 (NULL hash) should be kept"
+    );
+    assert!(
+        remaining.contains(&"m6".to_string()),
+        "m6 (NULL hash) should be kept"
+    );
+    assert_eq!(
+        remaining.len(),
+        4,
+        "expected 4 rows after dedup, got: {remaining:?}"
+    );
+
+    // Verify orphaned embeddings were cleaned up (m1, m3 embeddings should be gone)
+    let emb_count: u32 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM memory_embeddings WHERE memory_id NOT IN (SELECT id FROM memories)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        emb_count, 0,
+        "orphaned embeddings should have been cleaned up"
+    );
+
+    // Verify kept memories still have their embeddings
+    let kept_emb: u32 = conn
+        .query_row("SELECT COUNT(*) FROM memory_embeddings", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(kept_emb, 4, "embeddings for kept memories should remain");
+}
