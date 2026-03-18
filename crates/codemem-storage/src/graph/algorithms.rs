@@ -219,16 +219,43 @@ impl GraphEngine {
             .map(|(i, &idx)| (idx, i))
             .collect();
 
+        // Build a lookup from (src_node_id, dst_node_id) -> RelationshipType
+        // so we can apply relationship-aware weight multipliers.
+        let edge_rel_lookup: HashMap<(&str, &str), RelationshipType> = self
+            .edges
+            .values()
+            .map(|e| ((e.src.as_str(), e.dst.as_str()), e.relationship))
+            .collect();
+
         // Build undirected adjacency with weights.
         // Deduplicate bidirectional edges: for A->B and B->A, merge into one
         // undirected edge with combined weight.
+        // Heritage edges (Extends, Implements, Inherits) get a 0.5x multiplier
+        // to reduce coupling across inheritance boundaries in community detection.
         let mut undirected_weights: HashMap<(usize, usize), f64> = HashMap::new();
         for edge_ref in self.graph.edge_indices() {
             if let Some((src_idx, dst_idx)) = self.graph.edge_endpoints(edge_ref) {
                 let w = self.graph[edge_ref];
                 if let (Some(&si), Some(&di)) = (idx_pos.get(&src_idx), idx_pos.get(&dst_idx)) {
+                    // Look up the relationship type to apply heritage multiplier
+                    let multiplier = self
+                        .graph
+                        .node_weight(src_idx)
+                        .and_then(|src_id| {
+                            self.graph.node_weight(dst_idx).and_then(|dst_id| {
+                                edge_rel_lookup.get(&(src_id.as_str(), dst_id.as_str()))
+                            })
+                        })
+                        .map(|rel| match rel {
+                            RelationshipType::Extends
+                            | RelationshipType::Implements
+                            | RelationshipType::Inherits => 0.5,
+                            _ => 1.0,
+                        })
+                        .unwrap_or(1.0);
+
                     let key = if si <= di { (si, di) } else { (di, si) };
-                    *undirected_weights.entry(key).or_insert(0.0) += w;
+                    *undirected_weights.entry(key).or_insert(0.0) += w * multiplier;
                 }
             }
         }
