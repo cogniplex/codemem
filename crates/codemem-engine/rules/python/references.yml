@@ -14,6 +14,11 @@ references:
     name_field: "function"
     special: null
 
+  - kind: "call"
+    reference_kind: "callback"
+    name_field: null
+    special: "callback_args"
+
   - kind: "class_definition"
     reference_kind: "inherits"
     name_field: null

@@ -221,11 +221,16 @@ impl ReferenceResolver {
             .filter_map(|r| {
                 let (target, confidence) = self.resolve_with_confidence(r)?;
                 let relationship = match r.kind {
-                    ReferenceKind::Call => RelationshipType::Calls,
+                    ReferenceKind::Call | ReferenceKind::Callback => RelationshipType::Calls,
                     ReferenceKind::Import => RelationshipType::Imports,
                     ReferenceKind::Inherits => RelationshipType::Inherits,
                     ReferenceKind::Implements => RelationshipType::Implements,
                     ReferenceKind::TypeUsage => RelationshipType::DependsOn,
+                };
+                let confidence = if r.kind == ReferenceKind::Callback {
+                    confidence.min(0.6)
+                } else {
+                    confidence
                 };
 
                 Some(ResolvedEdge {
@@ -252,11 +257,16 @@ impl ReferenceResolver {
             match self.resolve_with_confidence(r) {
                 Some((target, confidence)) => {
                     let relationship = match r.kind {
-                        ReferenceKind::Call => RelationshipType::Calls,
+                        ReferenceKind::Call | ReferenceKind::Callback => RelationshipType::Calls,
                         ReferenceKind::Import => RelationshipType::Imports,
                         ReferenceKind::Inherits => RelationshipType::Inherits,
                         ReferenceKind::Implements => RelationshipType::Implements,
                         ReferenceKind::TypeUsage => RelationshipType::DependsOn,
+                    };
+                    let confidence = if r.kind == ReferenceKind::Callback {
+                        confidence.min(0.6)
+                    } else {
+                        confidence
                     };
                     edges.push(ResolvedEdge {
                         source_qualified_name: r.source_qualified_name.clone(),

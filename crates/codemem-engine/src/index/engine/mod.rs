@@ -130,6 +130,19 @@ impl AstGrepEngine {
             ))
         });
 
+        // R5: Filter out noise calls (builtins, stdlib methods)
+        references.retain(|r| {
+            if r.kind != ReferenceKind::Call {
+                return true; // only filter calls, not imports/inherits
+            }
+            let simple = r
+                .target_name
+                .rsplit(lang.scope_separator)
+                .next()
+                .unwrap_or(&r.target_name);
+            !crate::index::blocklist::is_blocked_call(lang.name, simple)
+        });
+
         references
     }
 
@@ -690,6 +703,7 @@ fn parse_reference_kind(s: &str) -> Option<ReferenceKind> {
     match s {
         "import" => Some(ReferenceKind::Import),
         "call" => Some(ReferenceKind::Call),
+        "callback" => Some(ReferenceKind::Callback),
         "inherits" => Some(ReferenceKind::Inherits),
         "implements" => Some(ReferenceKind::Implements),
         "type_usage" => Some(ReferenceKind::TypeUsage),
