@@ -181,6 +181,11 @@ impl CodememEngine {
         to: DateTime<Utc>,
         namespace: Option<&str>,
     ) -> Result<Vec<ChangeEntry>, CodememError> {
+        if from > to {
+            return Err(CodememError::InvalidInput(
+                "'from' must be before 'to'".into(),
+            ));
+        }
         let all_nodes = {
             let graph = self.lock_graph()?;
             graph.get_all_nodes()
@@ -319,6 +324,7 @@ impl CodememEngine {
             graph.get_all_nodes()
         };
         let all_edges = self.storage.all_graph_edges()?;
+        let stale_days = stale_days.min(3650); // Cap at 10 years
         let cutoff = Utc::now() - chrono::Duration::days(stale_days as i64);
 
         // Find the latest ModifiedBy edge date for each file
@@ -398,6 +404,11 @@ impl CodememEngine {
         to: DateTime<Utc>,
         namespace: Option<&str>,
     ) -> Result<DriftReport, CodememError> {
+        if from > to {
+            return Err(CodememError::InvalidInput(
+                "'from' must be before 'to'".into(),
+            ));
+        }
         let all_nodes = {
             let graph = self.lock_graph()?;
             graph.get_all_nodes()
