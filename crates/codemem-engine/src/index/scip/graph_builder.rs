@@ -876,13 +876,15 @@ fn is_noise_symbol(def: &ScipDefinition, parsed: &scip::types::Symbol) -> bool {
 
     use scip::types::descriptor::Suffix;
     match leaf.suffix.enum_value() {
-        // Parameters and type parameters are never graph-worthy
-        Ok(Suffix::Parameter | Suffix::TypeParameter) => return true,
+        // Parameters, type parameters, and locals are never graph-worthy.
+        // Local (suffix 8) is used by scip-typescript for local variables,
+        // destructured params, and function-scoped bindings.
+        Ok(Suffix::Parameter | Suffix::TypeParameter | Suffix::Local) => return true,
+        // Meta descriptors are compiler/framework metadata, not user code.
+        Ok(Suffix::Meta) => return true,
         // Term descriptor: check context to distinguish fields from locals
         Ok(Suffix::Term) => {
             // Term inside a Method = local variable / destructured param.
-            // A function's internal bindings (let x = ...) are almost never
-            // useful in a structural knowledge graph.
             let parent_suffix = parsed
                 .descriptors
                 .iter()
@@ -893,9 +895,7 @@ fn is_noise_symbol(def: &ScipDefinition, parsed: &scip::types::Symbol) -> bool {
                 return true;
             }
             // Positional disambiguator: any Term whose name ends in digits.
-            // SCIP appends digits to disambiguate anonymous/positional symbols
-            // (e.g., `name0`, `key21`). No name-list needed — the trailing
-            // digit + Term suffix is sufficient.
+            // SCIP appends digits to disambiguate anonymous/positional symbols.
             if has_trailing_digits(&leaf.name) {
                 return true;
             }
