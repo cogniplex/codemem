@@ -760,6 +760,27 @@ pub fn build_graph(
         });
     }
 
+    // Filter edges whose endpoints were removed by noise filtering.
+    // Noise definitions (parameters, locals, typeLiterals) are filtered from nodes
+    // but SCIP references may still point to them, causing FK constraint failures.
+    // We also allow edges to file: and pkg: nodes which are created by the persistence
+    // layer (not in this build result's nodes vec).
+    let valid_node_ids: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    let edge_count_before = edges.len();
+    edges.retain(|e| {
+        let src_ok = valid_node_ids.contains(e.src.as_str())
+            || e.src.starts_with("file:")
+            || e.src.starts_with("pkg:");
+        let dst_ok = valid_node_ids.contains(e.dst.as_str())
+            || e.dst.starts_with("file:")
+            || e.dst.starts_with("pkg:");
+        src_ok && dst_ok
+    });
+    let edges_dropped = edge_count_before - edges.len();
+    if edges_dropped > 0 {
+        tracing::debug!("Dropped {edges_dropped} SCIP edges referencing filtered noise nodes");
+    }
+
     ScipBuildResult {
         nodes,
         edges,
