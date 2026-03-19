@@ -291,6 +291,57 @@ impl CodememEngine {
         result.symbols_expired = self.expire_deleted_symbols(path, &real_commits, ns)?;
 
         // ── Step 9: Persist to storage and in-memory graph ──────────────
+        // Collect edge endpoints that don't exist as commit/PR nodes we're
+        // about to insert.  These need placeholder rows in graph_nodes
+        // BEFORE we insert edges, otherwise the FK constraint fails.
+        let commit_node_ids: HashSet<&str> = commit_nodes.iter().map(|n| n.id.as_str()).collect();
+        let mut placeholder_ids = HashSet::new();
+        let mut placeholders = Vec::new();
+        for edge in &edges {
+            for endpoint_id in [&edge.src, &edge.dst] {
+                if commit_node_ids.contains(endpoint_id.as_str()) {
+                    continue;
+                }
+                if !placeholder_ids.insert(endpoint_id.clone()) {
+                    continue; // already queued
+                }
+                // Only create if missing from storage
+                if matches!(self.storage.get_graph_node(endpoint_id), Ok(Some(_))) {
+                    continue;
+                }
+                let kind = if endpoint_id.starts_with("file:") {
+                    NodeKind::File
+                } else if endpoint_id.starts_with("sym:") {
+                    NodeKind::Function
+                } else if endpoint_id.starts_with("commit:") {
+                    NodeKind::Commit
+                } else if endpoint_id.starts_with("pr:") {
+                    NodeKind::PullRequest
+                } else {
+                    NodeKind::External
+                };
+                let label = endpoint_id
+                    .find(':')
+                    .map(|i| &endpoint_id[i + 1..])
+                    .unwrap_or(endpoint_id)
+                    .to_string();
+                placeholders.push(GraphNode {
+                    id: endpoint_id.clone(),
+                    kind,
+                    label,
+                    payload: HashMap::new(),
+                    centrality: 0.0,
+                    memory_id: None,
+                    namespace: None,
+                    valid_from: None,
+                    valid_to: None,
+                });
+            }
+        }
+
+        if !placeholders.is_empty() {
+            self.storage.insert_graph_nodes_batch(&placeholders)?;
+        }
         self.storage.insert_graph_nodes_batch(&commit_nodes)?;
         self.storage.insert_graph_edges_batch(&edges)?;
 
@@ -298,6 +349,9 @@ impl CodememEngine {
         // visibility to concurrent readers.
         {
             let mut graph = self.lock_graph()?;
+            for node in placeholders {
+                let _ = graph.add_node(node);
+            }
             for node in commit_nodes {
                 let _ = graph.add_node(node);
             }

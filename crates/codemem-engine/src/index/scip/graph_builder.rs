@@ -53,7 +53,11 @@ pub fn build_graph(
     let source_defs: Vec<&ScipDefinition> = scip
         .definitions
         .iter()
-        .filter(|d| is_source_path(&d.file_path) && !is_wildcard_module(&d.qualified_name))
+        .filter(|d| {
+            is_source_path(&d.file_path)
+                && !is_wildcard_module(&d.qualified_name)
+                && !is_noise_definition(d)
+        })
         .collect();
 
     // Build a set of defined symbol strings -> qualified names for edge resolution.
@@ -773,7 +777,7 @@ fn is_source_path(path: &str) -> bool {
         return false;
     }
     // Reject common non-source paths across languages
-    let reject = [
+    let reject_dirs = [
         "node_modules/",
         ".venv/",
         "site-packages/",
@@ -782,8 +786,235 @@ fn is_source_path(path: &str) -> bool {
         ".m2/",
         "/go-build/",
         "vendor/", // Go vendored deps
+        "dist/",
+        "build/",
     ];
-    !reject.iter().any(|r| path.contains(r))
+    if reject_dirs.iter().any(|r| path.contains(r)) {
+        return false;
+    }
+    // Reject generated code directories and output files
+    if path.contains("__generated__") || path.contains(".generated.") {
+        return false;
+    }
+    // Reject bundled/minified JS output
+    if path.ends_with(".bundle.js")
+        || path.ends_with(".min.js")
+        || path.ends_with(".min.css")
+        || path.contains("/webpack_bundles/")
+    {
+        return false;
+    }
+    true
+}
+
+/// Check if a SCIP definition is a noise symbol that should not become a graph node.
+///
+/// SCIP indexes *every* symbol including local variables, destructured params,
+/// anonymous type members, and positional descriptors. These are useful for an IDE
+/// (go-to-definition) but create massive noise in a knowledge graph.
+///
+/// Noise patterns:
+/// - Positional descriptors: `name0`, `key21`, `data0` — SCIP's positional naming
+///   for anonymous/local variables. The leaf name ends with a digit.
+/// - `typeLiteral` members: inline anonymous type members like `typeLiteral103.action`
+/// - Generated code: `is_generated` flag from SCIP
+fn is_noise_definition(def: &ScipDefinition) -> bool {
+    // Skip generated code (SCIP provides this flag)
+    if def.is_generated {
+        return true;
+    }
+
+    // Extract the leaf (last segment) of the qualified name
+    let leaf = def
+        .qualified_name
+        .rsplit([':', '.'])
+        .next()
+        .unwrap_or(&def.qualified_name);
+
+    // Skip typeLiteral members (anonymous TS inline type fields)
+    if leaf.contains("typeLiteral") || def.qualified_name.contains("typeLiteral") {
+        return true;
+    }
+
+    // Skip positional/anonymous descriptors: leaf name ends with a digit and
+    // the non-digit prefix is a common generic name. SCIP uses patterns like
+    // `name0`, `key21`, `data0`, `code0`, `context0` for local variables.
+    // We only skip when the base name is generic — `useState0` would be noise
+    // but `handleSubmit` ending in a digit is unlikely.
+    if let Some(base) = strip_trailing_digits(leaf) {
+        if is_generic_local_name(base) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Strip trailing digits from a name, returning the base if digits were found.
+/// "name0" → Some("name"), "key21" → Some("key"), "handleSubmit" → None
+fn strip_trailing_digits(s: &str) -> Option<&str> {
+    let trimmed = s.trim_end_matches(|c: char| c.is_ascii_digit());
+    if trimmed.len() < s.len() && !trimmed.is_empty() {
+        Some(trimmed)
+    } else {
+        None
+    }
+}
+
+/// Common generic base names used by SCIP for positional/anonymous descriptors.
+/// These are local variable names that add no structural value to the graph.
+fn is_generic_local_name(base: &str) -> bool {
+    matches!(
+        base,
+        "name"
+            | "key"
+            | "data"
+            | "code"
+            | "context"
+            | "event"
+            | "error"
+            | "err"
+            | "result"
+            | "value"
+            | "state"
+            | "props"
+            | "config"
+            | "options"
+            | "params"
+            | "args"
+            | "input"
+            | "output"
+            | "item"
+            | "items"
+            | "element"
+            | "node"
+            | "child"
+            | "parent"
+            | "id"
+            | "idx"
+            | "index"
+            | "count"
+            | "total"
+            | "msg"
+            | "message"
+            | "text"
+            | "label"
+            | "title"
+            | "description"
+            | "type"
+            | "kind"
+            | "status"
+            | "flag"
+            | "path"
+            | "url"
+            | "uri"
+            | "response"
+            | "request"
+            | "req"
+            | "res"
+            | "ctx"
+            | "cb"
+            | "fn"
+            | "func"
+            | "handler"
+            | "callback"
+            | "ref"
+            | "prev"
+            | "next"
+            | "current"
+            | "temp"
+            | "tmp"
+            | "acc"
+            | "i"
+            | "j"
+            | "k"
+            | "x"
+            | "y"
+            | "t"
+            | "e"
+            | "v"
+            | "a"
+            | "b"
+            | "c"
+            | "s"
+            | "n"
+            | "m"
+            | "p"
+            | "r"
+            | "router"
+            | "route"
+            | "track"
+            | "user"
+            | "token"
+            | "session"
+            | "query"
+            | "field"
+            | "col"
+            | "row"
+            | "line"
+            | "start"
+            | "end"
+            | "src"
+            | "dst"
+            | "target"
+            | "source"
+            | "action"
+            | "payload"
+            | "body"
+            | "header"
+            | "headers"
+            | "method"
+            | "mode"
+            | "variant"
+            | "tag"
+            | "attr"
+            | "class"
+            | "style"
+            | "width"
+            | "height"
+            | "size"
+            | "color"
+            | "offset"
+            | "limit"
+            | "page"
+            | "cursor"
+            | "filter"
+            | "sort"
+            | "order"
+            | "group"
+            | "match"
+            | "pattern"
+            | "schema"
+            | "model"
+            | "entity"
+            | "record"
+            | "entry"
+            | "table"
+            | "column"
+            | "db"
+            | "conn"
+            | "client"
+            | "server"
+            | "host"
+            | "port"
+            | "timeout"
+            | "interval"
+            | "duration"
+            | "timestamp"
+            | "date"
+            | "time"
+            | "mock"
+            | "stub"
+            | "spy"
+            | "fixture"
+            | "expected"
+            | "actual"
+            | "test"
+            | "spec"
+            | "suite"
+            | "assert"
+            | "check"
+    )
 }
 
 /// Try to parse a SCIP symbol string into a package-level external node ID.

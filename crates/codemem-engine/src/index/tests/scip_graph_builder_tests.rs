@@ -908,3 +908,204 @@ fn test_intra_module_edges_not_collapsed() {
         "inter-function calls in a module should NOT be collapsed"
     );
 }
+
+// ── Noise filtering tests ────────────────────────────────────────────
+
+#[test]
+fn noise_filter_skips_generated_code() {
+    let mut def = make_def(
+        "scip-typescript npm . __generated__/graphql#Query.",
+        "graphql.Query",
+        "src/__generated__/graphql.ts",
+        NodeKind::Class,
+        1,
+        10,
+    );
+    // File path filter catches __generated__
+    assert!(!is_source_path(&def.file_path));
+
+    // Also test is_generated flag
+    def.file_path = "src/types.ts".to_string();
+    def.is_generated = true;
+    assert!(is_noise_definition(&def));
+}
+
+#[test]
+fn noise_filter_skips_bundle_files() {
+    assert!(!is_source_path(
+        "frontend/static/webpack_bundles/partnerPortal.bundle.js"
+    ));
+    assert!(!is_source_path("dist/app.min.js"));
+    assert!(!is_source_path("build/output.js"));
+}
+
+#[test]
+fn noise_filter_skips_type_literals() {
+    let def = make_def(
+        "scip-typescript npm . graphql#QueryArgs.typeLiteral103.first.",
+        "graphql.QueryArgs.typeLiteral103.first",
+        "src/graphql.ts",
+        NodeKind::Function,
+        50,
+        50,
+    );
+    assert!(is_noise_definition(&def));
+}
+
+#[test]
+fn noise_filter_skips_positional_descriptors() {
+    // name0 — positional local variable
+    let def = make_def(
+        "scip-typescript npm . Component#name0.",
+        "Component.name0",
+        "src/component.ts",
+        NodeKind::Function,
+        10,
+        10,
+    );
+    assert!(is_noise_definition(&def));
+
+    // key21 — positional
+    let def2 = make_def(
+        "scip-typescript npm . Component#key21.",
+        "Component.key21",
+        "src/component.ts",
+        NodeKind::Function,
+        10,
+        10,
+    );
+    assert!(is_noise_definition(&def2));
+
+    // data0, context0, event3 — all generic + digit
+    for qn in &["Module.data0", "Module.context0", "Module.event3"] {
+        let d = make_def("sym", qn, "src/mod.ts", NodeKind::Function, 1, 1);
+        assert!(is_noise_definition(&d), "{qn} should be noise");
+    }
+}
+
+#[test]
+fn noise_filter_keeps_real_functions() {
+    // Real function names should NOT be filtered
+    for qn in &[
+        "auth.validateToken",
+        "hooks.useCustomCompareMemo",
+        "payments.handleSubmit",
+        "utils.formatDate",
+        "api.fetchUser",
+    ] {
+        let d = make_def("sym", qn, "src/mod.ts", NodeKind::Function, 1, 1);
+        assert!(!is_noise_definition(&d), "{qn} should NOT be noise");
+    }
+}
+
+#[test]
+fn noise_filter_keeps_functions_ending_in_digit_with_nongeneric_base() {
+    // handleSubmit2, useState3 — digit suffix but non-generic base name
+    for qn in &[
+        "Component.handleSubmit2",
+        "hooks.useState3",
+        "parser.parseV2",
+    ] {
+        let d = make_def("sym", qn, "src/mod.ts", NodeKind::Function, 1, 1);
+        assert!(!is_noise_definition(&d), "{qn} should NOT be noise");
+    }
+}
+
+#[test]
+fn noise_filter_end_to_end_build_graph() {
+    let scip = ScipReadResult {
+        project_root: String::new(),
+        definitions: vec![
+            // Real function — should survive
+            make_def(
+                "sym1",
+                "auth.validate",
+                "src/auth.ts",
+                NodeKind::Function,
+                1,
+                10,
+            ),
+            // typeLiteral — should be filtered
+            make_def(
+                "sym2",
+                "Query.typeLiteral5.first",
+                "src/graphql.ts",
+                NodeKind::Function,
+                1,
+                1,
+            ),
+            // Positional — should be filtered
+            make_def(
+                "sym3",
+                "Component.name0",
+                "src/component.ts",
+                NodeKind::Function,
+                1,
+                1,
+            ),
+            // Generated file — should be filtered
+            make_def(
+                "sym4",
+                "gen.Query",
+                "src/__generated__/types.ts",
+                NodeKind::Class,
+                1,
+                5,
+            ),
+            // Bundle file — should be filtered
+            make_def(
+                "sym5",
+                "app.init",
+                "static/app.bundle.js",
+                NodeKind::Function,
+                1,
+                1,
+            ),
+            // Real class — should survive
+            make_def(
+                "sym6",
+                "payments.PaymentProcessor",
+                "src/payments.ts",
+                NodeKind::Class,
+                1,
+                20,
+            ),
+        ],
+        references: vec![],
+        externals: vec![],
+        covered_files: vec!["src/auth.ts".to_string(), "src/payments.ts".to_string()],
+    };
+
+    let result = build_graph(&scip, Some("test-ns"), &ScipConfig::default());
+    let sym_nodes: Vec<_> = result
+        .nodes
+        .iter()
+        .filter(|n| n.payload.get("source").and_then(|v| v.as_str()) == Some("scip"))
+        .collect();
+
+    let node_ids: Vec<&str> = sym_nodes.iter().map(|n| n.id.as_str()).collect();
+    assert!(
+        node_ids.contains(&"sym:auth.validate"),
+        "real function should survive"
+    );
+    assert!(
+        node_ids.contains(&"sym:payments.PaymentProcessor"),
+        "real class should survive"
+    );
+    assert!(
+        !node_ids.iter().any(|id| id.contains("typeLiteral")),
+        "typeLiteral should be filtered"
+    );
+    assert!(
+        !node_ids.iter().any(|id| id.contains("name0")),
+        "positional should be filtered"
+    );
+    assert!(
+        !node_ids.iter().any(|id| id.contains("gen.Query")),
+        "generated file should be filtered"
+    );
+    assert!(
+        !node_ids.iter().any(|id| id.contains("app.init")),
+        "bundle file should be filtered"
+    );
+}
