@@ -1,6 +1,6 @@
 //! codemem-mcp: MCP server for Codemem (JSON-RPC 2.0 over stdio).
 //!
-//! Implements 28 tools:
+//! Implements 34 tools:
 //! store_memory, recall, delete_memory, associate_memories, refine_memory,
 //! split_memory, merge_memories, graph_traverse, summary_tree,
 //! codemem_status, search_code, get_symbol_info,

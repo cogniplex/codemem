@@ -720,9 +720,12 @@ impl CodememEngine {
         let mut test_depths: HashMap<String, usize> = HashMap::new();
         let mut test_files: HashMap<String, String> = HashMap::new();
 
+        // Shared visited set across all changed symbols to avoid redundant
+        // traversal of common intermediate nodes.
+        let mut visited: HashSet<&str> = HashSet::new();
+
         for &symbol_id in changed_symbol_ids {
             // BFS from symbol_id, following callers (reverse Calls edges)
-            let mut visited: HashSet<&str> = HashSet::new();
             let mut queue: VecDeque<(&str, usize)> = VecDeque::new();
 
             visited.insert(symbol_id);
@@ -826,14 +829,21 @@ fn is_test_node(node: &GraphNode) -> bool {
 }
 
 /// Check if a file path matches common test file patterns.
+///
+/// Anchored to filename component to avoid false positives like
+/// `src/test_utils/helpers.rs` or `src/load_test.config.yaml`.
 fn is_test_file(path: &str) -> bool {
     let p = path.to_lowercase();
-    p.contains("/tests/")
-        || p.contains("/__tests__/")
-        || p.contains("/test_")
-        || p.contains("_test.")
-        || p.contains(".test.")
-        || p.contains(".spec.")
-        || p.starts_with("test_")
-        || p.starts_with("tests/")
+
+    // Directory-based: file lives inside a test directory
+    if p.contains("/tests/") || p.contains("/__tests__/") || p.starts_with("tests/") {
+        return true;
+    }
+
+    // Filename-based: extract the filename component and check patterns
+    let filename = p.rsplit('/').next().unwrap_or(&p);
+    filename.starts_with("test_")
+        || filename.contains("_test.")
+        || filename.contains(".test.")
+        || filename.contains(".spec.")
 }

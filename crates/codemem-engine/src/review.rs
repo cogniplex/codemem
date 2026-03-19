@@ -545,20 +545,27 @@ fn detect_missing_co_changes(
         }
     }
 
+    // Minimum average coupling strength to surface a missing co-change.
+    // Below this threshold, the coupling is too weak to be actionable.
+    const MIN_CO_CHANGE_STRENGTH: f64 = 0.3;
+
     let mut result: Vec<MissingCoChange> = candidates
         .into_iter()
-        .map(|(file_id, couplings)| {
+        .filter_map(|(file_id, couplings)| {
             let strength = couplings.iter().map(|(_, w)| w).sum::<f64>() / couplings.len() as f64;
+            if strength < MIN_CO_CHANGE_STRENGTH {
+                return None;
+            }
             let coupled_with = couplings.into_iter().map(|(f, _)| f).collect();
             let file_path = file_id
                 .strip_prefix("file:")
                 .unwrap_or(&file_id)
                 .to_string();
-            MissingCoChange {
+            Some(MissingCoChange {
                 file_path,
                 coupled_with,
                 strength,
-            }
+            })
         })
         .collect();
 

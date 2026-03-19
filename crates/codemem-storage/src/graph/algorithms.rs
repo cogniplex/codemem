@@ -219,13 +219,40 @@ impl GraphEngine {
             .map(|(i, &idx)| (idx, i))
             .collect();
 
-        // Build a lookup from (src_node_id, dst_node_id) -> RelationshipType
-        // so we can apply relationship-aware weight multipliers.
-        let edge_rel_lookup: HashMap<(&str, &str), RelationshipType> = self
-            .edges
-            .values()
-            .map(|e| ((e.src.as_str(), e.dst.as_str()), e.relationship))
-            .collect();
+        // Build a lookup from petgraph EdgeIndex -> RelationshipType.
+        // Keyed by edge ID (not src/dst pair) to handle parallel edges correctly:
+        // two edges between the same node pair with different relationships
+        // (e.g., Calls + Inherits) must each get their own multiplier.
+        let edge_rel_by_idx: HashMap<petgraph::graph::EdgeIndex, RelationshipType> = {
+            // Reverse map: (src_node_id, dst_node_id, weight) -> RelationshipType
+            // We match petgraph edges to our Edge structs by endpoint node IDs.
+            // For parallel edges, we iterate self.edges and build a multimap.
+            let mut src_dst_rels: HashMap<(&str, &str), Vec<RelationshipType>> = HashMap::new();
+            for e in self.edges.values() {
+                src_dst_rels
+                    .entry((e.src.as_str(), e.dst.as_str()))
+                    .or_default()
+                    .push(e.relationship);
+            }
+            let mut lookup = HashMap::new();
+            for edge_ref in self.graph.edge_indices() {
+                if let Some((src_idx, dst_idx)) = self.graph.edge_endpoints(edge_ref) {
+                    if let (Some(src_id), Some(dst_id)) = (
+                        self.graph.node_weight(src_idx),
+                        self.graph.node_weight(dst_idx),
+                    ) {
+                        if let Some(rels) =
+                            src_dst_rels.get_mut(&(src_id.as_str(), dst_id.as_str()))
+                        {
+                            if let Some(rel) = rels.pop() {
+                                lookup.insert(edge_ref, rel);
+                            }
+                        }
+                    }
+                }
+            }
+            lookup
+        };
 
         // Build undirected adjacency with weights.
         // Deduplicate bidirectional edges: for A->B and B->A, merge into one
@@ -237,15 +264,8 @@ impl GraphEngine {
             if let Some((src_idx, dst_idx)) = self.graph.edge_endpoints(edge_ref) {
                 let w = self.graph[edge_ref];
                 if let (Some(&si), Some(&di)) = (idx_pos.get(&src_idx), idx_pos.get(&dst_idx)) {
-                    // Look up the relationship type to apply heritage multiplier
-                    let multiplier = self
-                        .graph
-                        .node_weight(src_idx)
-                        .and_then(|src_id| {
-                            self.graph.node_weight(dst_idx).and_then(|dst_id| {
-                                edge_rel_lookup.get(&(src_id.as_str(), dst_id.as_str()))
-                            })
-                        })
+                    let multiplier = edge_rel_by_idx
+                        .get(&edge_ref)
                         .map(|rel| match rel {
                             RelationshipType::Extends
                             | RelationshipType::Implements
@@ -711,8 +731,11 @@ impl GraphEngine {
 
         if sorted.len() == 1 {
             sorted[0].0.to_string()
-        } else {
+        } else if sorted.len() <= 2 {
             format!("{}+{}", sorted[0].0, sorted[1].0)
+        } else {
+            let extra = sorted.len() - 2;
+            format!("{}+{} +{extra} more", sorted[0].0, sorted[1].0)
         }
     }
 

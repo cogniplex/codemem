@@ -751,8 +751,10 @@ impl CodememEngine {
             )
         };
 
-        // 4. Recompute centrality
-        self.lock_graph()?.recompute_centrality();
+        // 4. Recompute centrality (PageRank only; betweenness is lazy/on-demand
+        //    because Brandes' algorithm is O(sqrt(n) * (V+E)) even with sampling,
+        //    which is too slow for large SCIP-indexed graphs with 50K+ nodes).
+        self.lock_graph()?.recompute_centrality_with_options(false);
 
         // 5. Compute summary stats
         let top_nodes = self.find_important_nodes(10, 0.85).unwrap_or_default();
