@@ -50,15 +50,33 @@ pub fn build_graph(
     // Also skip wildcard ambient module declarations (e.g., `declare module '*.css'`)
     // which act as catch-all type stubs — every matching import resolves to them,
     // creating thousands of useless edges with massive fan-in.
-    let source_defs: Vec<&ScipDefinition> = scip
+    // Stage 1: Filter by file path and wildcard module (cheap string checks).
+    let path_filtered: Vec<&ScipDefinition> = scip
         .definitions
         .iter()
-        .filter(|d| {
-            is_source_path(&d.file_path)
-                && !is_wildcard_module(&d.qualified_name)
-                && !is_noise_definition(d)
-        })
+        .filter(|d| is_source_path(&d.file_path) && !is_wildcard_module(&d.qualified_name))
         .collect();
+
+    // Stage 2: Parse SCIP symbols once, use for both noise filtering and containment chains.
+    // This avoids double-parsing (is_noise_definition + extract_containment_chain both need it).
+    let mut source_defs: Vec<&ScipDefinition> = Vec::with_capacity(path_filtered.len());
+    let mut parsed_symbols: Vec<scip::types::Symbol> = Vec::with_capacity(path_filtered.len());
+    for def in &path_filtered {
+        let parsed = match scip::symbol::parse_symbol(&def.scip_symbol) {
+            Ok(p) => p,
+            Err(_) => {
+                // Can't parse — keep it to be safe
+                source_defs.push(def);
+                parsed_symbols.push(scip::types::Symbol::default());
+                continue;
+            }
+        };
+        if is_noise_symbol(def, &parsed) {
+            continue;
+        }
+        source_defs.push(def);
+        parsed_symbols.push(parsed);
+    }
 
     // Build a set of defined symbol strings -> qualified names for edge resolution.
     let mut symbol_to_qname: HashMap<&str, &str> = HashMap::new();
@@ -76,10 +94,10 @@ pub fn build_graph(
     // Key: parent qname, Value: vec of (child label, tier3 category like "fields"/"type_params")
     let mut folded_children: HashMap<String, Vec<(String, &'static str)>> = HashMap::new();
 
-    // Pre-compute containment chains for all definitions (needed for tier 3 parent lookup).
-    let def_chains: Vec<Vec<(String, NodeKind)>> = source_defs
+    // Build containment chains from pre-parsed symbols (no re-parsing needed).
+    let def_chains: Vec<Vec<(String, NodeKind)>> = parsed_symbols
         .iter()
-        .map(|d| extract_containment_chain(&d.scip_symbol))
+        .map(extract_containment_chain_from_parsed)
         .collect();
 
     for (def_idx, def) in source_defs.iter().enumerate() {
@@ -807,214 +825,69 @@ fn is_source_path(path: &str) -> bool {
     true
 }
 
-/// Check if a SCIP definition is a noise symbol that should not become a graph node.
+/// Check if a SCIP definition is a noise symbol using structural descriptor analysis.
 ///
-/// SCIP indexes *every* symbol including local variables, destructured params,
-/// anonymous type members, and positional descriptors. These are useful for an IDE
-/// (go-to-definition) but create massive noise in a knowledge graph.
+/// Uses SCIP's descriptor suffix metadata to identify symbols that are structurally
+/// noise for a knowledge graph: parameters, type parameters, local variables inside
+/// functions, positional disambiguators, and anonymous type members.
 ///
-/// Noise patterns:
-/// - Positional descriptors: `name0`, `key21`, `data0` — SCIP's positional naming
-///   for anonymous/local variables. The leaf name ends with a digit.
-/// - `typeLiteral` members: inline anonymous type members like `typeLiteral103.action`
-/// - Generated code: `is_generated` flag from SCIP
-fn is_noise_definition(def: &ScipDefinition) -> bool {
+/// This is more reliable than name-based heuristics because it classifies based on
+/// what the symbol *is* (its role in the code structure) rather than what it's *named*.
+fn is_noise_symbol(def: &ScipDefinition, parsed: &scip::types::Symbol) -> bool {
     // Skip generated code (SCIP provides this flag)
     if def.is_generated {
         return true;
     }
 
-    // Extract the leaf (last segment) of the qualified name
-    let leaf = def
-        .qualified_name
-        .rsplit([':', '.'])
-        .next()
-        .unwrap_or(&def.qualified_name);
-
-    // Skip typeLiteral members (anonymous TS inline type fields)
-    if leaf.contains("typeLiteral") || def.qualified_name.contains("typeLiteral") {
+    // typeLiteral in any descriptor name (TS anonymous inline type members)
+    if parsed
+        .descriptors
+        .iter()
+        .any(|d| d.name.contains("typeLiteral"))
+    {
         return true;
     }
 
-    // Skip positional/anonymous descriptors: leaf name ends with a digit and
-    // the non-digit prefix is a common generic name. SCIP uses patterns like
-    // `name0`, `key21`, `data0`, `code0`, `context0` for local variables.
-    // We only skip when the base name is generic — `useState0` would be noise
-    // but `handleSubmit` ending in a digit is unlikely.
-    if let Some(base) = strip_trailing_digits(leaf) {
-        if is_generic_local_name(base) {
-            return true;
+    let leaf = match parsed.descriptors.last() {
+        Some(d) => d,
+        None => return false,
+    };
+
+    use scip::types::descriptor::Suffix;
+    match leaf.suffix.enum_value() {
+        // Parameters and type parameters are never graph-worthy
+        Ok(Suffix::Parameter | Suffix::TypeParameter) => return true,
+        // Term descriptor: check context to distinguish fields from locals
+        Ok(Suffix::Term) => {
+            // Term inside a Method = local variable / destructured param.
+            // A function's internal bindings (let x = ...) are almost never
+            // useful in a structural knowledge graph.
+            let parent_suffix = parsed
+                .descriptors
+                .iter()
+                .rev()
+                .nth(1)
+                .and_then(|d| d.suffix.enum_value().ok());
+            if matches!(parent_suffix, Some(Suffix::Method)) {
+                return true;
+            }
+            // Positional disambiguator: any Term whose name ends in digits.
+            // SCIP appends digits to disambiguate anonymous/positional symbols
+            // (e.g., `name0`, `key21`). No name-list needed — the trailing
+            // digit + Term suffix is sufficient.
+            if has_trailing_digits(&leaf.name) {
+                return true;
+            }
         }
+        _ => {}
     }
 
     false
 }
 
-/// Strip trailing digits from a name, returning the base if digits were found.
-/// "name0" → Some("name"), "key21" → Some("key"), "handleSubmit" → None
-fn strip_trailing_digits(s: &str) -> Option<&str> {
-    let trimmed = s.trim_end_matches(|c: char| c.is_ascii_digit());
-    if trimmed.len() < s.len() && !trimmed.is_empty() {
-        Some(trimmed)
-    } else {
-        None
-    }
-}
-
-/// Common generic base names used by SCIP for positional/anonymous descriptors.
-/// These are local variable names that add no structural value to the graph.
-fn is_generic_local_name(base: &str) -> bool {
-    matches!(
-        base,
-        "name"
-            | "key"
-            | "data"
-            | "code"
-            | "context"
-            | "event"
-            | "error"
-            | "err"
-            | "result"
-            | "value"
-            | "state"
-            | "props"
-            | "config"
-            | "options"
-            | "params"
-            | "args"
-            | "input"
-            | "output"
-            | "item"
-            | "items"
-            | "element"
-            | "node"
-            | "child"
-            | "parent"
-            | "id"
-            | "idx"
-            | "index"
-            | "count"
-            | "total"
-            | "msg"
-            | "message"
-            | "text"
-            | "label"
-            | "title"
-            | "description"
-            | "type"
-            | "kind"
-            | "status"
-            | "flag"
-            | "path"
-            | "url"
-            | "uri"
-            | "response"
-            | "request"
-            | "req"
-            | "res"
-            | "ctx"
-            | "cb"
-            | "fn"
-            | "func"
-            | "handler"
-            | "callback"
-            | "ref"
-            | "prev"
-            | "next"
-            | "current"
-            | "temp"
-            | "tmp"
-            | "acc"
-            | "i"
-            | "j"
-            | "k"
-            | "x"
-            | "y"
-            | "t"
-            | "e"
-            | "v"
-            | "a"
-            | "b"
-            | "c"
-            | "s"
-            | "n"
-            | "m"
-            | "p"
-            | "r"
-            | "router"
-            | "route"
-            | "track"
-            | "user"
-            | "token"
-            | "session"
-            | "query"
-            | "field"
-            | "col"
-            | "row"
-            | "line"
-            | "start"
-            | "end"
-            | "src"
-            | "dst"
-            | "target"
-            | "source"
-            | "action"
-            | "payload"
-            | "body"
-            | "header"
-            | "headers"
-            | "method"
-            | "mode"
-            | "variant"
-            | "tag"
-            | "attr"
-            | "class"
-            | "style"
-            | "width"
-            | "height"
-            | "size"
-            | "color"
-            | "offset"
-            | "limit"
-            | "page"
-            | "cursor"
-            | "filter"
-            | "sort"
-            | "order"
-            | "group"
-            | "match"
-            | "pattern"
-            | "schema"
-            | "model"
-            | "entity"
-            | "record"
-            | "entry"
-            | "table"
-            | "column"
-            | "db"
-            | "conn"
-            | "client"
-            | "server"
-            | "host"
-            | "port"
-            | "timeout"
-            | "interval"
-            | "duration"
-            | "timestamp"
-            | "date"
-            | "time"
-            | "mock"
-            | "stub"
-            | "spy"
-            | "fixture"
-            | "expected"
-            | "actual"
-            | "test"
-            | "spec"
-            | "suite"
-            | "assert"
-            | "check"
-    )
+/// Check if a name ends with ASCII digits (SCIP positional disambiguator).
+fn has_trailing_digits(name: &str) -> bool {
+    name.len() > 1 && name.ends_with(|c: char| c.is_ascii_digit())
 }
 
 /// Try to parse a SCIP symbol string into a package-level external node ID.
@@ -1030,18 +903,13 @@ fn parse_external_node_id(scip_symbol: &str) -> Option<String> {
     Some(format!("pkg:{}:{}", package.manager, package.name))
 }
 
-/// Extract the containment chain from a SCIP symbol's descriptor chain.
+/// Extract the containment chain from a pre-parsed SCIP symbol.
 ///
 /// For a symbol like `rust-analyzer cargo foo 1.0 auth/middleware/validate_token().`,
 /// returns: `[("auth", Module), ("auth::middleware", Module), ("auth::middleware::validate_token", Function)]`.
 ///
 /// The chain represents the hierarchical nesting: file→auth→auth::middleware→validate_token.
-fn extract_containment_chain(scip_symbol: &str) -> Vec<(String, NodeKind)> {
-    let parsed = match scip::symbol::parse_symbol(scip_symbol) {
-        Ok(p) => p,
-        Err(_) => return vec![],
-    };
-
+fn extract_containment_chain_from_parsed(parsed: &scip::types::Symbol) -> Vec<(String, NodeKind)> {
     // Detect separator from scheme
     let scheme = &parsed.scheme;
     let sep = if scheme == "rust-analyzer" || scheme == "lsif-clang" {
@@ -1052,7 +920,7 @@ fn extract_containment_chain(scip_symbol: &str) -> Vec<(String, NodeKind)> {
 
     let mut chain = Vec::new();
     let mut cumulative_parts: Vec<&str> = Vec::new();
-    let leaf_kind = super::infer_kind_from_parsed(&parsed);
+    let leaf_kind = super::infer_kind_from_parsed(parsed);
 
     for desc in &parsed.descriptors {
         if desc.name.is_empty() {

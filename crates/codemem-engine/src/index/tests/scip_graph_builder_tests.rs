@@ -911,23 +911,25 @@ fn test_intra_module_edges_not_collapsed() {
 
 // ── Noise filtering tests ────────────────────────────────────────────
 
+/// Helper: parse a SCIP symbol and run is_noise_symbol on a def with that symbol.
+fn check_noise(scip_symbol: &str, file_path: &str, is_generated: bool) -> bool {
+    let mut def = make_def(scip_symbol, "qn", file_path, NodeKind::Function, 1, 1);
+    def.is_generated = is_generated;
+    let parsed = scip::symbol::parse_symbol(scip_symbol).unwrap_or_default();
+    is_noise_symbol(&def, &parsed)
+}
+
 #[test]
 fn noise_filter_skips_generated_code() {
-    let mut def = make_def(
-        "scip-typescript npm . __generated__/graphql#Query.",
-        "graphql.Query",
-        "src/__generated__/graphql.ts",
-        NodeKind::Class,
-        1,
-        10,
-    );
     // File path filter catches __generated__
-    assert!(!is_source_path(&def.file_path));
+    assert!(!is_source_path("src/__generated__/graphql.ts"));
 
-    // Also test is_generated flag
-    def.file_path = "src/types.ts".to_string();
-    def.is_generated = true;
-    assert!(is_noise_definition(&def));
+    // is_generated flag
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/types#Query.",
+        "src/types.ts",
+        true
+    ));
 }
 
 #[test]
@@ -941,74 +943,86 @@ fn noise_filter_skips_bundle_files() {
 
 #[test]
 fn noise_filter_skips_type_literals() {
-    let def = make_def(
-        "scip-typescript npm . graphql#QueryArgs.typeLiteral103.first.",
-        "graphql.QueryArgs.typeLiteral103.first",
+    // typeLiteral in descriptor name
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/graphql#QueryArgs.typeLiteral103.first.",
         "src/graphql.ts",
-        NodeKind::Function,
-        50,
-        50,
-    );
-    assert!(is_noise_definition(&def));
+        false
+    ));
 }
 
 #[test]
-fn noise_filter_skips_positional_descriptors() {
-    // name0 — positional local variable
-    let def = make_def(
-        "scip-typescript npm . Component#name0.",
-        "Component.name0",
-        "src/component.ts",
-        NodeKind::Function,
-        10,
-        10,
-    );
-    assert!(is_noise_definition(&def));
+fn noise_filter_skips_parameters() {
+    // Suffix::Parameter — function parameter
+    // SCIP parameter suffix is `(`name`)`
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/auth#validate().(token)",
+        "src/auth.ts",
+        false
+    ));
+}
 
-    // key21 — positional
-    let def2 = make_def(
-        "scip-typescript npm . Component#key21.",
-        "Component.key21",
-        "src/component.ts",
-        NodeKind::Function,
-        10,
-        10,
-    );
-    assert!(is_noise_definition(&def2));
+#[test]
+fn noise_filter_skips_type_parameters() {
+    // Suffix::TypeParameter — generic T
+    // SCIP type parameter suffix is `[`name`]`
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/utils#identity().[T]",
+        "src/utils.ts",
+        false
+    ));
+}
 
-    // data0, context0, event3 — all generic + digit
-    for qn in &["Module.data0", "Module.context0", "Module.event3"] {
-        let d = make_def("sym", qn, "src/mod.ts", NodeKind::Function, 1, 1);
-        assert!(is_noise_definition(&d), "{qn} should be noise");
-    }
+#[test]
+fn noise_filter_skips_locals_inside_methods() {
+    // Term inside a Method = local variable (Suffix::Term is `.`, Method is `().`)
+    // SCIP: `auth#validate().token.` — `token` is a Term inside `validate` (Method)
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/auth#validate().token.",
+        "src/auth.ts",
+        false
+    ));
+}
+
+#[test]
+fn noise_filter_skips_positional_terms() {
+    // Term with trailing digits = positional disambiguator
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/component#Component.name0.",
+        "src/component.ts",
+        false
+    ));
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/component#Component.key21.",
+        "src/component.ts",
+        false
+    ));
 }
 
 #[test]
 fn noise_filter_keeps_real_functions() {
-    // Real function names should NOT be filtered
-    for qn in &[
-        "auth.validateToken",
-        "hooks.useCustomCompareMemo",
-        "payments.handleSubmit",
-        "utils.formatDate",
-        "api.fetchUser",
-    ] {
-        let d = make_def("sym", qn, "src/mod.ts", NodeKind::Function, 1, 1);
-        assert!(!is_noise_definition(&d), "{qn} should NOT be noise");
-    }
+    // Method suffix `().` — real function declarations
+    assert!(!check_noise(
+        "scip-typescript npm homepage 1.0.0 src/auth#validateToken().",
+        "src/auth.ts",
+        false
+    ));
+    assert!(!check_noise(
+        "scip-typescript npm homepage 1.0.0 src/hooks#useCustomCompareMemo().",
+        "src/hooks.ts",
+        false
+    ));
 }
 
 #[test]
-fn noise_filter_keeps_functions_ending_in_digit_with_nongeneric_base() {
-    // handleSubmit2, useState3 — digit suffix but non-generic base name
-    for qn in &[
-        "Component.handleSubmit2",
-        "hooks.useState3",
-        "parser.parseV2",
-    ] {
-        let d = make_def("sym", qn, "src/mod.ts", NodeKind::Function, 1, 1);
-        assert!(!is_noise_definition(&d), "{qn} should NOT be noise");
-    }
+fn noise_filter_keeps_class_fields() {
+    // Term inside a Type (not Method) = class field — should be kept
+    // SCIP: `Track#title.` — `title` is a Term inside `Track` (Type)
+    assert!(!check_noise(
+        "scip-typescript npm homepage 1.0.0 src/types#Track#title.",
+        "src/types.ts",
+        false
+    ));
 }
 
 #[test]
@@ -1016,9 +1030,9 @@ fn noise_filter_end_to_end_build_graph() {
     let scip = ScipReadResult {
         project_root: String::new(),
         definitions: vec![
-            // Real function — should survive
+            // Real function (Method suffix) — should survive
             make_def(
-                "sym1",
+                "scip-typescript npm pkg 1.0.0 src/auth#validate().",
                 "auth.validate",
                 "src/auth.ts",
                 NodeKind::Function,
@@ -1027,43 +1041,43 @@ fn noise_filter_end_to_end_build_graph() {
             ),
             // typeLiteral — should be filtered
             make_def(
-                "sym2",
-                "Query.typeLiteral5.first",
+                "scip-typescript npm pkg 1.0.0 src/graphql#Query.typeLiteral5.first.",
+                "graphql.Query.typeLiteral5.first",
                 "src/graphql.ts",
                 NodeKind::Function,
                 1,
                 1,
             ),
-            // Positional — should be filtered
+            // Parameter — should be filtered
             make_def(
-                "sym3",
-                "Component.name0",
-                "src/component.ts",
+                "scip-typescript npm pkg 1.0.0 src/auth#validate().(token)",
+                "auth.validate.token",
+                "src/auth.ts",
                 NodeKind::Function,
                 1,
                 1,
             ),
-            // Generated file — should be filtered
+            // Generated file — should be filtered by is_source_path
             make_def(
-                "sym4",
+                "scip-typescript npm pkg 1.0.0 src/__generated__/types#Query.",
                 "gen.Query",
                 "src/__generated__/types.ts",
                 NodeKind::Class,
                 1,
                 5,
             ),
-            // Bundle file — should be filtered
+            // Bundle file — should be filtered by is_source_path
             make_def(
-                "sym5",
+                "scip-typescript npm pkg 1.0.0 static/app.bundle#init().",
                 "app.init",
                 "static/app.bundle.js",
                 NodeKind::Function,
                 1,
                 1,
             ),
-            // Real class — should survive
+            // Real class (Type suffix) — should survive
             make_def(
-                "sym6",
+                "scip-typescript npm pkg 1.0.0 src/payments#PaymentProcessor#",
                 "payments.PaymentProcessor",
                 "src/payments.ts",
                 NodeKind::Class,
@@ -1086,19 +1100,19 @@ fn noise_filter_end_to_end_build_graph() {
     let node_ids: Vec<&str> = sym_nodes.iter().map(|n| n.id.as_str()).collect();
     assert!(
         node_ids.contains(&"sym:auth.validate"),
-        "real function should survive"
+        "real function should survive, got: {node_ids:?}"
     );
     assert!(
         node_ids.contains(&"sym:payments.PaymentProcessor"),
-        "real class should survive"
+        "real class should survive, got: {node_ids:?}"
     );
     assert!(
         !node_ids.iter().any(|id| id.contains("typeLiteral")),
         "typeLiteral should be filtered"
     );
     assert!(
-        !node_ids.iter().any(|id| id.contains("name0")),
-        "positional should be filtered"
+        !node_ids.iter().any(|id| id.contains("token")),
+        "parameter should be filtered"
     );
     assert!(
         !node_ids.iter().any(|id| id.contains("gen.Query")),
