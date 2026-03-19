@@ -467,7 +467,6 @@ impl GraphEngine {
     ///
     /// Returns groups of node IDs. Each group is a strongly connected component
     /// where every node can reach every other node via directed edges.
-    #[cfg(test)]
     pub fn strongly_connected_components(&self) -> Vec<Vec<String>> {
         let sccs = petgraph::algo::tarjan_scc(&self.graph);
 
@@ -680,6 +679,41 @@ impl GraphEngine {
             .collect();
 
         (nodes_vec, edges_vec)
+    }
+
+    /// Label a community by the most common parent directories of its member nodes.
+    ///
+    /// Takes a list of node IDs, looks up their `file_path` payloads, extracts
+    /// parent directory names (second-to-last path component), and returns a label.
+    /// If all members share the same directory, returns that name.
+    /// If mixed, combines the two most frequent directories with `+`.
+    /// Returns `"unknown"` if no file paths are found.
+    pub fn label_community(&self, member_ids: &[&str]) -> String {
+        let mut dir_counts: HashMap<&str, usize> = HashMap::new();
+
+        for &node_id in member_ids {
+            if let Some(node) = self.nodes.get(node_id) {
+                if let Some(file_path) = node.payload.get("file_path").and_then(|v| v.as_str()) {
+                    // Extract parent directory name (second-to-last path component)
+                    if let Some(dir) = file_path.rsplit('/').nth(1) {
+                        *dir_counts.entry(dir).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        if dir_counts.is_empty() {
+            return "unknown".to_string();
+        }
+
+        let mut sorted: Vec<_> = dir_counts.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+
+        if sorted.len() == 1 {
+            sorted[0].0.to_string()
+        } else {
+            format!("{}+{}", sorted[0].0, sorted[1].0)
+        }
     }
 
     /// Return node-to-community-ID mapping for Louvain.

@@ -74,6 +74,22 @@ pub struct TestHit {
     pub depth: usize,
 }
 
+/// Report on detected circular dependencies (strongly connected components).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CycleReport {
+    pub cycles: Vec<CycleGroup>,
+    pub total_cycles: usize,
+    pub critical_count: usize,
+}
+
+/// A single cycle group (SCC with >= 2 nodes).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CycleGroup {
+    pub nodes: Vec<String>,
+    pub size: usize,
+    pub severity: String,
+}
+
 /// Report on architectural drift between two time periods.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DriftReport {
@@ -186,6 +202,46 @@ impl CodememEngine {
             .collect();
 
         Ok(results)
+    }
+
+    // ── Cycle Detection ──────────────────────────────────────────────────
+
+    /// Detect circular dependencies using Tarjan's SCC algorithm.
+    /// Groups of >= 5 nodes are "critical", 3-4 are "warning", 2 are "info".
+    pub fn detect_cycles(&self) -> Result<CycleReport, CodememError> {
+        let graph = self.lock_graph()?;
+        let sccs = graph.strongly_connected_components();
+
+        let mut cycles: Vec<CycleGroup> = sccs
+            .into_iter()
+            .filter(|scc| scc.len() >= 2)
+            .map(|nodes| {
+                let size = nodes.len();
+                let severity = if size >= 5 {
+                    "critical"
+                } else if size >= 3 {
+                    "warning"
+                } else {
+                    "info"
+                }
+                .to_string();
+                CycleGroup {
+                    nodes,
+                    size,
+                    severity,
+                }
+            })
+            .collect();
+
+        cycles.sort_by(|a, b| b.size.cmp(&a.size));
+        let critical_count = cycles.iter().filter(|c| c.severity == "critical").count();
+        let total_cycles = cycles.len();
+
+        Ok(CycleReport {
+            cycles,
+            total_cycles,
+            critical_count,
+        })
     }
 
     // ── Temporal Queries ─────────────────────────────────────────────────

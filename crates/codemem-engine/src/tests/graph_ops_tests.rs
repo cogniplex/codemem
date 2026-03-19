@@ -343,3 +343,99 @@ fn test_impact_empty_graph() {
     assert!(result.direct_tests.is_empty());
     assert!(result.transitive_tests.is_empty());
 }
+
+// ── Cycle Detection ──────────────────────────────────────────────────────
+
+/// Helper: create a simple node for cycle tests.
+fn make_node(id: &str) -> GraphNode {
+    GraphNode {
+        id: id.to_string(),
+        kind: NodeKind::Function,
+        label: id.to_string(),
+        payload: HashMap::new(),
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+/// Helper: create a DependsOn edge.
+fn make_dep_edge(src: &str, dst: &str) -> Edge {
+    Edge {
+        id: format!("dep:{src}:{dst}"),
+        src: src.to_string(),
+        dst: dst.to_string(),
+        relationship: RelationshipType::DependsOn,
+        weight: 1.0,
+        properties: HashMap::new(),
+        created_at: Utc::now(),
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+#[test]
+fn detect_cycles_finds_warning_cycle() {
+    let engine = CodememEngine::for_testing();
+
+    // A -> B -> C -> A (cycle of 3 = "warning")
+    {
+        let mut graph = engine.lock_graph().expect("lock graph");
+        graph.add_node(make_node("A")).expect("add A");
+        graph.add_node(make_node("B")).expect("add B");
+        graph.add_node(make_node("C")).expect("add C");
+        graph.add_edge(make_dep_edge("A", "B")).expect("add A->B");
+        graph.add_edge(make_dep_edge("B", "C")).expect("add B->C");
+        graph.add_edge(make_dep_edge("C", "A")).expect("add C->A");
+    }
+
+    let report = engine.detect_cycles().expect("detect_cycles");
+    assert_eq!(report.total_cycles, 1, "should find exactly 1 cycle");
+    assert_eq!(report.cycles[0].size, 3);
+    assert_eq!(report.cycles[0].severity, "warning");
+    assert_eq!(report.critical_count, 0);
+}
+
+#[test]
+fn detect_cycles_no_cycles_in_dag() {
+    let engine = CodememEngine::for_testing();
+
+    // A -> B -> C (no back-edge, DAG)
+    {
+        let mut graph = engine.lock_graph().expect("lock graph");
+        graph.add_node(make_node("A")).expect("add A");
+        graph.add_node(make_node("B")).expect("add B");
+        graph.add_node(make_node("C")).expect("add C");
+        graph.add_edge(make_dep_edge("A", "B")).expect("add A->B");
+        graph.add_edge(make_dep_edge("B", "C")).expect("add B->C");
+    }
+
+    let report = engine.detect_cycles().expect("detect_cycles");
+    assert_eq!(report.total_cycles, 0, "DAG should have no cycles");
+}
+
+#[test]
+fn detect_cycles_critical_severity() {
+    let engine = CodememEngine::for_testing();
+
+    // Create a cycle of 5 nodes: A -> B -> C -> D -> E -> A
+    {
+        let mut graph = engine.lock_graph().expect("lock graph");
+        for id in &["A", "B", "C", "D", "E"] {
+            graph.add_node(make_node(id)).expect("add node");
+        }
+        graph.add_edge(make_dep_edge("A", "B")).expect("edge");
+        graph.add_edge(make_dep_edge("B", "C")).expect("edge");
+        graph.add_edge(make_dep_edge("C", "D")).expect("edge");
+        graph.add_edge(make_dep_edge("D", "E")).expect("edge");
+        graph.add_edge(make_dep_edge("E", "A")).expect("edge");
+    }
+
+    let report = engine.detect_cycles().expect("detect_cycles");
+    assert_eq!(report.total_cycles, 1);
+    assert_eq!(report.cycles[0].size, 5);
+    assert_eq!(report.cycles[0].severity, "critical");
+    assert_eq!(report.critical_count, 1);
+}

@@ -802,6 +802,24 @@ impl McpServer {
         }
     }
 
+    pub(crate) fn tool_cycles(&self, args: &Value) -> ToolResult {
+        let min_size = args.get("min_size").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
+
+        match self.engine.detect_cycles() {
+            Ok(mut report) => {
+                report.cycles.retain(|c| c.size >= min_size);
+                report.total_cycles = report.cycles.len();
+                report.critical_count = report
+                    .cycles
+                    .iter()
+                    .filter(|c| c.severity == "critical")
+                    .count();
+                ToolResult::text(serde_json::to_string_pretty(&report).expect("JSON serialization"))
+            }
+            Err(e) => ToolResult::tool_error(format!("Cycle detection failed: {e}")),
+        }
+    }
+
     pub(crate) fn tool_review_diff(&self, args: &Value) -> ToolResult {
         let diff = match args.get("diff").and_then(|v| v.as_str()) {
             Some(d) if !d.is_empty() => d,

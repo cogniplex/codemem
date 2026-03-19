@@ -1283,3 +1283,81 @@ fn louvain_with_assignment_all_nodes_present() {
     assert!(assignment.contains_key("b"));
     assert!(assignment.contains_key("c"));
 }
+
+// ── label_community Tests ──────────────────────────────────────────────
+
+fn file_node_with_path(id: &str, label: &str, file_path: &str) -> GraphNode {
+    let mut payload = HashMap::new();
+    payload.insert(
+        "file_path".to_string(),
+        serde_json::Value::String(file_path.to_string()),
+    );
+    GraphNode {
+        id: id.to_string(),
+        kind: NodeKind::File,
+        label: label.to_string(),
+        payload,
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+#[test]
+fn label_community_single_directory() {
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(file_node_with_path("a", "login.rs", "src/auth/login.rs"))
+        .unwrap();
+    graph
+        .add_node(file_node_with_path(
+            "b",
+            "session.rs",
+            "src/auth/session.rs",
+        ))
+        .unwrap();
+    graph
+        .add_node(file_node_with_path("c", "token.rs", "src/auth/token.rs"))
+        .unwrap();
+
+    let label = graph.label_community(&["a", "b", "c"]);
+    assert_eq!(label, "auth");
+}
+
+#[test]
+fn label_community_mixed_directories() {
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(file_node_with_path("a", "login.rs", "src/auth/login.rs"))
+        .unwrap();
+    graph
+        .add_node(file_node_with_path(
+            "b",
+            "session.rs",
+            "src/auth/session.rs",
+        ))
+        .unwrap();
+    graph
+        .add_node(file_node_with_path(
+            "c",
+            "cors.rs",
+            "src/middleware/cors.rs",
+        ))
+        .unwrap();
+
+    let label = graph.label_community(&["a", "b", "c"]);
+    // "auth" has 2 members, "middleware" has 1 → "auth+middleware"
+    assert_eq!(label, "auth+middleware");
+}
+
+#[test]
+fn label_community_no_file_paths() {
+    let mut graph = GraphEngine::new();
+    graph.add_node(file_node("x", "x.rs")).unwrap();
+    graph.add_node(file_node("y", "y.rs")).unwrap();
+
+    let label = graph.label_community(&["x", "y"]);
+    assert_eq!(label, "unknown");
+}

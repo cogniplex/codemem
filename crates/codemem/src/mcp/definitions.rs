@@ -462,5 +462,15 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 "required": ["symbols"]
             }
         }),
+        json!({
+            "name": "cycles",
+            "description": "Detect circular dependencies using Tarjan's SCC. Groups ≥5 nodes flagged as critical.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "min_size": { "type": "integer", "description": "Min cycle size to report (default 2)" }
+                }
+            }
+        }),
     ]
 }

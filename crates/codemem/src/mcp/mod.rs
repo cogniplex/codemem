@@ -266,6 +266,7 @@ impl McpServer {
             // ── Review & Impact ────────────────────────────────────────────
             "review_diff" => self.tool_review_diff(args),
             "test_impact" => self.tool_test_impact(args),
+            "cycles" => self.tool_cycles(args),
 
             // ── Temporal ─────────────────────────────────────────────────
             "what_changed" => self.tool_what_changed(args),
