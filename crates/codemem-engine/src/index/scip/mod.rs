@@ -419,11 +419,31 @@ pub fn infer_kind_from_parsed(parsed: &scip::types::Symbol) -> NodeKind {
             let parent = parsed.descriptors.iter().rev().nth(1);
             match parent.and_then(|d| d.suffix.enum_value().ok()) {
                 Some(Suffix::Type) => NodeKind::Field,
-                _ => NodeKind::Function,
+                _ => {
+                    // Module-level Term with UPPER_CASE name → Constant, not Function.
+                    // SCIP classifies `const ACCOUNT_ROUTE = "/account"` as Term,
+                    // but these are constants/config values, not callable functions.
+                    if is_constant_name(&last.name) {
+                        NodeKind::Constant
+                    } else {
+                        NodeKind::Function
+                    }
+                }
             }
         }
         _ => NodeKind::Function, // Meta, Local, UnspecifiedSuffix
     }
+}
+
+/// Check if a name looks like a constant (UPPER_CASE_WITH_UNDERSCORES or ALL_CAPS).
+/// Examples: `ACCOUNT_ROUTE`, `API_URL`, `MAX_RETRIES`, `DEBUG`.
+/// Counter-examples: `useState`, `handleClick`, `_build_filters`.
+fn is_constant_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && name.chars().any(|c| c.is_ascii_uppercase())
 }
 
 /// Resolve a node kind: use the SCIP `Kind` if specified, otherwise infer from the symbol.

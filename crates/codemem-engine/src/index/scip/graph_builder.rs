@@ -765,9 +765,17 @@ pub fn build_graph(
     // but SCIP references may still point to them, causing FK constraint failures.
     // We also allow edges to file: and pkg: nodes which are created by the persistence
     // layer (not in this build result's nodes vec).
+    //
+    // Additionally filter edges targeting language stdlib packages — these are the
+    // SCIP equivalent of the ast-grep call blocklist. Calls to TS builtins (Array,
+    // Promise, string) and Python stdlib (os, json, re) add no structural value.
     let valid_node_ids: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
     let edge_count_before = edges.len();
     edges.retain(|e| {
+        // Drop edges to language stdlib packages
+        if is_stdlib_package(&e.dst) {
+            return false;
+        }
         let src_ok = valid_node_ids.contains(e.src.as_str())
             || e.src.starts_with("file:")
             || e.src.starts_with("pkg:");
@@ -778,7 +786,7 @@ pub fn build_graph(
     });
     let edges_dropped = edge_count_before - edges.len();
     if edges_dropped > 0 {
-        tracing::debug!("Dropped {edges_dropped} SCIP edges referencing filtered noise nodes");
+        tracing::debug!("Dropped {edges_dropped} SCIP edges referencing filtered/stdlib nodes");
     }
 
     ScipBuildResult {
@@ -909,6 +917,30 @@ fn is_noise_symbol(def: &ScipDefinition, parsed: &scip::types::Symbol) -> bool {
 /// Check if a name ends with ASCII digits (SCIP positional disambiguator).
 fn has_trailing_digits(name: &str) -> bool {
     name.len() > 1 && name.ends_with(|c: char| c.is_ascii_digit())
+}
+
+/// Check if a node ID is a language stdlib package that should not receive edges.
+///
+/// These are the SCIP equivalent of the ast-grep call blocklist — calls to
+/// TS builtins (Array, Promise, string) and Python stdlib (os, json, re)
+/// add no structural value to the knowledge graph.
+fn is_stdlib_package(node_id: &str) -> bool {
+    matches!(
+        node_id,
+        "pkg:npm:typescript"
+            | "pkg:npm:@types/node"
+            | "pkg:python:python-stdlib"
+            | "pkg:python:typing_extensions"
+            | "pkg:python:builtins"
+            | "pkg:maven:java.lang"
+            | "pkg:maven:java.util"
+            | "pkg:maven:java.io"
+            | "pkg:go:builtin"
+            | "pkg:go:fmt"
+            | "pkg:cargo:std"
+            | "pkg:cargo:core"
+            | "pkg:cargo:alloc"
+    )
 }
 
 /// Try to parse a SCIP symbol string into a package-level external node ID.
