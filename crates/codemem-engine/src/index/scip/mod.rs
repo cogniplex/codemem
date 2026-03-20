@@ -153,6 +153,15 @@ pub fn parse_scip_bytes(bytes: &[u8]) -> Result<ScipReadResult, String> {
             let is_generated = (roles & ROLE_GENERATED) != 0;
 
             if is_def {
+                // Early noise filter: if SymbolInformation.Kind identifies this as a
+                // variable, parameter, or literal type, skip it entirely. This avoids
+                // building qualified names and containment chains for noise symbols.
+                if let Some(info) = sym_info_map.get(occ.symbol.as_str()) {
+                    if is_noise_kind(info.kind.value()) {
+                        continue;
+                    }
+                }
+
                 let qualified_name = match scip_symbol_to_qualified_name(&occ.symbol, lang_sep) {
                     Some(q) => q,
                     None => continue,
@@ -361,25 +370,86 @@ pub fn detect_language_separator(language: &str) -> &'static str {
 fn scip_kind_to_node_kind(kind: i32) -> Option<NodeKind> {
     use scip::types::symbol_information::Kind;
     match kind {
-        x if x == Kind::Class as i32 => Some(NodeKind::Class),
-        x if x == Kind::Interface as i32 => Some(NodeKind::Interface),
+        x if x == Kind::Class as i32 || x == Kind::Struct as i32 => Some(NodeKind::Class),
+        x if x == Kind::Interface as i32 || x == Kind::Protocol as i32 => Some(NodeKind::Interface),
         x if x == Kind::Trait as i32 => Some(NodeKind::Trait),
         x if x == Kind::Enum as i32 => Some(NodeKind::Enum),
         x if x == Kind::EnumMember as i32 => Some(NodeKind::EnumVariant),
-        x if x == Kind::Field as i32 => Some(NodeKind::Field),
+        x if x == Kind::Field as i32
+            || x == Kind::StaticField as i32
+            || x == Kind::StaticDataMember as i32 =>
+        {
+            Some(NodeKind::Field)
+        }
+        x if x == Kind::Property as i32 || x == Kind::StaticProperty as i32 => {
+            Some(NodeKind::Property)
+        }
         x if x == Kind::TypeParameter as i32 => Some(NodeKind::TypeParameter),
         x if x == Kind::Macro as i32 => Some(NodeKind::Macro),
-        x if x == Kind::Property as i32 => Some(NodeKind::Property),
         x if x == Kind::Function as i32 || x == Kind::Constructor as i32 => {
             Some(NodeKind::Function)
         }
-        x if x == Kind::Method as i32 => Some(NodeKind::Method),
-        x if x == Kind::Namespace as i32 || x == Kind::Module as i32 => Some(NodeKind::Module),
-        x if x == Kind::Package as i32 => Some(NodeKind::Package),
-        x if x == Kind::TypeAlias as i32 || x == Kind::Type as i32 => Some(NodeKind::Type),
-        x if x == Kind::Constant as i32 => Some(NodeKind::Constant),
+        x if x == Kind::Method as i32
+            || x == Kind::StaticMethod as i32
+            || x == Kind::AbstractMethod as i32
+            || x == Kind::TraitMethod as i32
+            || x == Kind::ProtocolMethod as i32
+            || x == Kind::PureVirtualMethod as i32
+            || x == Kind::MethodSpecification as i32
+            || x == Kind::Getter as i32
+            || x == Kind::Setter as i32
+            || x == Kind::Accessor as i32 =>
+        {
+            Some(NodeKind::Method)
+        }
+        x if x == Kind::Namespace as i32
+            || x == Kind::Module as i32
+            || x == Kind::PackageObject as i32 =>
+        {
+            Some(NodeKind::Module)
+        }
+        x if x == Kind::Package as i32 || x == Kind::Library as i32 => Some(NodeKind::Package),
+        x if x == Kind::TypeAlias as i32
+            || x == Kind::Type as i32
+            || x == Kind::AssociatedType as i32 =>
+        {
+            Some(NodeKind::Type)
+        }
+        x if x == Kind::Constant as i32 || x == Kind::StaticVariable as i32 => {
+            Some(NodeKind::Constant)
+        }
         _ => None,
     }
+}
+
+/// Check if a `SymbolInformation.Kind` value represents a symbol that should
+/// never become a graph node in a knowledge graph.
+///
+/// This is the primary noise filter — when the indexer provides a Kind, we trust
+/// it over descriptor Suffix heuristics. Variables, parameters, literal types,
+/// and other non-structural symbols are filtered here.
+pub fn is_noise_kind(kind: i32) -> bool {
+    use scip::types::symbol_information::Kind;
+    matches!(kind,
+        x if x == Kind::Variable as i32
+            || x == Kind::Parameter as i32
+            || x == Kind::SelfParameter as i32
+            || x == Kind::ThisParameter as i32
+            || x == Kind::ParameterLabel as i32
+            || x == Kind::TypeParameter as i32
+            // Literal/value types — not structural
+            || x == Kind::Boolean as i32
+            || x == Kind::Number as i32
+            || x == Kind::String as i32
+            || x == Kind::Null as i32
+            || x == Kind::Array as i32
+            || x == Kind::Object as i32
+            || x == Kind::Key as i32
+            || x == Kind::Pattern as i32
+            // Receiver/error types
+            || x == Kind::MethodReceiver as i32
+            || x == Kind::Error as i32
+    )
 }
 
 /// Infer `NodeKind` from the SCIP symbol's descriptor suffixes when

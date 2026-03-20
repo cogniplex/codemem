@@ -854,14 +854,14 @@ fn is_source_path(path: &str) -> bool {
     true
 }
 
-/// Check if a SCIP definition is a noise symbol using structural descriptor analysis.
+/// Fallback noise filter using SCIP descriptor suffixes.
 ///
-/// Uses SCIP's descriptor suffix metadata to identify symbols that are structurally
-/// noise for a knowledge graph: parameters, type parameters, local variables inside
-/// functions, positional disambiguators, and anonymous type members.
+/// This runs AFTER the primary `is_noise_kind()` filter in the reader. It catches
+/// noise that slips through when `SymbolInformation.Kind` is `UnspecifiedKind`
+/// (common with scip-go and older indexers that don't populate Kind).
 ///
-/// This is more reliable than name-based heuristics because it classifies based on
-/// what the symbol *is* (its role in the code structure) rather than what it's *named*.
+/// Uses descriptor suffix metadata: parameters, type parameters, locals inside
+/// functions, positional disambiguators (trailing digits), and typeLiteral members.
 fn is_noise_symbol(def: &ScipDefinition, parsed: &scip::types::Symbol) -> bool {
     // Skip generated code (SCIP provides this flag)
     if def.is_generated {
