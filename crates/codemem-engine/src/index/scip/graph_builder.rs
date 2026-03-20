@@ -557,14 +557,14 @@ pub fn build_graph(
         }
 
         // Pick the most specific role for each reference. Priority:
-        //   IMPORT > WRITE > READ > generic CALLS
+        //   IMPORT > WRITE > READ > kind-aware fallback
         // A reference can have multiple role flags (e.g., IMPORT + READ_ACCESS),
         // but we emit one edge per reference to avoid double-counting in
         // PageRank — the more specific role subsumes the less specific one.
         //
         // scip-go workaround: scip-go sets READ_ACCESS on ALL references
         // without semantic differentiation. When ONLY READ_ACCESS is set
-        // (no IMPORT, WRITE), fall through to CALLS.
+        // (no IMPORT, WRITE), fall through to the kind-aware default.
         let semantic_mask = ROLE_IMPORT | ROLE_WRITE_ACCESS | ROLE_READ_ACCESS;
         let is_scip_go_generic = r.role_bitmask & semantic_mask == ROLE_READ_ACCESS;
 
@@ -575,7 +575,17 @@ pub fn build_graph(
         } else if is_read_ref(r.role_bitmask) && !is_scip_go_generic {
             (RelationshipType::Reads, 0.3)
         } else {
-            (RelationshipType::Calls, 1.0)
+            // When the role bitmask is generic (no semantic flags), use the
+            // target node's kind to pick the correct relationship. A reference
+            // to a class is a type dependency, not a function call.
+            match target_kind {
+                Some(NodeKind::Class | NodeKind::Interface | NodeKind::Trait | NodeKind::Type) => {
+                    (RelationshipType::DependsOn, 0.3)
+                }
+                Some(NodeKind::Module | NodeKind::Package) => (RelationshipType::Imports, 0.5),
+                Some(NodeKind::Constant) => (RelationshipType::Reads, 0.3),
+                _ => (RelationshipType::Calls, 1.0),
+            }
         };
 
         let edge_prefix = rel.to_string().to_lowercase();
