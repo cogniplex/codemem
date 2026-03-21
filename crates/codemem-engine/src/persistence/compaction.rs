@@ -50,10 +50,27 @@ impl CodememEngine {
 
     /// Compact chunk and symbol graph-nodes after indexing.
     /// Returns (chunks_pruned, symbols_pruned).
-    pub fn compact_graph(&self, seen_files: &HashSet<String>) -> (usize, usize) {
+    ///
+    /// # Panics
+    /// Panics if namespace is None. PageRank must be scoped to a namespace
+    /// to prevent cross-project score pollution in shared databases.
+    pub fn compact_graph(
+        &self,
+        seen_files: &HashSet<String>,
+        namespace: Option<&str>,
+    ) -> (usize, usize) {
+        let namespace = namespace.expect("compact_graph requires explicit namespace to prevent cross-project PageRank pollution");
+
         let mut graph = match self.lock_graph() {
             Ok(g) => g,
-            Err(_) => return (0, 0),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    namespace = %namespace,
+                    "compact_graph: failed to acquire graph lock (poisoned)"
+                );
+                return (0, 0);
+            }
         };
 
         // Fetch all nodes once and share between both compaction passes.
@@ -63,10 +80,11 @@ impl CodememEngine {
 
         if chunks_pruned > 0 || symbols_pruned > 0 {
             // compute_centrality: updates node.centrality with degree centrality.
-            // recompute_centrality: caches PageRank + betweenness for hybrid scoring.
+            // recompute_centrality: caches PageRank for hybrid scoring, scoped to
+            // the current namespace so cross-project scores don't bleed in.
             // Both are needed — they populate different data used by different scoring paths.
             graph.compute_centrality();
-            graph.recompute_centrality();
+            graph.recompute_centrality_for_namespace(namespace);
         }
 
         (chunks_pruned, symbols_pruned)

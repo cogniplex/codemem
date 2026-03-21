@@ -95,7 +95,7 @@ impl super::CodememEngine {
         let graph_counts = self.persist_graph_nodes(results, namespace)?;
 
         let (chunks_pruned, symbols_pruned) = if self.config.chunking.auto_compact {
-            self.compact_graph(seen_files)
+            self.compact_graph(seen_files, namespace)
         } else {
             (0, 0)
         };
@@ -136,7 +136,7 @@ impl super::CodememEngine {
 
         // 3. Auto-compact
         let (chunks_pruned, symbols_pruned) = if self.config.chunking.auto_compact {
-            self.compact_graph(seen_files)
+            self.compact_graph(seen_files, namespace)
         } else {
             (0, 0)
         };

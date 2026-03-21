@@ -294,11 +294,9 @@ impl CodememEngine {
             last_expiry_sweep: AtomicI64::new(0),
         };
 
-        // H7: Only compute PageRank at startup; betweenness is computed lazily
-        // via `ensure_betweenness_computed()` when first needed.
-        engine
-            .lock_graph()?
-            .recompute_centrality_with_options(false);
+        // PageRank is computed per-namespace during analyze/index rather than
+        // globally at startup, preventing cross-project score pollution when
+        // the shared database holds multiple indexed projects.
 
         Ok(engine)
     }

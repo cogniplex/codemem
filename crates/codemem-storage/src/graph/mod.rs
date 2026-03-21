@@ -275,13 +275,58 @@ impl GraphEngine {
         self.recompute_centrality_with_options(true);
     }
 
+    /// Recompute PageRank for a single namespace and update the cache.
+    ///
+    /// Only scores for nodes in `namespace` are written; scores for nodes in
+    /// other namespaces are left unchanged. This prevents cross-project
+    /// pollution when the shared database holds multiple indexed projects.
+    ///
+    /// Stale scores for deleted nodes in this namespace are evicted.
+    pub fn recompute_centrality_for_namespace(&mut self, namespace: &str) {
+        // Get set of node IDs currently in this namespace
+        let current_node_ids: HashSet<String> = self.nodes
+            .iter()
+            .filter(|(_, n)| n.namespace.as_deref() == Some(namespace))
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        // Evict stale scores: remove cached entries for deleted nodes in this namespace
+        self.cached_pagerank.retain(|id, _| {
+            // Keep score if node doesn't exist OR node belongs to different namespace
+            self.nodes.get(id)
+                .map(|n| n.namespace.as_deref() != Some(namespace))
+                .unwrap_or(true) // Keep if node doesn't exist (safe fallback)
+        });
+
+        // Compute and insert new scores
+        let scores = self.pagerank_for_namespace(
+            namespace,
+            codemem_core::PAGERANK_DAMPING_DEFAULT,
+            codemem_core::PAGERANK_ITERATIONS_DEFAULT,
+            codemem_core::PAGERANK_TOLERANCE_DEFAULT,
+        );
+        for (id, score) in scores {
+            self.cached_pagerank.insert(id, score);
+        }
+
+        tracing::debug!(
+            namespace = %namespace,
+            scores_updated = self.cached_pagerank.iter().filter(|(id, _)| current_node_ids.contains(*id)).count(),
+            "PageRank recomputed for namespace"
+        );
+    }
+
     /// Recompute centrality caches with control over which algorithms run.
     ///
     /// PageRank is always computed. Betweenness centrality is only computed
     /// when `include_betweenness` is true, since it is O(V * E) and can be
     /// expensive on large graphs.
     pub fn recompute_centrality_with_options(&mut self, include_betweenness: bool) {
-        self.cached_pagerank = self.pagerank(0.85, 100, 1e-6);
+        self.cached_pagerank = self.pagerank(
+            codemem_core::PAGERANK_DAMPING_DEFAULT,
+            codemem_core::PAGERANK_ITERATIONS_DEFAULT,
+            codemem_core::PAGERANK_TOLERANCE_DEFAULT,
+        );
         if include_betweenness {
             self.cached_betweenness = self.betweenness_centrality();
         } else {

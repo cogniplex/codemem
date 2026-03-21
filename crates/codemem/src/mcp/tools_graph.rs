@@ -639,16 +639,25 @@ impl McpServer {
     /// Renamed from get_pagerank: find the most important/central nodes.
     pub(crate) fn tool_find_important_nodes(&self, args: &Value) -> ToolResult {
         let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
-        let damping = args.get("damping").and_then(|v| v.as_f64()).unwrap_or(0.85);
+        // Bound top_k to reasonable range to prevent resource exhaustion
+        let top_k = top_k.min(1000);
 
-        match self.engine.find_important_nodes(top_k, damping) {
+        let damping = args.get("damping").and_then(|v| v.as_f64()).unwrap_or(0.85);
+        // Validate damping is in (0, 1)
+        if damping <= 0.0 || damping >= 1.0 {
+            return ToolResult::tool_error(format!("damping must be in range (0, 1), got {damping}"));
+        }
+
+        let namespace = args.get("namespace").and_then(|v| v.as_str());
+
+        match self.engine.find_important_nodes(top_k, damping, namespace) {
             Ok(ranked) => {
                 let results: Vec<Value> = ranked
                     .iter()
                     .map(|r| {
                         json!({
                             "id": r.id,
-                            "pagerank": format!("{:.6}", r.score),
+                            "pagerank": r.score,
                             "kind": r.kind,
                             "label": r.label,
                         })
