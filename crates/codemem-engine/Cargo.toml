@@ -33,8 +33,8 @@ walkdir = { workspace = true }
 ignore = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
-ast-grep-core = "0.41"
-ast-grep-language = "0.41"
+ast-grep-core = "0.42"
+ast-grep-language = "0.42"
 serde_yaml = "0.9"
 
 # SCIP code intelligence
