@@ -227,7 +227,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "top_k": { "type": "integer", "default": 20 },
-                    "damping": { "type": "number", "default": 0.85 }
+                    "damping": { "type": "number", "default": 0.85 },
+                    "namespace": { "type": "string", "description": "Optional namespace to scope PageRank (prevents cross-project score pollution)" }
                 }
             }
         }),

@@ -170,7 +170,7 @@ fn persist_creates_file_nodes() {
     files.insert("src/lib.rs".to_string());
 
     let result = make_index_result(vec![], vec![], files, vec![]);
-    let pr = engine.persist_index_results(&result, None).unwrap();
+    let pr = engine.persist_index_results(&result, Some("test")).unwrap();
 
     assert_eq!(pr.files_created, 2);
 
@@ -193,7 +193,7 @@ fn persist_creates_package_nodes() {
     files.insert("src/util/helper.rs".to_string());
 
     let result = make_index_result(vec![], vec![], files, vec![]);
-    let pr = engine.persist_index_results(&result, None).unwrap();
+    let pr = engine.persist_index_results(&result, Some("test")).unwrap();
 
     assert!(pr.packages_created > 0);
 
@@ -215,7 +215,7 @@ fn persist_creates_contains_edges_for_packages() {
     files.insert("src/util/helper.rs".to_string());
 
     let result = make_index_result(vec![], vec![], files, vec![]);
-    engine.persist_index_results(&result, None).unwrap();
+    engine.persist_index_results(&result, Some("test")).unwrap();
 
     let graph = engine.lock_graph().unwrap();
 
@@ -249,7 +249,7 @@ fn persist_creates_symbol_nodes() {
     ];
 
     let result = make_index_result(symbols, vec![], files, vec![]);
-    let pr = engine.persist_index_results(&result, None).unwrap();
+    let pr = engine.persist_index_results(&result, Some("test")).unwrap();
 
     assert_eq!(pr.symbols_stored, 2);
 
@@ -272,7 +272,7 @@ fn persist_creates_file_to_symbol_contains_edge() {
 
     let symbols = vec![make_symbol("process", "src/main.rs", SymbolKind::Function)];
     let result = make_index_result(symbols, vec![], files, vec![]);
-    engine.persist_index_results(&result, None).unwrap();
+    engine.persist_index_results(&result, Some("test")).unwrap();
 
     let graph = engine.lock_graph().unwrap();
     let file_edges = graph.get_edges("file:src/main.rs").unwrap();
@@ -296,7 +296,7 @@ fn persist_stores_symbol_payload_fields() {
     sym.visibility = Visibility::Public;
 
     let result = make_index_result(vec![sym], vec![], files, vec![]);
-    engine.persist_index_results(&result, None).unwrap();
+    engine.persist_index_results(&result, Some("test")).unwrap();
 
     let graph = engine.lock_graph().unwrap();
     let node = graph.get_node("sym:handler").unwrap().unwrap();
@@ -341,7 +341,7 @@ fn persist_creates_reference_edges() {
     }];
 
     let result = make_index_result(symbols, vec![], files, edges);
-    let pr = engine.persist_index_results(&result, None).unwrap();
+    let pr = engine.persist_index_results(&result, Some("test")).unwrap();
 
     assert_eq!(pr.edges_resolved, 1);
 
@@ -371,7 +371,7 @@ fn persist_creates_chunk_nodes() {
     ];
 
     let result = make_index_result(vec![], chunks, files, vec![]);
-    let pr = engine.persist_index_results(&result, None).unwrap();
+    let pr = engine.persist_index_results(&result, Some("test")).unwrap();
 
     // Chunks may be pruned by auto-compact, but at least some should be stored
     assert!(pr.chunks_stored >= 1);
@@ -396,7 +396,7 @@ fn persist_creates_file_to_chunk_edge() {
 
     let chunks = vec![make_chunk("src/main.rs", 0, None)];
     let result = make_index_result(vec![], chunks, files, vec![]);
-    engine.persist_index_results(&result, None).unwrap();
+    engine.persist_index_results(&result, Some("test")).unwrap();
 
     let graph = engine.lock_graph().unwrap();
     let file_edges = graph.get_edges("file:src/main.rs").unwrap();
@@ -417,7 +417,7 @@ fn persist_creates_parent_symbol_to_chunk_edge() {
     let chunks = vec![make_chunk("src/main.rs", 0, Some("process"))];
 
     let result = make_index_result(symbols, chunks, files, vec![]);
-    engine.persist_index_results(&result, None).unwrap();
+    engine.persist_index_results(&result, Some("test")).unwrap();
 
     let graph = engine.lock_graph().unwrap();
     let sym_edges = graph.get_edges("sym:process").unwrap();
@@ -465,7 +465,7 @@ fn persist_without_embeddings_has_zero_embedded() {
     let symbols = vec![make_symbol("f", "src/main.rs", SymbolKind::Function)];
     let chunks = vec![make_chunk("src/main.rs", 0, None)];
     let result = make_index_result(symbols, chunks, files, vec![]);
-    let pr = engine.persist_index_results(&result, None).unwrap();
+    let pr = engine.persist_index_results(&result, Some("test")).unwrap();
 
     // for_testing() has no embedding provider
     assert_eq!(pr.symbols_embedded, 0);
@@ -487,7 +487,7 @@ fn persist_calls_progress_callback() {
 
     // With no embeddings, progress won't be called. That's expected.
     engine
-        .persist_index_results_with_progress(&result, None, |_done, _total| {
+        .persist_index_results_with_progress(&result, Some("test"), |_done, _total| {
             pc.store(true, std::sync::atomic::Ordering::SeqCst);
         })
         .unwrap();
@@ -505,7 +505,7 @@ fn persist_calls_progress_callback() {
 fn compact_graph_empty() {
     let engine = CodememEngine::for_testing();
     let seen = HashSet::new();
-    let (chunks_pruned, symbols_pruned) = engine.compact_graph(&seen);
+    let (chunks_pruned, symbols_pruned) = engine.compact_graph(&seen, Some("test"));
     assert_eq!(chunks_pruned, 0);
     assert_eq!(symbols_pruned, 0);
 }
@@ -538,9 +538,9 @@ fn compact_graph_preserves_structural_symbols() {
     ];
 
     let result = make_index_result(symbols, vec![], files.clone(), vec![]);
-    engine.persist_index_results(&result, None).unwrap();
+    engine.persist_index_results(&result, Some("test")).unwrap();
 
-    let (_cp, sp) = engine.compact_graph(&files);
+    let (_cp, sp) = engine.compact_graph(&files, Some("test"));
 
     // Structural symbols should not be pruned
     let graph = engine.lock_graph().unwrap();
@@ -574,7 +574,7 @@ fn compact_prunes_low_value_chunks_beyond_max() {
         .collect();
 
     let result = make_index_result(vec![], chunks, files.clone(), vec![]);
-    engine.persist_index_results(&result, None).unwrap();
+    engine.persist_index_results(&result, Some("test")).unwrap();
 
     // compact_graph is already called by persist if auto_compact is on.
     // The auto_compact flag is true by default, so chunks beyond the limit
@@ -613,7 +613,7 @@ fn compact_preserves_high_value_chunks() {
     chunk.non_ws_chars = 200; // large, high value
 
     let result = make_index_result(symbols, vec![chunk], files.clone(), vec![]);
-    engine.persist_index_results(&result, None).unwrap();
+    engine.persist_index_results(&result, Some("test")).unwrap();
 
     let graph = engine.lock_graph().unwrap();
     let chunk_node = graph.get_node("chunk:src/main.rs:0").unwrap();
@@ -646,12 +646,12 @@ fn compact_cold_start_redistributes_weights() {
     )];
 
     let result = make_index_result(symbols, vec![], files.clone(), vec![]);
-    engine.persist_index_results(&result, None).unwrap();
+    engine.persist_index_results(&result, Some("test")).unwrap();
 
     // With cold start, the symbol should score low enough to potentially be pruned.
     // The exact behavior depends on max_retained_symbols_per_file.
     // Just verify the compaction runs without error.
-    let (cp, sp) = engine.compact_graph(&files);
+    let (cp, sp) = engine.compact_graph(&files, Some("test"));
     // At minimum, this should not panic — the values are valid counts
     let _ = (cp, sp);
 }
@@ -728,12 +728,12 @@ fn persist_cleans_stale_chunks_on_reindex() {
         make_chunk("src/main.rs", 1, None),
     ];
     let result1 = make_index_result(vec![], chunks1, files.clone(), vec![]);
-    engine.persist_index_results(&result1, None).unwrap();
+    engine.persist_index_results(&result1, Some("test")).unwrap();
 
     // Re-index with only 1 chunk (simulating file changed)
     let chunks2 = vec![make_chunk("src/main.rs", 0, None)];
     let result2 = make_index_result(vec![], chunks2, files, vec![]);
-    engine.persist_index_results(&result2, None).unwrap();
+    engine.persist_index_results(&result2, Some("test")).unwrap();
 
     // Old chunk:src/main.rs:1 should be cleaned up by the stale cleanup logic
     // (delete_graph_nodes_by_prefix is called before re-inserting chunks)
