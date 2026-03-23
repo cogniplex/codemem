@@ -188,6 +188,10 @@ pub trait GraphBackend: Send + Sync {
     /// Recompute centrality, optionally including expensive betweenness calculation.
     fn recompute_centrality_with_options(&mut self, _include_betweenness: bool) {}
 
+    /// Recompute PageRank scoped to a single namespace, updating only that
+    /// namespace's scores in the cache. Nodes from other namespaces are unaffected.
+    fn recompute_centrality_for_namespace(&mut self, _namespace: &str) {}
+
     /// Lazily compute betweenness centrality if not yet computed.
     fn ensure_betweenness_computed(&mut self) {}
 
@@ -224,6 +228,20 @@ pub trait GraphBackend: Send + Sync {
     /// Returns a map from node ID to PageRank score.
     fn pagerank(&self, _damping: f64, _iterations: usize, _tolerance: f64) -> HashMap<String, f64> {
         HashMap::new()
+    }
+
+    /// Compute PageRank scores for nodes in a single namespace.
+    /// Only nodes belonging to `namespace` participate; cross-namespace edges are ignored.
+    /// Returns a map from node ID to PageRank score (only for nodes in the namespace).
+    /// Default is abstract; implementers must provide namespace-scoped computation.
+    fn pagerank_for_namespace(
+        &self,
+        _namespace: &str,
+        _damping: f64,
+        _iterations: usize,
+        _tolerance: f64,
+    ) -> HashMap<String, f64> {
+        panic!("pagerank_for_namespace must be implemented; default fallback violates isolation guarantee");
     }
 
     /// Run Louvain community detection at the given resolution.

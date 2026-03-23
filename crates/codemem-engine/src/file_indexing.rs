@@ -99,11 +99,14 @@ impl CodememEngine {
     }
 
     /// Reload the in-memory graph from the database.
+    ///
+    /// **Note**: This loads graph structure but does NOT recompute centrality scores.
+    /// Callers must recompute for their namespace after reloading via
+    /// `recompute_centrality_for_namespace(namespace)` to avoid cross-project PageRank pollution.
     pub fn reload_graph(&self) -> Result<(), CodememError> {
         let new_graph = codemem_storage::graph::GraphEngine::from_storage(&*self.storage)?;
         let mut graph = self.lock_graph()?;
         *graph = Box::new(new_graph);
-        graph.recompute_centrality();
         Ok(())
     }
 
@@ -751,13 +754,18 @@ impl CodememEngine {
             )
         };
 
-        // 4. Recompute centrality (PageRank only; betweenness is lazy/on-demand
-        //    because Brandes' algorithm is O(sqrt(n) * (V+E)) even with sampling,
-        //    which is too slow for large SCIP-indexed graphs with 50K+ nodes).
-        self.lock_graph()?.recompute_centrality_with_options(false);
+        // 4. Recompute centrality scoped to this namespace so cross-project
+        //    scores from other indexed repos don't pollute PageRank here.
+        //    (PageRank only; betweenness is lazy/on-demand because Brandes'
+        //    algorithm is O(sqrt(n) * (V+E)) even with sampling, which is
+        //    too slow for large SCIP-indexed graphs with 50K+ nodes.)
+        self.lock_graph()?
+            .recompute_centrality_for_namespace(options.namespace);
 
         // 5. Compute summary stats
-        let top_nodes = self.find_important_nodes(10, 0.85).unwrap_or_default();
+        let top_nodes = self
+            .find_important_nodes(10, 0.85, Some(options.namespace))
+            .unwrap_or_default();
         let community_count = self.louvain_communities(1.0).map(|c| c.len()).unwrap_or(0);
 
         // 6. Save indexes

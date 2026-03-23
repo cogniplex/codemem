@@ -1361,3 +1361,101 @@ fn label_community_no_file_paths() {
     let label = graph.label_community(&["x", "y"]);
     assert_eq!(label, "unknown");
 }
+
+// ── PageRank for Namespace Tests ────────────────────────────────────────
+
+#[test]
+fn pagerank_for_namespace_isolated_namespaces() {
+    // proj1: a -> b
+    // proj2: c -> d
+    // PageRank for proj1 should only include a and b
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(namespaced_node("a", "a.rs", Some("proj1"), NodeKind::File))
+        .unwrap();
+    graph
+        .add_node(namespaced_node("b", "b.rs", Some("proj1"), NodeKind::File))
+        .unwrap();
+    graph
+        .add_node(namespaced_node("c", "c.rs", Some("proj2"), NodeKind::File))
+        .unwrap();
+    graph
+        .add_node(namespaced_node("d", "d.rs", Some("proj2"), NodeKind::File))
+        .unwrap();
+    graph.add_edge(test_edge("a", "b")).unwrap();
+    graph.add_edge(test_edge("c", "d")).unwrap();
+    graph.compute_centrality();
+
+    // PageRank for proj1 should only include a and b
+    let ranks = graph.pagerank_for_namespace("proj1", 0.85, 100, 1e-6);
+    assert_eq!(ranks.len(), 2);
+    assert!(ranks.contains_key("a"));
+    assert!(ranks.contains_key("b"));
+    assert!(!ranks.contains_key("c"));
+    assert!(!ranks.contains_key("d"));
+
+    // PageRank for proj2 should only include c and d
+    let ranks = graph.pagerank_for_namespace("proj2", 0.85, 100, 1e-6);
+    assert_eq!(ranks.len(), 2);
+    assert!(!ranks.contains_key("a"));
+    assert!(!ranks.contains_key("b"));
+    assert!(ranks.contains_key("c"));
+    assert!(ranks.contains_key("d"));
+}
+
+#[test]
+fn pagerank_for_namespace_empty_namespace() {
+    // Graph with nodes in proj1, query for non-existent namespace
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(namespaced_node("a", "a.rs", Some("proj1"), NodeKind::File))
+        .unwrap();
+    graph
+        .add_node(namespaced_node("b", "b.rs", Some("proj1"), NodeKind::File))
+        .unwrap();
+    graph.add_edge(test_edge("a", "b")).unwrap();
+    graph.compute_centrality();
+
+    // PageRank for non-existent namespace should be empty
+    let ranks = graph.pagerank_for_namespace("nonexistent", 0.85, 100, 1e-6);
+    assert!(ranks.is_empty());
+}
+
+#[test]
+fn pagerank_for_namespace_cross_namespace_edges_ignored() {
+    // a (proj1) --CALLS--> b (proj2)
+    // PageRank for proj1 should NOT flow to b
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(namespaced_node(
+            "a",
+            "fn_a",
+            Some("proj1"),
+            NodeKind::Function,
+        ))
+        .unwrap();
+    graph
+        .add_node(namespaced_node(
+            "b",
+            "fn_b",
+            Some("proj2"),
+            NodeKind::Function,
+        ))
+        .unwrap();
+    graph
+        .add_edge(typed_edge("a", "b", RelationshipType::Calls))
+        .unwrap();
+    graph.compute_centrality();
+
+    // PageRank for proj1 should only include a
+    let ranks = graph.pagerank_for_namespace("proj1", 0.85, 100, 1e-6);
+    assert_eq!(ranks.len(), 1);
+    assert!(ranks.contains_key("a"));
+    assert!(!ranks.contains_key("b"));
+
+    // PageRank for proj2 should only include b
+    let ranks = graph.pagerank_for_namespace("proj2", 0.85, 100, 1e-6);
+    assert_eq!(ranks.len(), 1);
+    assert!(!ranks.contains_key("a"));
+    assert!(ranks.contains_key("b"));
+}

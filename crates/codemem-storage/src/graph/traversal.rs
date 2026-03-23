@@ -441,6 +441,10 @@ impl GraphBackend for GraphEngine {
         GraphEngine::recompute_centrality_with_options(self, include_betweenness);
     }
 
+    fn recompute_centrality_for_namespace(&mut self, namespace: &str) {
+        GraphEngine::recompute_centrality_for_namespace(self, namespace);
+    }
+
     fn ensure_betweenness_computed(&mut self) {
         GraphEngine::ensure_betweenness_computed(self);
     }
@@ -474,6 +478,16 @@ impl GraphBackend for GraphEngine {
 
     fn pagerank(&self, damping: f64, iterations: usize, tolerance: f64) -> HashMap<String, f64> {
         GraphEngine::pagerank(self, damping, iterations, tolerance)
+    }
+
+    fn pagerank_for_namespace(
+        &self,
+        namespace: &str,
+        damping: f64,
+        iterations: usize,
+        tolerance: f64,
+    ) -> HashMap<String, f64> {
+        GraphEngine::pagerank_for_namespace(self, namespace, damping, iterations, tolerance)
     }
 
     fn louvain_communities(&self, resolution: f64) -> Vec<Vec<String>> {
