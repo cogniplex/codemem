@@ -59,7 +59,9 @@ impl CodememEngine {
         seen_files: &HashSet<String>,
         namespace: Option<&str>,
     ) -> (usize, usize) {
-        let namespace = namespace.expect("compact_graph requires explicit namespace to prevent cross-project PageRank pollution");
+        let namespace = namespace.expect(
+            "compact_graph requires explicit namespace to prevent cross-project PageRank pollution",
+        );
 
         let mut graph = match self.lock_graph() {
             Ok(g) => g,

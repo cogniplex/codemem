@@ -645,7 +645,9 @@ impl McpServer {
         let damping = args.get("damping").and_then(|v| v.as_f64()).unwrap_or(0.85);
         // Validate damping is in (0, 1)
         if damping <= 0.0 || damping >= 1.0 {
-            return ToolResult::tool_error(format!("damping must be in range (0, 1), got {damping}"));
+            return ToolResult::tool_error(format!(
+                "damping must be in range (0, 1), got {damping}"
+            ));
         }
 
         let namespace = args.get("namespace").and_then(|v| v.as_str());

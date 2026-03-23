@@ -284,7 +284,8 @@ impl GraphEngine {
     /// Stale scores for deleted nodes in this namespace are evicted.
     pub fn recompute_centrality_for_namespace(&mut self, namespace: &str) {
         // Get set of node IDs currently in this namespace
-        let current_node_ids: HashSet<String> = self.nodes
+        let current_node_ids: HashSet<String> = self
+            .nodes
             .iter()
             .filter(|(_, n)| n.namespace.as_deref() == Some(namespace))
             .map(|(id, _)| id.clone())
@@ -293,7 +294,8 @@ impl GraphEngine {
         // Evict stale scores: remove cached entries for deleted nodes in this namespace
         self.cached_pagerank.retain(|id, _| {
             // Keep score if node doesn't exist OR node belongs to different namespace
-            self.nodes.get(id)
+            self.nodes
+                .get(id)
                 .map(|n| n.namespace.as_deref() != Some(namespace))
                 .unwrap_or(true) // Keep if node doesn't exist (safe fallback)
         });

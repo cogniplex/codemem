@@ -728,12 +728,16 @@ fn persist_cleans_stale_chunks_on_reindex() {
         make_chunk("src/main.rs", 1, None),
     ];
     let result1 = make_index_result(vec![], chunks1, files.clone(), vec![]);
-    engine.persist_index_results(&result1, Some("test")).unwrap();
+    engine
+        .persist_index_results(&result1, Some("test"))
+        .unwrap();
 
     // Re-index with only 1 chunk (simulating file changed)
     let chunks2 = vec![make_chunk("src/main.rs", 0, None)];
     let result2 = make_index_result(vec![], chunks2, files, vec![]);
-    engine.persist_index_results(&result2, Some("test")).unwrap();
+    engine
+        .persist_index_results(&result2, Some("test"))
+        .unwrap();
 
     // Old chunk:src/main.rs:1 should be cleaned up by the stale cleanup logic
     // (delete_graph_nodes_by_prefix is called before re-inserting chunks)

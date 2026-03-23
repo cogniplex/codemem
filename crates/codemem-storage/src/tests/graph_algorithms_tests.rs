@@ -1031,10 +1031,20 @@ fn pagerank_for_namespace_cross_namespace_edges_ignored() {
     // PageRank for proj1 should NOT flow to b
     let mut graph = GraphEngine::new();
     graph
-        .add_node(namespaced_node("a", "fn_a", Some("proj1"), NodeKind::Function))
+        .add_node(namespaced_node(
+            "a",
+            "fn_a",
+            Some("proj1"),
+            NodeKind::Function,
+        ))
         .unwrap();
     graph
-        .add_node(namespaced_node("b", "fn_b", Some("proj2"), NodeKind::Function))
+        .add_node(namespaced_node(
+            "b",
+            "fn_b",
+            Some("proj2"),
+            NodeKind::Function,
+        ))
         .unwrap();
     graph
         .add_edge(typed_edge("a", "b", RelationshipType::Calls))
