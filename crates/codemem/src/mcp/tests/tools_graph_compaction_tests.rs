@@ -168,7 +168,7 @@ fn compaction_prunes_low_score_chunks() {
 
     let mut seen = std::collections::HashSet::new();
     seen.insert(file_path.to_string());
-    let (chunks_pruned, _symbols_pruned) = server.engine.compact_graph(&seen);
+    let (chunks_pruned, _symbols_pruned) = server.engine.compact_graph(&seen, Some("test"));
 
     // With 15 chunks and max_retained_chunks_per_file=10, at least some should be pruned
     assert!(
@@ -284,7 +284,7 @@ fn compaction_preserves_memory_linked_chunks() {
 
     let mut seen = std::collections::HashSet::new();
     seen.insert(file_path.to_string());
-    server.engine.compact_graph(&seen);
+    server.engine.compact_graph(&seen, Some("test"));
 
     // The memory-linked chunk (chunk:0) should survive compaction
     let graph = server.engine.lock_graph().unwrap();
@@ -485,7 +485,7 @@ fn compaction_prunes_low_score_symbols() {
 
     let mut seen = std::collections::HashSet::new();
     seen.insert(file_path.to_string());
-    let (_chunks_pruned, symbols_pruned) = server.engine.compact_graph(&seen);
+    let (_chunks_pruned, symbols_pruned) = server.engine.compact_graph(&seen, Some("test"));
 
     // With 20 symbols and max_retained_symbols_per_file=15, some should be pruned
     assert!(
@@ -573,7 +573,7 @@ fn compaction_preserves_public_symbols() {
 
     let mut seen = std::collections::HashSet::new();
     seen.insert(file_path.to_string());
-    let (_chunks_pruned, symbols_pruned) = server.engine.compact_graph(&seen);
+    let (_chunks_pruned, symbols_pruned) = server.engine.compact_graph(&seen, Some("test"));
 
     // K = max(15, 20 public) = 20, so no public symbols should be pruned
     assert_eq!(
@@ -703,7 +703,7 @@ fn compaction_preserves_structural_anchors() {
 
     let mut seen = std::collections::HashSet::new();
     seen.insert(file_path.to_string());
-    let (_chunks_pruned, symbols_pruned) = server.engine.compact_graph(&seen);
+    let (_chunks_pruned, symbols_pruned) = server.engine.compact_graph(&seen, Some("test"));
 
     // Some private functions should be pruned (23 total, K=15)
     assert!(

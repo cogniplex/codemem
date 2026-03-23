@@ -5,6 +5,115 @@ use petgraph::Direction;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 impl GraphEngine {
+    /// Compute PageRank scores for nodes in a single namespace using power iteration.
+    ///
+    /// Only nodes belonging to `namespace` participate. Edges that cross into other
+    /// namespaces are ignored so that unrelated projects cannot inflate or deflate
+    /// centrality scores within this namespace.
+    ///
+    /// Returns a map from node ID to PageRank score (only for nodes in the namespace).
+    pub fn pagerank_for_namespace(
+        &self,
+        namespace: &str,
+        damping: f64,
+        iterations: usize,
+        tolerance: f64,
+    ) -> HashMap<String, f64> {
+        // Collect petgraph indices for nodes that belong to this namespace.
+        let ns_indices: Vec<NodeIndex> = self
+            .graph
+            .node_indices()
+            .filter(|&idx| {
+                self.graph
+                    .node_weight(idx)
+                    .and_then(|id| self.nodes.get(id))
+                    .and_then(|n| n.namespace.as_deref())
+                    == Some(namespace)
+            })
+            .collect();
+
+        let n = ns_indices.len();
+        if n == 0 {
+            tracing::debug!(
+                namespace = %namespace,
+                "PageRank requested for namespace with no nodes"
+            );
+            return HashMap::new();
+        }
+
+        let ns_id_set: HashSet<NodeIndex> = ns_indices.iter().copied().collect();
+
+        let idx_pos: HashMap<NodeIndex, usize> = ns_indices
+            .iter()
+            .enumerate()
+            .map(|(i, &idx)| (idx, i))
+            .collect();
+
+        let nf = n as f64;
+        let initial = 1.0 / nf;
+        let mut scores = vec![initial; n];
+
+        // Out-degree counting only edges that stay within the namespace.
+        // Edges leaving the namespace are ignored — their score contribution
+        // is lost from the namespace (a form of implicit sink), keeping scores
+        // local to the namespace for isolated PageRank computation.
+        let out_degree: Vec<usize> = ns_indices
+            .iter()
+            .map(|&idx| {
+                self.graph
+                    .neighbors_directed(idx, Direction::Outgoing)
+                    .filter(|nb| ns_id_set.contains(nb))
+                    .count()
+            })
+            .collect();
+
+        for _ in 0..iterations {
+            let mut new_scores = vec![(1.0 - damping) / nf; n];
+
+            for (i, &idx) in ns_indices.iter().enumerate() {
+                let deg = out_degree[i];
+                if deg == 0 {
+                    // No in-namespace edges: distribute score evenly within namespace.
+                    // (Note: may have cross-namespace edges, but they don't contribute
+                    // to in-namespace PageRank; score remains in namespace.)
+                    let share = damping * scores[i] / nf;
+                    for ns in new_scores.iter_mut() {
+                        *ns += share;
+                    }
+                } else {
+                    let share = damping * scores[i] / deg as f64;
+                    for neighbor in self.graph.neighbors_directed(idx, Direction::Outgoing) {
+                        if let Some(&pos) = idx_pos.get(&neighbor) {
+                            new_scores[pos] += share;
+                        }
+                    }
+                }
+            }
+
+            let diff: f64 = scores
+                .iter()
+                .zip(new_scores.iter())
+                .map(|(a, b)| (a - b).abs())
+                .sum();
+
+            scores = new_scores;
+
+            if diff < tolerance {
+                break;
+            }
+        }
+
+        ns_indices
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &idx)| {
+                self.graph
+                    .node_weight(idx)
+                    .map(|id| (id.clone(), scores[i]))
+            })
+            .collect()
+    }
+
     /// Compute PageRank scores for all nodes using power iteration.
     ///
     /// - `damping`: probability of following an edge (default 0.85)

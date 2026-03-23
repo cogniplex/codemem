@@ -218,7 +218,11 @@ pub async fn get_pagerank(
     let namespace = query.namespace.clone();
 
     let result = state.server.engine.with_graph(|graph| {
-        let scores = graph.pagerank(0.85, 100, 1e-6);
+        let scores = graph.pagerank(
+            codemem_core::PAGERANK_DAMPING_DEFAULT,
+            codemem_core::PAGERANK_ITERATIONS_DEFAULT,
+            codemem_core::PAGERANK_TOLERANCE_DEFAULT,
+        );
 
         let mut entries: Vec<PagerankEntry> = scores
             .into_iter()

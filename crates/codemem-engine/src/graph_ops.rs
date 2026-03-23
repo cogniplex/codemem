@@ -144,13 +144,30 @@ impl CodememEngine {
 
     /// Compute PageRank and return the top-k nodes with their scores,
     /// kinds, and labels.
+    ///
+    /// If `namespace` is provided, PageRank is computed only for nodes
+    /// in that namespace, preventing cross-project score pollution.
     pub fn find_important_nodes(
         &self,
         top_k: usize,
         damping: f64,
+        namespace: Option<&str>,
     ) -> Result<Vec<RankedNode>, CodememError> {
         let graph = self.lock_graph()?;
-        let scores = graph.pagerank(damping, 100, 1e-6);
+        let scores = if let Some(ns) = namespace {
+            graph.pagerank_for_namespace(
+                ns,
+                damping,
+                codemem_core::PAGERANK_ITERATIONS_DEFAULT,
+                codemem_core::PAGERANK_TOLERANCE_DEFAULT,
+            )
+        } else {
+            graph.pagerank(
+                damping,
+                codemem_core::PAGERANK_ITERATIONS_DEFAULT,
+                codemem_core::PAGERANK_TOLERANCE_DEFAULT,
+            )
+        };
 
         let mut sorted: Vec<(String, f64)> = scores.into_iter().collect();
         sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
