@@ -97,27 +97,32 @@ impl StorageBackend for Storage {
         }
         let conn = self.conn()?;
 
-        let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
-        let sql = format!(
-            "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, repo, git_ref, expires_at, created_at, updated_at, last_accessed_at FROM memories WHERE id IN ({})",
-            placeholders.join(",")
-        );
-
-        let mut stmt = conn.prepare(&sql).storage_err()?;
-
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
-
-        let rows = stmt
-            .query_map(params.as_slice(), MemoryRow::from_row)
-            .storage_err()?;
-
+        // SQLite limits bind parameters to 32766; chunk to stay within the limit.
+        const CHUNK_SIZE: usize = 30_000;
         let mut memories = Vec::new();
-        for row in rows {
-            let row = row.storage_err()?;
-            memories.push(row.into_memory_node()?);
+
+        for chunk in ids.chunks(CHUNK_SIZE) {
+            let placeholders: Vec<String> = (1..=chunk.len()).map(|i| format!("?{i}")).collect();
+            let sql = format!(
+                "SELECT id, content, memory_type, importance, confidence, access_count, content_hash, tags, metadata, namespace, session_id, repo, git_ref, expires_at, created_at, updated_at, last_accessed_at FROM memories WHERE id IN ({})",
+                placeholders.join(",")
+            );
+
+            let mut stmt = conn.prepare(&sql).storage_err()?;
+
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
+
+            let rows = stmt
+                .query_map(params.as_slice(), MemoryRow::from_row)
+                .storage_err()?;
+
+            for row in rows {
+                let row = row.storage_err()?;
+                memories.push(row.into_memory_node()?);
+            }
         }
         Ok(memories)
     }

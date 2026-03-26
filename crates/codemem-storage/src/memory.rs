@@ -244,42 +244,49 @@ impl Storage {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .storage_err()?;
 
-        let placeholders: String = (1..=ids.len())
-            .map(|i| format!("?{i}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
+        // SQLite limits bind parameters to 32766; chunk to stay within the limit.
+        const CHUNK_SIZE: usize = 30_000;
+        let mut total_deleted = 0;
 
-        // Delete edges referencing graph nodes linked to these memories.
-        // Uses ?N numbered params which SQLite allows to be reused in the same statement.
-        let edge_sql = format!(
-            "DELETE FROM graph_edges WHERE \
-             src IN (SELECT id FROM graph_nodes WHERE memory_id IN ({placeholders})) \
-             OR dst IN (SELECT id FROM graph_nodes WHERE memory_id IN ({placeholders})) \
-             OR src IN ({placeholders}) OR dst IN ({placeholders})"
-        );
-        tx.execute(&edge_sql, params.as_slice()).storage_err()?;
+        for chunk in ids.chunks(CHUNK_SIZE) {
+            let placeholders: String = (1..=chunk.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
 
-        // Delete graph nodes linked to these memories (by memory_id column or by id)
-        let node_sql = format!(
-            "DELETE FROM graph_nodes WHERE memory_id IN ({placeholders}) OR id IN ({placeholders})"
-        );
-        tx.execute(&node_sql, params.as_slice()).storage_err()?;
+            // Delete edges referencing graph nodes linked to these memories.
+            // Uses ?N numbered params which SQLite allows to be reused in the same statement.
+            let edge_sql = format!(
+                "DELETE FROM graph_edges WHERE \
+                 src IN (SELECT id FROM graph_nodes WHERE memory_id IN ({placeholders})) \
+                 OR dst IN (SELECT id FROM graph_nodes WHERE memory_id IN ({placeholders})) \
+                 OR src IN ({placeholders}) OR dst IN ({placeholders})"
+            );
+            tx.execute(&edge_sql, params.as_slice()).storage_err()?;
 
-        // Delete embeddings
-        let emb_sql = format!("DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})");
-        tx.execute(&emb_sql, params.as_slice()).storage_err()?;
+            // Delete graph nodes linked to these memories (by memory_id column or by id)
+            let node_sql = format!(
+                "DELETE FROM graph_nodes WHERE memory_id IN ({placeholders}) OR id IN ({placeholders})"
+            );
+            tx.execute(&node_sql, params.as_slice()).storage_err()?;
 
-        // Delete the memories themselves
-        let mem_sql = format!("DELETE FROM memories WHERE id IN ({placeholders})");
-        let deleted = tx.execute(&mem_sql, params.as_slice()).storage_err()?;
+            // Delete embeddings
+            let emb_sql =
+                format!("DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})");
+            tx.execute(&emb_sql, params.as_slice()).storage_err()?;
+
+            // Delete the memories themselves
+            let mem_sql = format!("DELETE FROM memories WHERE id IN ({placeholders})");
+            total_deleted += tx.execute(&mem_sql, params.as_slice()).storage_err()?;
+        }
 
         tx.commit().storage_err()?;
 
-        Ok(deleted)
+        Ok(total_deleted)
     }
 
     /// List all memory IDs with an optional limit.
