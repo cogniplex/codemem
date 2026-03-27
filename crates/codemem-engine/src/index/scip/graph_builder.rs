@@ -50,11 +50,33 @@ pub fn build_graph(
     // Also skip wildcard ambient module declarations (e.g., `declare module '*.css'`)
     // which act as catch-all type stubs — every matching import resolves to them,
     // creating thousands of useless edges with massive fan-in.
-    let source_defs: Vec<&ScipDefinition> = scip
+    // Stage 1: Filter by file path and wildcard module (cheap string checks).
+    let path_filtered: Vec<&ScipDefinition> = scip
         .definitions
         .iter()
         .filter(|d| is_source_path(&d.file_path) && !is_wildcard_module(&d.qualified_name))
         .collect();
+
+    // Stage 2: Parse SCIP symbols once, use for both noise filtering and containment chains.
+    // This avoids double-parsing (is_noise_definition + extract_containment_chain both need it).
+    let mut source_defs: Vec<&ScipDefinition> = Vec::with_capacity(path_filtered.len());
+    let mut parsed_symbols: Vec<scip::types::Symbol> = Vec::with_capacity(path_filtered.len());
+    for def in &path_filtered {
+        let parsed = match scip::symbol::parse_symbol(&def.scip_symbol) {
+            Ok(p) => p,
+            Err(_) => {
+                // Can't parse — keep it to be safe
+                source_defs.push(def);
+                parsed_symbols.push(scip::types::Symbol::default());
+                continue;
+            }
+        };
+        if is_noise_symbol(def, &parsed) {
+            continue;
+        }
+        source_defs.push(def);
+        parsed_symbols.push(parsed);
+    }
 
     // Build a set of defined symbol strings -> qualified names for edge resolution.
     let mut symbol_to_qname: HashMap<&str, &str> = HashMap::new();
@@ -72,10 +94,10 @@ pub fn build_graph(
     // Key: parent qname, Value: vec of (child label, tier3 category like "fields"/"type_params")
     let mut folded_children: HashMap<String, Vec<(String, &'static str)>> = HashMap::new();
 
-    // Pre-compute containment chains for all definitions (needed for tier 3 parent lookup).
-    let def_chains: Vec<Vec<(String, NodeKind)>> = source_defs
+    // Build containment chains from pre-parsed symbols (no re-parsing needed).
+    let def_chains: Vec<Vec<(String, NodeKind)>> = parsed_symbols
         .iter()
-        .map(|d| extract_containment_chain(&d.scip_symbol))
+        .map(extract_containment_chain_from_parsed)
         .collect();
 
     for (def_idx, def) in source_defs.iter().enumerate() {
@@ -535,14 +557,14 @@ pub fn build_graph(
         }
 
         // Pick the most specific role for each reference. Priority:
-        //   IMPORT > WRITE > READ > generic CALLS
+        //   IMPORT > WRITE > READ > kind-aware fallback
         // A reference can have multiple role flags (e.g., IMPORT + READ_ACCESS),
         // but we emit one edge per reference to avoid double-counting in
         // PageRank — the more specific role subsumes the less specific one.
         //
         // scip-go workaround: scip-go sets READ_ACCESS on ALL references
         // without semantic differentiation. When ONLY READ_ACCESS is set
-        // (no IMPORT, WRITE), fall through to CALLS.
+        // (no IMPORT, WRITE), fall through to the kind-aware default.
         let semantic_mask = ROLE_IMPORT | ROLE_WRITE_ACCESS | ROLE_READ_ACCESS;
         let is_scip_go_generic = r.role_bitmask & semantic_mask == ROLE_READ_ACCESS;
 
@@ -553,7 +575,17 @@ pub fn build_graph(
         } else if is_read_ref(r.role_bitmask) && !is_scip_go_generic {
             (RelationshipType::Reads, 0.3)
         } else {
-            (RelationshipType::Calls, 1.0)
+            // When the role bitmask is generic (no semantic flags), use the
+            // target node's kind to pick the correct relationship. A reference
+            // to a class is a type dependency, not a function call.
+            match target_kind {
+                Some(NodeKind::Class | NodeKind::Interface | NodeKind::Trait | NodeKind::Type) => {
+                    (RelationshipType::DependsOn, 0.3)
+                }
+                Some(NodeKind::Module | NodeKind::Package) => (RelationshipType::Imports, 0.5),
+                Some(NodeKind::Constant) => (RelationshipType::Reads, 0.3),
+                _ => (RelationshipType::Calls, 1.0),
+            }
         };
 
         let edge_prefix = rel.to_string().to_lowercase();
@@ -738,6 +770,35 @@ pub fn build_graph(
         });
     }
 
+    // Filter edges whose endpoints were removed by noise filtering.
+    // Noise definitions (parameters, locals, typeLiterals) are filtered from nodes
+    // but SCIP references may still point to them, causing FK constraint failures.
+    // We also allow edges to file: and pkg: nodes which are created by the persistence
+    // layer (not in this build result's nodes vec).
+    //
+    // Additionally filter edges targeting language stdlib packages — these are the
+    // SCIP equivalent of the ast-grep call blocklist. Calls to TS builtins (Array,
+    // Promise, string) and Python stdlib (os, json, re) add no structural value.
+    let valid_node_ids: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    let edge_count_before = edges.len();
+    edges.retain(|e| {
+        // Drop edges to language stdlib packages
+        if is_stdlib_package(&e.dst) {
+            return false;
+        }
+        let src_ok = valid_node_ids.contains(e.src.as_str())
+            || e.src.starts_with("file:")
+            || e.src.starts_with("pkg:");
+        let dst_ok = valid_node_ids.contains(e.dst.as_str())
+            || e.dst.starts_with("file:")
+            || e.dst.starts_with("pkg:");
+        src_ok && dst_ok
+    });
+    let edges_dropped = edge_count_before - edges.len();
+    if edges_dropped > 0 {
+        tracing::debug!("Dropped {edges_dropped} SCIP edges referencing filtered/stdlib nodes");
+    }
+
     ScipBuildResult {
         nodes,
         edges,
@@ -773,7 +834,7 @@ fn is_source_path(path: &str) -> bool {
         return false;
     }
     // Reject common non-source paths across languages
-    let reject = [
+    let reject_dirs = [
         "node_modules/",
         ".venv/",
         "site-packages/",
@@ -782,8 +843,114 @@ fn is_source_path(path: &str) -> bool {
         ".m2/",
         "/go-build/",
         "vendor/", // Go vendored deps
+        "dist/",
+        "build/",
     ];
-    !reject.iter().any(|r| path.contains(r))
+    if reject_dirs.iter().any(|r| path.contains(r)) {
+        return false;
+    }
+    // Reject generated code directories and output files
+    if path.contains("__generated__") || path.contains(".generated.") {
+        return false;
+    }
+    // Reject bundled/minified JS output
+    if path.ends_with(".bundle.js")
+        || path.ends_with(".min.js")
+        || path.ends_with(".min.css")
+        || path.contains("/webpack_bundles/")
+    {
+        return false;
+    }
+    true
+}
+
+/// Fallback noise filter using SCIP descriptor suffixes.
+///
+/// This runs AFTER the primary `is_noise_kind()` filter in the reader. It catches
+/// noise that slips through when `SymbolInformation.Kind` is `UnspecifiedKind`
+/// (common with scip-go and older indexers that don't populate Kind).
+///
+/// Uses descriptor suffix metadata: parameters, type parameters, locals inside
+/// functions, positional disambiguators (trailing digits), and typeLiteral members.
+fn is_noise_symbol(def: &ScipDefinition, parsed: &scip::types::Symbol) -> bool {
+    // Skip generated code (SCIP provides this flag)
+    if def.is_generated {
+        return true;
+    }
+
+    // typeLiteral in any descriptor name (TS anonymous inline type members)
+    if parsed
+        .descriptors
+        .iter()
+        .any(|d| d.name.contains("typeLiteral"))
+    {
+        return true;
+    }
+
+    let leaf = match parsed.descriptors.last() {
+        Some(d) => d,
+        None => return false,
+    };
+
+    use scip::types::descriptor::Suffix;
+    match leaf.suffix.enum_value() {
+        // Parameters, type parameters, and locals are never graph-worthy.
+        // Local (suffix 8) is used by scip-typescript for local variables,
+        // destructured params, and function-scoped bindings.
+        Ok(Suffix::Parameter | Suffix::TypeParameter | Suffix::Local) => return true,
+        // Meta descriptors are compiler/framework metadata, not user code.
+        Ok(Suffix::Meta) => return true,
+        // Term descriptor: check context to distinguish fields from locals
+        Ok(Suffix::Term) => {
+            // Term inside a Method = local variable / destructured param.
+            let parent_suffix = parsed
+                .descriptors
+                .iter()
+                .rev()
+                .nth(1)
+                .and_then(|d| d.suffix.enum_value().ok());
+            if matches!(parent_suffix, Some(Suffix::Method)) {
+                return true;
+            }
+            // Positional disambiguator: any Term whose name ends in digits.
+            // SCIP appends digits to disambiguate anonymous/positional symbols.
+            if has_trailing_digits(&leaf.name) {
+                return true;
+            }
+        }
+        _ => {}
+    }
+
+    false
+}
+
+/// Check if a name ends with ASCII digits (SCIP positional disambiguator).
+fn has_trailing_digits(name: &str) -> bool {
+    name.len() > 1 && name.ends_with(|c: char| c.is_ascii_digit())
+}
+
+/// Check if a node ID is a language stdlib package that should not receive edges.
+///
+/// These are the SCIP equivalent of the ast-grep call blocklist — calls to
+/// TS builtins (Array, Promise, string) and Python stdlib (os, json, re)
+/// add no structural value to the knowledge graph.
+fn is_stdlib_package(node_id: &str) -> bool {
+    matches!(
+        node_id,
+        "pkg:npm:typescript"
+            | "pkg:npm:@types/node"
+            | "pkg:python:python-stdlib"
+            | "pkg:python:typing_extensions"
+            | "pkg:python:builtins"
+            | "pkg:maven:java.lang"
+            | "pkg:maven:java.util"
+            | "pkg:maven:java.io"
+            | "pkg:go:builtin"
+            | "pkg:go:fmt"
+            | "pkg:cargo:std"
+            | "pkg:cargo:core"
+            | "pkg:cargo:alloc"
+    )
 }
 
 /// Try to parse a SCIP symbol string into a package-level external node ID.
@@ -799,18 +966,13 @@ fn parse_external_node_id(scip_symbol: &str) -> Option<String> {
     Some(format!("pkg:{}:{}", package.manager, package.name))
 }
 
-/// Extract the containment chain from a SCIP symbol's descriptor chain.
+/// Extract the containment chain from a pre-parsed SCIP symbol.
 ///
 /// For a symbol like `rust-analyzer cargo foo 1.0 auth/middleware/validate_token().`,
 /// returns: `[("auth", Module), ("auth::middleware", Module), ("auth::middleware::validate_token", Function)]`.
 ///
 /// The chain represents the hierarchical nesting: file→auth→auth::middleware→validate_token.
-fn extract_containment_chain(scip_symbol: &str) -> Vec<(String, NodeKind)> {
-    let parsed = match scip::symbol::parse_symbol(scip_symbol) {
-        Ok(p) => p,
-        Err(_) => return vec![],
-    };
-
+fn extract_containment_chain_from_parsed(parsed: &scip::types::Symbol) -> Vec<(String, NodeKind)> {
     // Detect separator from scheme
     let scheme = &parsed.scheme;
     let sep = if scheme == "rust-analyzer" || scheme == "lsif-clang" {
@@ -821,7 +983,7 @@ fn extract_containment_chain(scip_symbol: &str) -> Vec<(String, NodeKind)> {
 
     let mut chain = Vec::new();
     let mut cumulative_parts: Vec<&str> = Vec::new();
-    let leaf_kind = super::infer_kind_from_parsed(&parsed);
+    let leaf_kind = super::infer_kind_from_parsed(parsed);
 
     for desc in &parsed.descriptors {
         if desc.name.is_empty() {

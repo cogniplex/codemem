@@ -44,6 +44,14 @@ pub struct MissingChange {
     pub reason: String,
 }
 
+/// A file historically coupled with changed files but absent from the diff.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MissingCoChange {
+    pub file_path: String,
+    pub coupled_with: Vec<String>,
+    pub strength: f64,
+}
+
 /// Full blast radius report for a diff.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BlastRadiusReport {
@@ -54,6 +62,7 @@ pub struct BlastRadiusReport {
     pub affected_modules: Vec<String>,
     pub risk_score: f64,
     pub missing_changes: Vec<MissingChange>,
+    pub missing_co_changes: Vec<MissingCoChange>,
     pub relevant_memories: Vec<MemorySnippet>,
 }
 
@@ -396,6 +405,10 @@ impl CodememEngine {
         let graph = self.lock_graph()?;
         let missing_changes = detect_missing_changes(&**graph, &mapping.changed_symbols, &seen);
 
+        // Missing co-change detection: files that historically change together
+        // with the diff's changed files but are absent from the diff.
+        let missing_co_changes = detect_missing_co_changes(&**graph, &mapping.changed_files);
+
         let affected_files: Vec<String> = affected_files.into_iter().collect();
         let affected_modules: Vec<String> = affected_modules.into_iter().collect();
 
@@ -407,6 +420,7 @@ impl CodememEngine {
             affected_modules,
             risk_score,
             missing_changes,
+            missing_co_changes,
             relevant_memories,
         })
     }
@@ -492,6 +506,75 @@ fn detect_missing_changes(
     }
 
     missing
+}
+
+/// Detect files historically coupled (CoChanged edges) with changed files but absent
+/// from the diff. For each missing file, collects which changed files it's coupled with
+/// and averages the coupling strength. Results are sorted by strength descending.
+fn detect_missing_co_changes(
+    graph: &dyn GraphBackend,
+    changed_files: &[String],
+) -> Vec<MissingCoChange> {
+    let changed_set: HashSet<&str> = changed_files.iter().map(|s| s.as_str()).collect();
+
+    // Map: missing_file_id -> Vec<(coupled_changed_file, weight)>
+    let mut candidates: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+
+    for file_id in changed_files {
+        let edges = graph.get_edges(file_id).unwrap_or_default();
+        for edge in &edges {
+            if edge.relationship != RelationshipType::CoChanged {
+                continue;
+            }
+            // Find the other end of the edge
+            let other = if edge.src == *file_id {
+                &edge.dst
+            } else {
+                &edge.src
+            };
+            // Skip files already in the diff
+            if changed_set.contains(other.as_str()) {
+                continue;
+            }
+            // Strip "file:" prefix for display
+            let file_path = file_id.strip_prefix("file:").unwrap_or(file_id);
+            candidates
+                .entry(other.clone())
+                .or_default()
+                .push((file_path.to_string(), edge.weight));
+        }
+    }
+
+    // Minimum average coupling strength to surface a missing co-change.
+    // Below this threshold, the coupling is too weak to be actionable.
+    const MIN_CO_CHANGE_STRENGTH: f64 = 0.3;
+
+    let mut result: Vec<MissingCoChange> = candidates
+        .into_iter()
+        .filter_map(|(file_id, couplings)| {
+            let strength = couplings.iter().map(|(_, w)| w).sum::<f64>() / couplings.len() as f64;
+            if strength < MIN_CO_CHANGE_STRENGTH {
+                return None;
+            }
+            let coupled_with = couplings.into_iter().map(|(f, _)| f).collect();
+            let file_path = file_id
+                .strip_prefix("file:")
+                .unwrap_or(&file_id)
+                .to_string();
+            Some(MissingCoChange {
+                file_path,
+                coupled_with,
+                strength,
+            })
+        })
+        .collect();
+
+    result.sort_by(|a, b| {
+        b.strength
+            .partial_cmp(&a.strength)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    result
 }
 
 #[cfg(test)]

@@ -908,3 +908,218 @@ fn test_intra_module_edges_not_collapsed() {
         "inter-function calls in a module should NOT be collapsed"
     );
 }
+
+// ── Noise filtering tests ────────────────────────────────────────────
+
+/// Helper: parse a SCIP symbol and run is_noise_symbol on a def with that symbol.
+fn check_noise(scip_symbol: &str, file_path: &str, is_generated: bool) -> bool {
+    let mut def = make_def(scip_symbol, "qn", file_path, NodeKind::Function, 1, 1);
+    def.is_generated = is_generated;
+    let parsed = scip::symbol::parse_symbol(scip_symbol).unwrap_or_default();
+    is_noise_symbol(&def, &parsed)
+}
+
+#[test]
+fn noise_filter_skips_generated_code() {
+    // File path filter catches __generated__
+    assert!(!is_source_path("src/__generated__/graphql.ts"));
+
+    // is_generated flag
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/types#Query.",
+        "src/types.ts",
+        true
+    ));
+}
+
+#[test]
+fn noise_filter_skips_bundle_files() {
+    assert!(!is_source_path(
+        "frontend/static/webpack_bundles/partnerPortal.bundle.js"
+    ));
+    assert!(!is_source_path("dist/app.min.js"));
+    assert!(!is_source_path("build/output.js"));
+}
+
+#[test]
+fn noise_filter_skips_type_literals() {
+    // typeLiteral in descriptor name
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/graphql#QueryArgs.typeLiteral103.first.",
+        "src/graphql.ts",
+        false
+    ));
+}
+
+#[test]
+fn noise_filter_skips_parameters() {
+    // Suffix::Parameter — function parameter
+    // SCIP parameter suffix is `(`name`)`
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/auth#validate().(token)",
+        "src/auth.ts",
+        false
+    ));
+}
+
+#[test]
+fn noise_filter_skips_type_parameters() {
+    // Suffix::TypeParameter — generic T
+    // SCIP type parameter suffix is `[`name`]`
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/utils#identity().[T]",
+        "src/utils.ts",
+        false
+    ));
+}
+
+#[test]
+fn noise_filter_skips_locals_inside_methods() {
+    // Term inside a Method = local variable (Suffix::Term is `.`, Method is `().`)
+    // SCIP: `auth#validate().token.` — `token` is a Term inside `validate` (Method)
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/auth#validate().token.",
+        "src/auth.ts",
+        false
+    ));
+}
+
+#[test]
+fn noise_filter_skips_positional_terms() {
+    // Term with trailing digits = positional disambiguator
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/component#Component.name0.",
+        "src/component.ts",
+        false
+    ));
+    assert!(check_noise(
+        "scip-typescript npm homepage 1.0.0 src/component#Component.key21.",
+        "src/component.ts",
+        false
+    ));
+}
+
+#[test]
+fn noise_filter_keeps_real_functions() {
+    // Method suffix `().` — real function declarations
+    assert!(!check_noise(
+        "scip-typescript npm homepage 1.0.0 src/auth#validateToken().",
+        "src/auth.ts",
+        false
+    ));
+    assert!(!check_noise(
+        "scip-typescript npm homepage 1.0.0 src/hooks#useCustomCompareMemo().",
+        "src/hooks.ts",
+        false
+    ));
+}
+
+#[test]
+fn noise_filter_keeps_class_fields() {
+    // Term inside a Type (not Method) = class field — should be kept
+    // SCIP: `Track#title.` — `title` is a Term inside `Track` (Type)
+    assert!(!check_noise(
+        "scip-typescript npm homepage 1.0.0 src/types#Track#title.",
+        "src/types.ts",
+        false
+    ));
+}
+
+#[test]
+fn noise_filter_end_to_end_build_graph() {
+    let scip = ScipReadResult {
+        project_root: String::new(),
+        definitions: vec![
+            // Real function (Method suffix) — should survive
+            make_def(
+                "scip-typescript npm pkg 1.0.0 src/auth#validate().",
+                "auth.validate",
+                "src/auth.ts",
+                NodeKind::Function,
+                1,
+                10,
+            ),
+            // typeLiteral — should be filtered
+            make_def(
+                "scip-typescript npm pkg 1.0.0 src/graphql#Query.typeLiteral5.first.",
+                "graphql.Query.typeLiteral5.first",
+                "src/graphql.ts",
+                NodeKind::Function,
+                1,
+                1,
+            ),
+            // Parameter — should be filtered
+            make_def(
+                "scip-typescript npm pkg 1.0.0 src/auth#validate().(token)",
+                "auth.validate.token",
+                "src/auth.ts",
+                NodeKind::Function,
+                1,
+                1,
+            ),
+            // Generated file — should be filtered by is_source_path
+            make_def(
+                "scip-typescript npm pkg 1.0.0 src/__generated__/types#Query.",
+                "gen.Query",
+                "src/__generated__/types.ts",
+                NodeKind::Class,
+                1,
+                5,
+            ),
+            // Bundle file — should be filtered by is_source_path
+            make_def(
+                "scip-typescript npm pkg 1.0.0 static/app.bundle#init().",
+                "app.init",
+                "static/app.bundle.js",
+                NodeKind::Function,
+                1,
+                1,
+            ),
+            // Real class (Type suffix) — should survive
+            make_def(
+                "scip-typescript npm pkg 1.0.0 src/payments#PaymentProcessor#",
+                "payments.PaymentProcessor",
+                "src/payments.ts",
+                NodeKind::Class,
+                1,
+                20,
+            ),
+        ],
+        references: vec![],
+        externals: vec![],
+        covered_files: vec!["src/auth.ts".to_string(), "src/payments.ts".to_string()],
+    };
+
+    let result = build_graph(&scip, Some("test-ns"), &ScipConfig::default());
+    let sym_nodes: Vec<_> = result
+        .nodes
+        .iter()
+        .filter(|n| n.payload.get("source").and_then(|v| v.as_str()) == Some("scip"))
+        .collect();
+
+    let node_ids: Vec<&str> = sym_nodes.iter().map(|n| n.id.as_str()).collect();
+    assert!(
+        node_ids.contains(&"sym:auth.validate"),
+        "real function should survive, got: {node_ids:?}"
+    );
+    assert!(
+        node_ids.contains(&"sym:payments.PaymentProcessor"),
+        "real class should survive, got: {node_ids:?}"
+    );
+    assert!(
+        !node_ids.iter().any(|id| id.contains("typeLiteral")),
+        "typeLiteral should be filtered"
+    );
+    assert!(
+        !node_ids.iter().any(|id| id.contains("token")),
+        "parameter should be filtered"
+    );
+    assert!(
+        !node_ids.iter().any(|id| id.contains("gen.Query")),
+        "generated file should be filtered"
+    );
+    assert!(
+        !node_ids.iter().any(|id| id.contains("app.init")),
+        "bundle file should be filtered"
+    );
+}

@@ -412,21 +412,19 @@ Get symbol dependency graph. Replaces the former `get_dependencies` and `get_imp
 
 ### find_important_nodes
 
-Run PageRank to find the most important/central nodes. When a namespace is specified, PageRank is computed only over nodes in that namespace, preventing cross-project score pollution. Replaces the former `get_pagerank` tool.
+Run PageRank to find the most important/central nodes. Replaces the former `get_pagerank` tool.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `top_k` | integer | no | `20` | Number of top-ranked nodes to return (bounded to max 1000) |
-| `damping` | number | no | `0.85` | PageRank damping factor; must be in range (0, 1) |
-| `namespace` | string | no | -- | Restrict PageRank to nodes in this namespace; omit for global PageRank |
+| `top_k` | integer | no | `20` | Number of top-ranked nodes to return |
+| `damping` | number | no | `0.85` | PageRank damping factor |
 
 ```json
 {
   "name": "find_important_nodes",
   "arguments": {
     "top_k": 10,
-    "damping": 0.85,
-    "namespace": "codemem"
+    "damping": 0.85
   }
 }
 ```

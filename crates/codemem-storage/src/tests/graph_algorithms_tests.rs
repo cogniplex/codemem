@@ -951,6 +951,324 @@ fn louvain_with_assignment_single_node() {
 }
 
 #[test]
+fn louvain_heritage_edges_reduce_coupling() {
+    // Two clusters connected by a heritage (Inherits) bridge.
+    // The bridge weight is high enough that WITHOUT the 0.5x heritage
+    // multiplier, Louvain merges everything into one community.
+    // WITH the multiplier, the effective bridge weight drops below the
+    // threshold and the clusters stay separate.
+    //
+    // Cluster 1: a <-> b  (Contains, internal undirected weight = 2.0)
+    // Cluster 2: c <-> d  (Contains, internal undirected weight = 2.0)
+    // Bridge: b --Inherits--> c  weight=3.0
+    //         c --Inherits--> b  weight=3.0
+    //   Without 0.5x: bridge undirected = 6.0 (>> internal 2.0), merges.
+    //   With 0.5x:    bridge undirected = 3.0, still > 2.0 but modularity
+    //                 penalty for merging outweighs the gain => stays split.
+    let mut graph = GraphEngine::new();
+    for id in &["a", "b", "c", "d"] {
+        graph.add_node(file_node(id, &format!("{id}.rs"))).unwrap();
+    }
+    // Cluster 1: a <-> b (Contains edges, 1.0x multiplier)
+    graph
+        .add_edge(Edge {
+            id: "ab".to_string(),
+            src: "a".to_string(),
+            dst: "b".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "ba".to_string(),
+            src: "b".to_string(),
+            dst: "a".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    // Cluster 2: c <-> d (Contains edges, 1.0x multiplier)
+    graph
+        .add_edge(Edge {
+            id: "cd".to_string(),
+            src: "c".to_string(),
+            dst: "d".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "dc".to_string(),
+            src: "d".to_string(),
+            dst: "c".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    // Heritage bridge: b <-> c with Inherits, weight 3.0 each direction.
+    graph
+        .add_edge(Edge {
+            id: "heritage_b_c".to_string(),
+            src: "b".to_string(),
+            dst: "c".to_string(),
+            relationship: RelationshipType::Inherits,
+            weight: 3.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "heritage_c_b".to_string(),
+            src: "c".to_string(),
+            dst: "b".to_string(),
+            relationship: RelationshipType::Inherits,
+            weight: 3.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+
+    let communities = graph.louvain_communities(1.0);
+    assert_eq!(
+        communities.len(),
+        2,
+        "Heritage bridge with 0.5x multiplier should keep clusters separate, got {}: {:?}",
+        communities.len(),
+        communities
+    );
+
+    // Verify correct split: {a,b} and {c,d}
+    let comm0_set: HashSet<&str> = communities[0].iter().map(|s| s.as_str()).collect();
+    let has_ab = comm0_set.contains("a") && comm0_set.contains("b");
+    let has_cd = comm0_set.contains("c") && comm0_set.contains("d");
+    assert!(
+        has_ab || has_cd,
+        "Heritage-bridged clusters should stay separate: {:?}",
+        communities
+    );
+}
+
+#[test]
+fn louvain_non_heritage_bridge_merges_clusters() {
+    // Same topology as heritage test but with Contains (1.0x multiplier).
+    // The strong bridge should merge everything into one community,
+    // proving the heritage test is testing the multiplier.
+    let mut graph = GraphEngine::new();
+    for id in &["a", "b", "c", "d"] {
+        graph.add_node(file_node(id, &format!("{id}.rs"))).unwrap();
+    }
+    graph
+        .add_edge(Edge {
+            id: "ab".to_string(),
+            src: "a".to_string(),
+            dst: "b".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "ba".to_string(),
+            src: "b".to_string(),
+            dst: "a".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "cd".to_string(),
+            src: "c".to_string(),
+            dst: "d".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "dc".to_string(),
+            src: "d".to_string(),
+            dst: "c".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    // Same bridge but with Contains (no multiplier) instead of Inherits
+    graph
+        .add_edge(Edge {
+            id: "bridge_b_c".to_string(),
+            src: "b".to_string(),
+            dst: "c".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 3.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "bridge_c_b".to_string(),
+            src: "c".to_string(),
+            dst: "b".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 3.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+
+    let communities = graph.louvain_communities(1.0);
+    assert_eq!(
+        communities.len(),
+        1,
+        "Non-heritage bridge should merge clusters into one community, got {}: {:?}",
+        communities.len(),
+        communities
+    );
+}
+
+#[test]
+fn louvain_extends_and_implements_also_reduced() {
+    // Verify Extends and Implements also get the 0.5x multiplier.
+    // Same topology as heritage test.
+    let mut graph = GraphEngine::new();
+    for id in &["a", "b", "c", "d"] {
+        graph.add_node(file_node(id, &format!("{id}.rs"))).unwrap();
+    }
+    graph
+        .add_edge(Edge {
+            id: "ab".to_string(),
+            src: "a".to_string(),
+            dst: "b".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "ba".to_string(),
+            src: "b".to_string(),
+            dst: "a".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "cd".to_string(),
+            src: "c".to_string(),
+            dst: "d".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "dc".to_string(),
+            src: "d".to_string(),
+            dst: "c".to_string(),
+            relationship: RelationshipType::Contains,
+            weight: 1.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    // Bridge with Extends one direction, Implements the other
+    graph
+        .add_edge(Edge {
+            id: "extends_b_c".to_string(),
+            src: "b".to_string(),
+            dst: "c".to_string(),
+            relationship: RelationshipType::Extends,
+            weight: 3.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    graph
+        .add_edge(Edge {
+            id: "implements_c_b".to_string(),
+            src: "c".to_string(),
+            dst: "b".to_string(),
+            relationship: RelationshipType::Implements,
+            weight: 3.0,
+            properties: HashMap::new(),
+            created_at: chrono::Utc::now(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+
+    let communities = graph.louvain_communities(1.0);
+    assert_eq!(
+        communities.len(),
+        2,
+        "Extends/Implements bridge should keep clusters separate, got {}: {:?}",
+        communities.len(),
+        communities
+    );
+}
+
+#[test]
 fn louvain_with_assignment_all_nodes_present() {
     let mut graph = GraphEngine::new();
     for id in &["a", "b", "c"] {
@@ -964,6 +1282,84 @@ fn louvain_with_assignment_all_nodes_present() {
     assert!(assignment.contains_key("a"));
     assert!(assignment.contains_key("b"));
     assert!(assignment.contains_key("c"));
+}
+
+// ── label_community Tests ──────────────────────────────────────────────
+
+fn file_node_with_path(id: &str, label: &str, file_path: &str) -> GraphNode {
+    let mut payload = HashMap::new();
+    payload.insert(
+        "file_path".to_string(),
+        serde_json::Value::String(file_path.to_string()),
+    );
+    GraphNode {
+        id: id.to_string(),
+        kind: NodeKind::File,
+        label: label.to_string(),
+        payload,
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+#[test]
+fn label_community_single_directory() {
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(file_node_with_path("a", "login.rs", "src/auth/login.rs"))
+        .unwrap();
+    graph
+        .add_node(file_node_with_path(
+            "b",
+            "session.rs",
+            "src/auth/session.rs",
+        ))
+        .unwrap();
+    graph
+        .add_node(file_node_with_path("c", "token.rs", "src/auth/token.rs"))
+        .unwrap();
+
+    let label = graph.label_community(&["a", "b", "c"]);
+    assert_eq!(label, "auth");
+}
+
+#[test]
+fn label_community_mixed_directories() {
+    let mut graph = GraphEngine::new();
+    graph
+        .add_node(file_node_with_path("a", "login.rs", "src/auth/login.rs"))
+        .unwrap();
+    graph
+        .add_node(file_node_with_path(
+            "b",
+            "session.rs",
+            "src/auth/session.rs",
+        ))
+        .unwrap();
+    graph
+        .add_node(file_node_with_path(
+            "c",
+            "cors.rs",
+            "src/middleware/cors.rs",
+        ))
+        .unwrap();
+
+    let label = graph.label_community(&["a", "b", "c"]);
+    // "auth" has 2 members, "middleware" has 1 → "auth+middleware"
+    assert_eq!(label, "auth+middleware");
+}
+
+#[test]
+fn label_community_no_file_paths() {
+    let mut graph = GraphEngine::new();
+    graph.add_node(file_node("x", "x.rs")).unwrap();
+    graph.add_node(file_node("y", "y.rs")).unwrap();
+
+    let label = graph.label_community(&["x", "y"]);
+    assert_eq!(label, "unknown");
 }
 
 // ── PageRank for Namespace Tests ────────────────────────────────────────

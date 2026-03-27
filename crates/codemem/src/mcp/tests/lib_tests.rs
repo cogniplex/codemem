@@ -14,12 +14,12 @@ fn handle_initialize() {
 }
 
 #[test]
-fn handle_tools_list_returns_32_tools() {
+fn handle_tools_list_returns_34_tools() {
     let server = test_server();
     let resp = server.handle_request("tools/list", None, json!(2));
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 32);
+    assert_eq!(tools.len(), 34);
 
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     // Memory CRUD (7)
@@ -53,6 +53,8 @@ fn handle_tools_list_returns_32_tools() {
     // Session & Context (2)
     assert!(names.contains(&"session_checkpoint"));
     assert!(names.contains(&"session_context"));
+    // Test Impact (1)
+    assert!(names.contains(&"test_impact"));
 }
 
 #[test]

@@ -328,16 +328,63 @@ impl GraphEngine {
             .map(|(i, &idx)| (idx, i))
             .collect();
 
+        // Build a lookup from petgraph EdgeIndex -> RelationshipType.
+        // Keyed by edge ID (not src/dst pair) to handle parallel edges correctly:
+        // two edges between the same node pair with different relationships
+        // (e.g., Calls + Inherits) must each get their own multiplier.
+        let edge_rel_by_idx: HashMap<petgraph::graph::EdgeIndex, RelationshipType> = {
+            // Reverse map: (src_node_id, dst_node_id, weight) -> RelationshipType
+            // We match petgraph edges to our Edge structs by endpoint node IDs.
+            // For parallel edges, we iterate self.edges and build a multimap.
+            let mut src_dst_rels: HashMap<(&str, &str), Vec<RelationshipType>> = HashMap::new();
+            for e in self.edges.values() {
+                src_dst_rels
+                    .entry((e.src.as_str(), e.dst.as_str()))
+                    .or_default()
+                    .push(e.relationship);
+            }
+            let mut lookup = HashMap::new();
+            for edge_ref in self.graph.edge_indices() {
+                if let Some((src_idx, dst_idx)) = self.graph.edge_endpoints(edge_ref) {
+                    if let (Some(src_id), Some(dst_id)) = (
+                        self.graph.node_weight(src_idx),
+                        self.graph.node_weight(dst_idx),
+                    ) {
+                        if let Some(rels) =
+                            src_dst_rels.get_mut(&(src_id.as_str(), dst_id.as_str()))
+                        {
+                            if let Some(rel) = rels.pop() {
+                                lookup.insert(edge_ref, rel);
+                            }
+                        }
+                    }
+                }
+            }
+            lookup
+        };
+
         // Build undirected adjacency with weights.
         // Deduplicate bidirectional edges: for A->B and B->A, merge into one
         // undirected edge with combined weight.
+        // Heritage edges (Extends, Implements, Inherits) get a 0.5x multiplier
+        // to reduce coupling across inheritance boundaries in community detection.
         let mut undirected_weights: HashMap<(usize, usize), f64> = HashMap::new();
         for edge_ref in self.graph.edge_indices() {
             if let Some((src_idx, dst_idx)) = self.graph.edge_endpoints(edge_ref) {
                 let w = self.graph[edge_ref];
                 if let (Some(&si), Some(&di)) = (idx_pos.get(&src_idx), idx_pos.get(&dst_idx)) {
+                    let multiplier = edge_rel_by_idx
+                        .get(&edge_ref)
+                        .map(|rel| match rel {
+                            RelationshipType::Extends
+                            | RelationshipType::Implements
+                            | RelationshipType::Inherits => 0.5,
+                            _ => 1.0,
+                        })
+                        .unwrap_or(1.0);
+
                     let key = if si <= di { (si, di) } else { (di, si) };
-                    *undirected_weights.entry(key).or_insert(0.0) += w;
+                    *undirected_weights.entry(key).or_insert(0.0) += w * multiplier;
                 }
             }
         }
@@ -549,7 +596,6 @@ impl GraphEngine {
     ///
     /// Returns groups of node IDs. Each group is a strongly connected component
     /// where every node can reach every other node via directed edges.
-    #[cfg(test)]
     pub fn strongly_connected_components(&self) -> Vec<Vec<String>> {
         let sccs = petgraph::algo::tarjan_scc(&self.graph);
 
@@ -762,6 +808,44 @@ impl GraphEngine {
             .collect();
 
         (nodes_vec, edges_vec)
+    }
+
+    /// Label a community by the most common parent directories of its member nodes.
+    ///
+    /// Takes a list of node IDs, looks up their `file_path` payloads, extracts
+    /// parent directory names (second-to-last path component), and returns a label.
+    /// If all members share the same directory, returns that name.
+    /// If mixed, combines the two most frequent directories with `+`.
+    /// Returns `"unknown"` if no file paths are found.
+    pub fn label_community(&self, member_ids: &[&str]) -> String {
+        let mut dir_counts: HashMap<&str, usize> = HashMap::new();
+
+        for &node_id in member_ids {
+            if let Some(node) = self.nodes.get(node_id) {
+                if let Some(file_path) = node.payload.get("file_path").and_then(|v| v.as_str()) {
+                    // Extract parent directory name (second-to-last path component)
+                    if let Some(dir) = file_path.rsplit('/').nth(1) {
+                        *dir_counts.entry(dir).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        if dir_counts.is_empty() {
+            return "unknown".to_string();
+        }
+
+        let mut sorted: Vec<_> = dir_counts.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+
+        if sorted.len() == 1 {
+            sorted[0].0.to_string()
+        } else if sorted.len() <= 2 {
+            format!("{}+{}", sorted[0].0, sorted[1].0)
+        } else {
+            let extra = sorted.len() - 2;
+            format!("{}+{} +{extra} more", sorted[0].0, sorted[1].0)
+        }
     }
 
     /// Return node-to-community-ID mapping for Louvain.

@@ -472,6 +472,10 @@ impl GraphBackend for GraphEngine {
         GraphEngine::connected_components(self)
     }
 
+    fn strongly_connected_components(&self) -> Vec<Vec<String>> {
+        GraphEngine::strongly_connected_components(self)
+    }
+
     fn pagerank(&self, damping: f64, iterations: usize, tolerance: f64) -> HashMap<String, f64> {
         GraphEngine::pagerank(self, damping, iterations, tolerance)
     }

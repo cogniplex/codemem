@@ -222,3 +222,146 @@ fn blast_radius_empty_diff() {
     assert!(report.direct_dependents.is_empty());
     assert_eq!(report.risk_score, 0.0);
 }
+
+// ── missing co-change tests ───────────────────────────────────────────
+
+fn make_file_node(file_path: &str) -> GraphNode {
+    GraphNode {
+        id: format!("file:{file_path}"),
+        kind: NodeKind::File,
+        label: file_path.to_string(),
+        payload: HashMap::new(),
+        centrality: 0.0,
+        memory_id: None,
+        namespace: None,
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+fn make_cochanged_edge(src_file: &str, dst_file: &str, weight: f64) -> Edge {
+    Edge {
+        id: format!("cochanged:{src_file}->{dst_file}"),
+        src: format!("file:{src_file}"),
+        dst: format!("file:{dst_file}"),
+        relationship: RelationshipType::CoChanged,
+        weight,
+        properties: HashMap::new(),
+        created_at: chrono::Utc::now(),
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+#[test]
+fn blast_radius_detects_missing_co_changes() {
+    let engine = CodememEngine::for_testing();
+
+    {
+        let mut graph = engine.lock_graph().unwrap();
+
+        // File nodes
+        graph.add_node(make_file_node("src/auth.rs")).unwrap();
+        graph.add_node(make_file_node("src/auth_test.rs")).unwrap();
+        graph.add_node(make_file_node("src/config.rs")).unwrap();
+
+        // A symbol in the changed file so diff_to_symbols picks it up
+        let sym = make_sym_node("auth::validate_token", "src/auth.rs", 10, 16);
+        graph.add_node(sym).unwrap();
+
+        // CoChanged edges: auth.rs <-> auth_test.rs (strong), auth.rs <-> config.rs (weaker)
+        graph
+            .add_edge(make_cochanged_edge("src/auth.rs", "src/auth_test.rs", 0.9))
+            .unwrap();
+        graph
+            .add_edge(make_cochanged_edge("src/auth.rs", "src/config.rs", 0.5))
+            .unwrap();
+    }
+
+    // Diff only touches src/auth.rs — auth_test.rs and config.rs should be flagged as missing
+    let report = engine.blast_radius(SAMPLE_DIFF, 1).unwrap();
+
+    assert!(
+        !report.missing_co_changes.is_empty(),
+        "Should detect missing co-changes"
+    );
+
+    // auth_test.rs should be present (strongly coupled)
+    let auth_test = report
+        .missing_co_changes
+        .iter()
+        .find(|m| m.file_path == "src/auth_test.rs");
+    assert!(
+        auth_test.is_some(),
+        "Should flag auth_test.rs as missing co-change"
+    );
+    let auth_test = auth_test.unwrap();
+    assert!(
+        (auth_test.strength - 0.9).abs() < 0.01,
+        "Strength should match the edge weight"
+    );
+    assert!(
+        auth_test.coupled_with.contains(&"src/auth.rs".to_string()),
+        "Should record which changed file it's coupled with"
+    );
+
+    // config.rs should also be present
+    assert!(
+        report
+            .missing_co_changes
+            .iter()
+            .any(|m| m.file_path == "src/config.rs"),
+        "Should flag config.rs as missing co-change"
+    );
+
+    // Results should be sorted by strength descending
+    if report.missing_co_changes.len() >= 2 {
+        assert!(
+            report.missing_co_changes[0].strength >= report.missing_co_changes[1].strength,
+            "Missing co-changes should be sorted by strength descending"
+        );
+    }
+}
+
+#[test]
+fn blast_radius_no_missing_co_changes_when_all_present() {
+    let engine = CodememEngine::for_testing();
+
+    // Create a diff that touches both auth.rs and auth_test.rs
+    let diff = r#"diff --git a/src/auth.rs b/src/auth.rs
+--- a/src/auth.rs
++++ b/src/auth.rs
+@@ -10,6 +10,7 @@ fn validate_token(token: &str) -> bool {
+     let decoded = decode(token);
++    log::info!("validating");
+     true
+ }
+diff --git a/src/auth_test.rs b/src/auth_test.rs
+--- a/src/auth_test.rs
++++ b/src/auth_test.rs
+@@ -1,3 +1,4 @@
+ fn test_validate() {
++    assert!(true);
+ }
+"#;
+
+    {
+        let mut graph = engine.lock_graph().unwrap();
+        graph.add_node(make_file_node("src/auth.rs")).unwrap();
+        graph.add_node(make_file_node("src/auth_test.rs")).unwrap();
+
+        let sym = make_sym_node("auth::validate_token", "src/auth.rs", 10, 16);
+        graph.add_node(sym).unwrap();
+
+        graph
+            .add_edge(make_cochanged_edge("src/auth.rs", "src/auth_test.rs", 0.9))
+            .unwrap();
+    }
+
+    let report = engine.blast_radius(diff, 1).unwrap();
+    // Both files are in the diff, so no missing co-changes
+    assert!(
+        report.missing_co_changes.is_empty(),
+        "No missing co-changes when all coupled files are in the diff"
+    );
+}

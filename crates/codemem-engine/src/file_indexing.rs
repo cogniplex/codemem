@@ -756,6 +756,9 @@ impl CodememEngine {
 
         // 4. Recompute centrality scoped to this namespace so cross-project
         //    scores from other indexed repos don't pollute PageRank here.
+        //    (PageRank only; betweenness is lazy/on-demand because Brandes'
+        //    algorithm is O(sqrt(n) * (V+E)) even with sampling, which is
+        //    too slow for large SCIP-indexed graphs with 50K+ nodes.)
         self.lock_graph()?
             .recompute_centrality_for_namespace(options.namespace);
 

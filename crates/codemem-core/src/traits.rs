@@ -218,6 +218,12 @@ pub trait GraphBackend: Send + Sync {
         Vec::new()
     }
 
+    /// Find strongly connected components using Tarjan's algorithm.
+    /// Each SCC is a group where every node can reach every other via directed edges.
+    fn strongly_connected_components(&self) -> Vec<Vec<String>> {
+        Vec::new()
+    }
+
     /// Compute PageRank scores for all nodes.
     /// Returns a map from node ID to PageRank score.
     fn pagerank(&self, _damping: f64, _iterations: usize, _tolerance: f64) -> HashMap<String, f64> {
