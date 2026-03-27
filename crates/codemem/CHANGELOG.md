@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.15.0](https://github.com/cogniplex/codemem/compare/v0.14.1...v0.15.0) (2026-03-27)
+
+
+### Features
+
+* graph intelligence — SCIP noise filtering, test impact, co-change detection ([#63](https://github.com/cogniplex/codemem/issues/63)) ([5723bc6](https://github.com/cogniplex/codemem/commit/5723bc6df45b63be8bd6c2684513ee0b18c1b26a))
+
+
+### Bug Fixes
+
+* namespace-scoped PageRank to prevent cross-project score pollution ([#61](https://github.com/cogniplex/codemem/issues/61)) ([5316a89](https://github.com/cogniplex/codemem/commit/5316a892f26dc49ff3d067b55faf9507ab57a320))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.15.0 to 0.16.0
+    * codemem-engine bumped from 0.15.0 to 0.16.0
+
 ## [0.14.1](https://github.com/cogniplex/codemem/compare/v0.14.0...v0.14.1) (2026-03-18)
 
 
