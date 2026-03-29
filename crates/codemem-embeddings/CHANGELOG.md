@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.1](https://github.com/cogniplex/codemem/compare/v0.14.0...v0.14.1) (2026-03-29)
+
+
+### Bug Fixes
+
+* post-review fixes for temporal graph, Gemini provider, and migration safety ([#56](https://github.com/cogniplex/codemem/issues/56)) ([f345dc6](https://github.com/cogniplex/codemem/commit/f345dc65550d2281d204856b1757a901f0a1f338))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.16.0 to 0.17.0
+
 ## [0.14.0](https://github.com/cogniplex/codemem/compare/v0.13.1...v0.14.0) (2026-03-27)
 
 
