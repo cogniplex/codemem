@@ -53,11 +53,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Configuration
-toml = "1.0"
+toml = "1.1"
 
 # Utilities
 uuid = { version = "1", features = ["v4"] }
-sha2 = "0.10"
+sha2 = "0.11"
 thiserror = "2"
 anyhow = "1"
 dirs = "6"
