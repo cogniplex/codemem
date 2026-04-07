@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.17.0](https://github.com/cogniplex/codemem/compare/v0.16.0...v0.17.0) (2026-04-07)
+
+
+### Features
+
+* add analyze CLI command with progressive embedding ([fcd8227](https://github.com/cogniplex/codemem/commit/fcd8227c7f522ad63d1ed2257474a023c86ce25c))
+* add get_node_memories + node_coverage tools, rewrite code-mapper agent ([e2d10a3](https://github.com/cogniplex/codemem/commit/e2d10a37ab757eabde818bd0e380cdba0c3f2725))
+* diff-aware review pipeline with blast radius analysis ([#46](https://github.com/cogniplex/codemem/issues/46)) ([9285d57](https://github.com/cogniplex/codemem/commit/9285d57f8b1cf2ae8491e1cfb7ea34ec010272ad))
+* engine overhaul — MCP consolidation (40→28 tools), enhanced symbol model, 11 enrichment types, architecture fixes, and performance improvements ([9772d67](https://github.com/cogniplex/codemem/commit/9772d670a12bfe74884ad5bd4ce4d5f786e4d001))
+* **engine:** respect configured vector dimensions ([9a4d18d](https://github.com/cogniplex/codemem/commit/9a4d18decd256d3549d86cd289bda7c9453043b8))
+* graph accuracy improvements and cross-service API surface detection ([#49](https://github.com/cogniplex/codemem/issues/49)) ([e892375](https://github.com/cogniplex/codemem/commit/e892375a253ff89fc6aaffdf4f142775b21afdf9))
+* graph intelligence — SCIP noise filtering, test impact, co-change detection ([#63](https://github.com/cogniplex/codemem/issues/63)) ([5723bc6](https://github.com/cogniplex/codemem/commit/5723bc6df45b63be8bd6c2684513ee0b18c1b26a))
+* graph quality improvements — blocklist, callbacks, dead code ([#58](https://github.com/cogniplex/codemem/issues/58)) ([42e1486](https://github.com/cogniplex/codemem/commit/42e1486f4d65da0b707738989fcbaa2687645a5d))
+* **graph:** tag-based auto-linking and memory-neighbor scoring ([1403797](https://github.com/cogniplex/codemem/commit/1403797ebca46847e617e8d9a2faa9da31565e5a))
+* incremental re-indexing with symbol-level diff ([#26](https://github.com/cogniplex/codemem/issues/26)) ([872b10f](https://github.com/cogniplex/codemem/commit/872b10f05cbe35d44e04f87767dcd18c5f5c8ba7))
+* JinaBERT support, F16 default, configurable embedding model ([#68](https://github.com/cogniplex/codemem/issues/68)) ([48f423d](https://github.com/cogniplex/codemem/commit/48f423d4f85ee0174276491ea1ace35bac37d214))
+* LSP enrichment + cross-repo linking pipeline ([#33](https://github.com/cogniplex/codemem/issues/33)) ([a74bde5](https://github.com/cogniplex/codemem/commit/a74bde595b567f6c79c58ff19c134f580258348a))
+* memory expiration with opportunistic cleanup ([#41](https://github.com/cogniplex/codemem/issues/41)) ([cf8e995](https://github.com/cogniplex/codemem/commit/cf8e995df43f908ee77dea90520d3483b5a059ca))
+* **recall:** entity expansion surfaces structurally connected memories ([fce2acb](https://github.com/cogniplex/codemem/commit/fce2acb7850c2fd4ab7de44d44ac1f5009cbf6ff))
+* replace LSP enrichment with SCIP integration ([#39](https://github.com/cogniplex/codemem/issues/39)) ([b50dd29](https://github.com/cogniplex/codemem/commit/b50dd29f0c0c12718b1191d6eaf178937d41c33f))
+* scope context with repo/branch/user awareness ([#45](https://github.com/cogniplex/codemem/issues/45)) ([d6ec98f](https://github.com/cogniplex/codemem/commit/d6ec98f7f20a4246a0b1ac63b33164710525a244))
+* semantic-aware chunking with boundary splitting and signature injection ([f261fef](https://github.com/cogniplex/codemem/commit/f261fefc04d1022773a95c98b48ffa22c2590fee))
+* session continuity and persistence pipeline improvements ([#10](https://github.com/cogniplex/codemem/issues/10)) ([970b6f8](https://github.com/cogniplex/codemem/commit/970b6f899dccee81e84143ad6a8ac96f8965307c))
+* temporal graph layer — commit/PR nodes, ModifiedBy edges, temporal queries ([#52](https://github.com/cogniplex/codemem/issues/52)) ([3679b22](https://github.com/cogniplex/codemem/commit/3679b2221bf1ac7c8bcbd179e35d9726908e494b))
+
+
+### Bug Fixes
+
+* 12 correctness, safety, and pipeline fixes from code review ([#47](https://github.com/cogniplex/codemem/issues/47)) ([71d628f](https://github.com/cogniplex/codemem/commit/71d628f3f76c342c0087e107b1faad2682222068))
+* auto-create ~/.codemem directory on engine startup ([71154fb](https://github.com/cogniplex/codemem/commit/71154fbe79c8aa308015ea9048898a52480d1b6d))
+* blame enrichment now stores ownership insights for all qualifying files ([93a6571](https://github.com/cogniplex/codemem/commit/93a6571008d116893eef4ce1f9627584ef8284f0))
+* cache-through DB fallback for symbol lookups ([28bb794](https://github.com/cogniplex/codemem/commit/28bb7943435bd5055e1c6e1755b4eceb85edae2b))
+* **ci:** use explicit crate versions for release-please compatibility ([cc54698](https://github.com/cogniplex/codemem/commit/cc54698870e3a2d69904859ff032fbd1ccc224a2))
+* **ci:** use explicit path+version for internal deps instead of workspace inheritance ([cc3f43c](https://github.com/cogniplex/codemem/commit/cc3f43c82b7eb8593e69b5f78baf5cf6fe5201bb))
+* Claude Code hooks spec compliance (issue [#27](https://github.com/cogniplex/codemem/issues/27)) ([#29](https://github.com/cogniplex/codemem/issues/29)) ([dafc4e8](https://github.com/cogniplex/codemem/commit/dafc4e865ced97ddbcb4c7d98d0e9b10de723519))
+* embedding memory leaks, silent batch drops, HNSW ghost compaction, BM25 persistence ([7a41a36](https://github.com/cogniplex/codemem/commit/7a41a367d7031ac423743f6a36bb317fca0fb054))
+* namespace-scoped file hashes, configurable embed batch size, hook storage ([#35](https://github.com/cogniplex/codemem/issues/35)) ([1c5bb9c](https://github.com/cogniplex/codemem/commit/1c5bb9c30ee9cce6868e60fb7a9400c2474a5d1c))
+* namespace-scoped PageRank to prevent cross-project score pollution ([#61](https://github.com/cogniplex/codemem/issues/61)) ([5316a89](https://github.com/cogniplex/codemem/commit/5316a892f26dc49ff3d067b55faf9507ab57a320))
+* post-review fixes for temporal graph, Gemini provider, and migration safety ([#56](https://github.com/cogniplex/codemem/issues/56)) ([f345dc6](https://github.com/cogniplex/codemem/commit/f345dc65550d2281d204856b1757a901f0a1f338))
+* review findings — config validation, cascade delete, BM25 consistency, scoring hardening, and engine refinements ([f0fa69d](https://github.com/cogniplex/codemem/commit/f0fa69d66a9e382c9ed3385cae508033cc21902a))
+* storage audit fixes and 4 critical bug fixes ([96b3916](https://github.com/cogniplex/codemem/commit/96b391674be8f3e0af67b77702c999693fb0d7ef))
+* use full persist pipeline in store_pattern_memory, remove dead code ([a262533](https://github.com/cogniplex/codemem/commit/a2625331cb876c869cd2b921621c8d38b4c77f81))
+* use relative paths for graph node IDs ([2c9e6a2](https://github.com/cogniplex/codemem/commit/2c9e6a270a79670840547e229f6391ccdd83c4d8))
+
+
+### Performance Improvements
+
+* batch graph node/edge inserts and embedding storage in persistence pipeline ([3b518dd](https://github.com/cogniplex/codemem/commit/3b518dda2230af1c668b75d4cc9af083cc057d9c))
+* lazy init for vector/BM25/embeddings in CodememEngine ([#28](https://github.com/cogniplex/codemem/issues/28)) ([823cbc1](https://github.com/cogniplex/codemem/commit/823cbc1ed798fc0988c07e63510a51eddc6c0fb6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.16.0 to 0.17.0
+    * codemem-storage bumped from 0.15.0 to 0.15.1
+    * codemem-embeddings bumped from 0.14.0 to 0.15.0
+
 ## [0.16.0](https://github.com/cogniplex/codemem/compare/v0.15.0...v0.16.0) (2026-03-27)
 
 
