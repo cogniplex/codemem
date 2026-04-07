@@ -8,7 +8,9 @@ use crate::CodememError;
 /// Compute a SHA-256 content hash for deduplication.
 pub fn content_hash(content: &str) -> String {
     let hash = Sha256::digest(content.as_bytes());
-    format!("{:x}", hash)
+    hash.iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
 }
 
 // ── Memory Types ────────────────────────────────────────────────────────────
