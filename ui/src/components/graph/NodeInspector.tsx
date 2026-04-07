@@ -1,4 +1,4 @@
-import { X, Expand, Network, Target } from 'lucide-react'
+import { X, Expand, Target } from 'lucide-react'
 import type { GraphNode, GraphEdge } from '../../api/types'
 import { KIND_COLORS } from './constants'
 import { trimLabel } from '../../utils/paths'
@@ -17,13 +17,10 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
   const nodeMap = new Map(allNodes.map((n) => [n.id, n]))
 
   return (
-    <div className="absolute right-4 top-4 z-10 flex w-72 flex-col rounded-lg border border-zinc-800 bg-zinc-900/95 shadow-xl backdrop-blur-sm">
+    <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Network size={14} className="text-violet-400" />
-          <span className="text-sm font-medium text-zinc-200">Node Inspector</span>
-        </div>
+        <span className="text-sm font-medium text-zinc-200">Details</span>
         <button
           onClick={onClose}
           className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
@@ -33,7 +30,7 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
       </div>
 
       {/* Node details */}
-      <div className="space-y-3 p-4">
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
         <div>
           <p className="text-xs text-zinc-500">Label</p>
           <p className="text-sm font-medium text-zinc-200 break-words">{trimLabel(node.label)}</p>
@@ -63,6 +60,11 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
           </div>
         )}
 
+        <div>
+          <p className="text-xs text-zinc-500">ID</p>
+          <p className="truncate text-xs font-mono text-zinc-500">{node.id}</p>
+        </div>
+
         {/* Action buttons */}
         <div className="flex gap-2">
           <button
@@ -88,7 +90,7 @@ export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbor
           <p className="mb-1.5 text-xs font-medium text-zinc-400">
             Connections ({connectedEdges.length})
           </p>
-          <div className="max-h-52 space-y-1 overflow-y-auto">
+          <div className="max-h-64 space-y-1 overflow-y-auto">
             {connectedEdges.length === 0 && (
               <p className="text-xs text-zinc-600">No connections</p>
             )}

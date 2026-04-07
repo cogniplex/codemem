@@ -9,6 +9,7 @@ import { NodeInspector } from './NodeInspector'
 import { CommunityLegend } from './CommunityLegend'
 import { RelationshipFilters } from './RelationshipFilters'
 import { FocusToolbar } from './FocusToolbar'
+import { FileTree } from './FileTree'
 
 const ALL_KINDS = new Set([
   'function', 'method', 'class', 'file', 'module', 'package',
@@ -27,7 +28,7 @@ export function GraphExplorer() {
   const [searchLabel, setSearchLabel] = useState('')
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
   const [layoutRunning, setLayoutRunning] = useState(false)
-  // Hide noisy high-volume edge types by default — users can toggle them on
+  const [showFileTree, setShowFileTree] = useState(true)
   const [activeRelationships, setActiveRelationships] = useState<Set<string>>(() => {
     const defaults = new Set(ALL_RELATIONSHIPS)
     defaults.delete('CO_CHANGED')
@@ -35,7 +36,6 @@ export function GraphExplorer() {
   })
   const [focusMode, setFocusMode] = useState<{ nodeId: string; depth: number } | null>(null)
 
-  // Fetch neighbors for focus mode
   const focusNeighborId = focusMode?.nodeId ?? ''
   const focusDepth = focusMode?.depth ?? 1
   const { data: focusData } = useNeighbors(focusNeighborId, focusDepth)
@@ -53,7 +53,6 @@ export function GraphExplorer() {
   const { data: communitiesData } = useCommunities(undefined, showCommunities)
   const { data: neighborsData } = useNeighbors(expandedNodeId ?? '', 2)
 
-  // Merge neighbor data into the subgraph
   const subgraphNodes = subgraph?.nodes
   const subgraphEdges = subgraph?.edges
   const neighborNodes = neighborsData?.nodes
@@ -75,11 +74,9 @@ export function GraphExplorer() {
     return [...subgraphEdges, ...extra]
   }, [subgraphEdges, neighborEdges])
 
-  // When in focus mode, use focus data instead of merged subgraph
   const displayNodes = focusMode && focusData ? focusData.nodes : mergedNodes
   const displayEdges = focusMode && focusData ? focusData.edges : mergedEdges
 
-  // Compute edge counts by relationship type for filters
   const edgeCounts = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const edge of displayEdges) {
@@ -158,81 +155,105 @@ export function GraphExplorer() {
     )
   }
 
-  // Find focus node label for toolbar
   const focusNodeLabel = focusMode
     ? displayNodes.find((n) => n.id === focusMode.nodeId)?.label ?? focusMode.nodeId
     : ''
 
   return (
-    <div className="relative h-full w-full">
-      <SigmaGraph
-        nodes={displayNodes}
-        edges={displayEdges}
-        communities={focusMode ? null : (communitiesData?.communities ?? null)}
-        showCommunities={!focusMode && showCommunities}
-        showEdges={showEdges}
-        onNodeClick={handleNodeClick}
-        highlightNodeId={selectedNodeId}
-        searchLabel={searchLabel}
-        onLayoutRunning={setLayoutRunning}
-        activeRelationships={activeRelationships}
-        focusNodeId={focusMode?.nodeId ?? null}
-      />
-
-      {focusMode && (
-        <FocusToolbar
-          nodeLabel={focusNodeLabel}
-          depth={focusMode.depth}
-          onDepthChange={handleFocusDepthChange}
-          onExit={handleExitFocus}
-        />
-      )}
-
-      {layoutRunning && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
-          <div className="flex items-center gap-2 rounded-full bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-400 backdrop-blur-sm">
-            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" />
-            Stabilizing layout...
-          </div>
+    <div className="flex h-full">
+      {/* Left: File Tree */}
+      {showFileTree && (
+        <div className="flex w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
+          <FileTree
+            nodes={displayNodes}
+            onSelectNode={handleNodeClick}
+            selectedNodeId={selectedNodeId}
+          />
         </div>
       )}
 
-      {!focusMode && (
-        <GraphControls
-          kinds={kinds}
-          onToggleKind={handleToggleKind}
-          maxNodes={maxNodes}
-          onMaxNodesChange={setMaxNodes}
-          showCommunities={showCommunities}
-          onToggleCommunities={() => setShowCommunities((v) => !v)}
-          showEdges={showEdges}
-          onToggleEdges={() => setShowEdges((v) => !v)}
-          searchLabel={searchLabel}
-          onSearchChange={setSearchLabel}
-        />
-      )}
-
-      {selectedNode && (
-        <NodeInspector
-          node={selectedNode}
+      {/* Center: Force Graph */}
+      <div className="relative min-w-0 flex-1">
+        <SigmaGraph
+          nodes={displayNodes}
           edges={displayEdges}
-          allNodes={displayNodes}
-          onClose={() => setSelectedNodeId(null)}
-          onExpandNeighbors={handleExpandNeighbors}
-          onFocus={handleFocus}
-        />
-      )}
-
-      {showEdges && (
-        <RelationshipFilters
+          communities={focusMode ? null : (communitiesData?.communities ?? null)}
+          showCommunities={!focusMode && showCommunities}
+          showEdges={showEdges}
+          onNodeClick={handleNodeClick}
+          highlightNodeId={selectedNodeId}
+          searchLabel={searchLabel}
+          onLayoutRunning={setLayoutRunning}
           activeRelationships={activeRelationships}
-          edgeCounts={edgeCounts}
-          onToggle={handleToggleRelationship}
+          focusNodeId={focusMode?.nodeId ?? null}
         />
-      )}
 
-      {!focusMode && showCommunities && communitiesData?.communities && (
-        <CommunityLegend communities={communitiesData.communities} />
+        {focusMode && (
+          <FocusToolbar
+            nodeLabel={focusNodeLabel}
+            depth={focusMode.depth}
+            onDepthChange={handleFocusDepthChange}
+            onExit={handleExitFocus}
+          />
+        )}
+
+        {layoutRunning && (
+          <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
+            <div className="flex items-center gap-2 rounded-full bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-400 backdrop-blur-sm">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" />
+              Stabilizing layout...
+            </div>
+          </div>
+        )}
+
+        {/* Toggle file tree button */}
+        <button
+          onClick={() => setShowFileTree((v) => !v)}
+          className="absolute left-2 top-2 z-10 rounded-md bg-zinc-800/80 px-2 py-1 text-xs text-zinc-400 backdrop-blur-sm hover:bg-zinc-700 hover:text-zinc-200"
+        >
+          {showFileTree ? 'Hide Tree' : 'Show Tree'}
+        </button>
+
+        {!focusMode && (
+          <GraphControls
+            kinds={kinds}
+            onToggleKind={handleToggleKind}
+            maxNodes={maxNodes}
+            onMaxNodesChange={setMaxNodes}
+            showCommunities={showCommunities}
+            onToggleCommunities={() => setShowCommunities((v) => !v)}
+            showEdges={showEdges}
+            onToggleEdges={() => setShowEdges((v) => !v)}
+            searchLabel={searchLabel}
+            onSearchChange={setSearchLabel}
+          />
+        )}
+
+        {showEdges && (
+          <RelationshipFilters
+            activeRelationships={activeRelationships}
+            edgeCounts={edgeCounts}
+            onToggle={handleToggleRelationship}
+          />
+        )}
+
+        {!focusMode && showCommunities && communitiesData?.communities && (
+          <CommunityLegend communities={communitiesData.communities} />
+        )}
+      </div>
+
+      {/* Right: Detail Panel */}
+      {selectedNode && (
+        <div className="w-72 shrink-0 border-l border-zinc-800 bg-zinc-950">
+          <NodeInspector
+            node={selectedNode}
+            edges={displayEdges}
+            allNodes={displayNodes}
+            onClose={() => setSelectedNodeId(null)}
+            onExpandNeighbors={handleExpandNeighbors}
+            onFocus={handleFocus}
+          />
+        </div>
       )}
     </div>
   )
