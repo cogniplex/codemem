@@ -84,6 +84,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Temporal graph nodes (valid_from, valid_to)",
         sql: include_str!("migrations/015_temporal_graph_nodes.sql"),
     },
+    Migration {
+        version: 16,
+        description: "Namespace root paths",
+        sql: include_str!("migrations/016_namespace_roots.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.

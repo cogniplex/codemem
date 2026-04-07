@@ -18,22 +18,17 @@ interface Props {
   selectedNodeId: string | null
 }
 
+const SKIP_KINDS = new Set([
+  'memory', 'chunk', 'commit', 'pull_request', 'external',
+])
+
 /** Build a hierarchical tree from flat graph nodes. */
 function buildTree(nodes: GraphNode[]): TreeNode[] {
   const root: TreeNode = { name: '', path: '', kind: 'directory', children: [] }
 
-  // Group: file nodes by path, symbol nodes by file
   const fileNodes = nodes.filter((n) => n.kind === 'file')
   const symbolNodes = nodes.filter(
-    (n) =>
-      n.kind !== 'file' &&
-      n.kind !== 'package' &&
-      n.kind !== 'module' &&
-      n.kind !== 'memory' &&
-      n.kind !== 'chunk' &&
-      n.kind !== 'commit' &&
-      n.kind !== 'pull_request' &&
-      n.kind !== 'external',
+    (n) => !SKIP_KINDS.has(n.kind) && n.kind !== 'file' && n.kind !== 'package' && n.kind !== 'module',
   )
 
   // Build directory structure from file paths
@@ -45,48 +40,59 @@ function buildTree(nodes: GraphNode[]): TreeNode[] {
 
   // Insert file nodes into tree
   for (const [path, node] of filesByPath) {
-    const parts = path.split('/')
-    let current = root
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]
-      const isLast = i === parts.length - 1
-      let child = current.children.find((c) => c.name === part)
-      if (!child) {
-        child = {
-          name: part,
-          path: parts.slice(0, i + 1).join('/'),
-          kind: isLast ? 'file' : 'directory',
-          nodeId: isLast ? node.id : undefined,
-          graphKind: isLast ? node.kind : undefined,
-          children: [],
-        }
-        current.children.push(child)
-      }
-      current = child
-    }
+    insertPath(root, path, node.id, node.kind)
   }
 
-  // Attach symbols to their parent files by matching node ID prefix
+  // Attach symbols to their parent files
   for (const sym of symbolNodes) {
-    // Symbols have IDs like "sym:file.rs::StructName::method"
-    // Try to match by label containing file path segments
-    const symId = sym.id
-    // Find the file this symbol belongs to — check payload or label
-    for (const [path, fileNode] of filesByPath) {
-      if (symId.includes(path) || sym.label.includes(path.split('/').pop() ?? '')) {
-        // Find the file tree node and add symbol as child
-        const fileTreeNode = findTreeNode(root, fileNode.id)
-        if (fileTreeNode) {
-          fileTreeNode.children.push({
-            name: sym.label,
-            path: `${path}#${sym.label}`,
+    const filePath = sym.payload?.file_path as string | undefined
+    if (filePath && filesByPath.has(filePath)) {
+      const fileTreeNode = findTreeNode(root, `file:${filePath}`) ?? findTreeNode(root, filePath)
+      if (fileTreeNode) {
+        fileTreeNode.children.push({
+          name: sym.label,
+          path: `${filePath}#${sym.label}`,
+          kind: 'symbol',
+          nodeId: sym.id,
+          graphKind: sym.kind,
+          children: [],
+        })
+        continue
+      }
+    }
+
+    // Fallback: if no file nodes exist, build tree from symbol module paths.
+    // Symbol IDs look like "sym:cli::Commands::Analyze" — use "::" segments as tree levels.
+    if (filesByPath.size === 0) {
+      const symPath = sym.id.replace(/^sym:/, '')
+      const segments = symPath.split('::')
+      if (segments.length > 1) {
+        // Use all but last segment as directory path, last as the symbol name
+        const modulePath = segments.slice(0, -1).join('/')
+        const symName = segments[segments.length - 1]
+        // Ensure the module directory exists
+        insertPath(root, modulePath, undefined, undefined)
+        const parentDir = findTreeNodeByPath(root, modulePath)
+        if (parentDir) {
+          parentDir.children.push({
+            name: symName,
+            path: `${modulePath}#${symName}`,
             kind: 'symbol',
             nodeId: sym.id,
             graphKind: sym.kind,
             children: [],
           })
-          break
         }
+      } else {
+        // Single-segment symbol — add to root
+        root.children.push({
+          name: sym.label,
+          path: `#${sym.label}`,
+          kind: 'symbol',
+          nodeId: sym.id,
+          graphKind: sym.kind,
+          children: [],
+        })
       }
     }
   }
@@ -95,6 +101,37 @@ function buildTree(nodes: GraphNode[]): TreeNode[] {
   sortTree(root)
 
   return root.children
+}
+
+function insertPath(root: TreeNode, path: string, nodeId?: string, graphKind?: string) {
+  const parts = path.split('/')
+  let current = root
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]
+    const isLast = i === parts.length - 1
+    let child = current.children.find((c) => c.name === part)
+    if (!child) {
+      child = {
+        name: part,
+        path: parts.slice(0, i + 1).join('/'),
+        kind: isLast && nodeId ? 'file' : 'directory',
+        nodeId: isLast ? nodeId : undefined,
+        graphKind: isLast ? graphKind : undefined,
+        children: [],
+      }
+      current.children.push(child)
+    }
+    current = child
+  }
+}
+
+function findTreeNodeByPath(node: TreeNode, path: string): TreeNode | null {
+  if (node.path === path) return node
+  for (const child of node.children) {
+    const found = findTreeNodeByPath(child, path)
+    if (found) return found
+  }
+  return null
 }
 
 function findTreeNode(node: TreeNode, nodeId: string): TreeNode | null {

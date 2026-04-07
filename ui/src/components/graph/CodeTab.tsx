@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useFileContent } from '../../api/hooks'
+import { useNamespaceStore } from '../../stores/namespace'
 import type { GraphNode } from '../../api/types'
 
 interface Props {
@@ -40,11 +41,12 @@ const EXT_TO_LANG: Record<string, string> = {
 }
 
 export function CodeTab({ node }: Props) {
+  const namespace = useNamespaceStore((s) => s.active)
   const filePath = (node.payload?.file_path as string) ?? extractFilePath(node)
   const lineStart = (node.payload?.line_start as number) ?? undefined
   const lineEnd = (node.payload?.line_end as number) ?? undefined
 
-  const { data, isLoading, error } = useFileContent(filePath, undefined, undefined)
+  const { data, isLoading, error } = useFileContent(filePath, undefined, undefined, namespace ?? undefined)
   const codeRef = useRef<HTMLDivElement>(null)
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null)
 

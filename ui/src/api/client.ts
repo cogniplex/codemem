@@ -70,10 +70,11 @@ export const api = {
     if (params?.limit !== undefined) search.set('limit', String(params.limit))
     return request<import('./types').BrowseResponse>(`/api/graph/browse?${search}`)
   },
-  fileContent: (params: { path: string; line_start?: number; line_end?: number }) => {
+  fileContent: (params: { path: string; line_start?: number; line_end?: number; namespace?: string }) => {
     const search = new URLSearchParams({ path: params.path })
     if (params.line_start !== undefined) search.set('line_start', String(params.line_start))
     if (params.line_end !== undefined) search.set('line_end', String(params.line_end))
+    if (params.namespace) search.set('namespace', params.namespace)
     return request<import('./types').FileContentResponse>(`/api/graph/file-content?${search}`)
   },
   vectors: (namespace?: string) => {

@@ -930,4 +930,14 @@ pub trait StorageBackend: Send + Sync {
     ) -> Result<Vec<(String, String, String, String, String, String)>, CodememError> {
         Ok(Vec::new())
     }
+
+    /// Get the stored root path for a namespace (set by `codemem analyze`).
+    fn get_namespace_root(&self, _namespace: &str) -> Result<Option<String>, CodememError> {
+        Ok(None)
+    }
+
+    /// Store the root path for a namespace.
+    fn set_namespace_root(&self, _namespace: &str, _root_path: &str) -> Result<(), CodememError> {
+        Ok(())
+    }
 }

@@ -486,6 +486,53 @@ pub struct FileContentQuery {
     pub path: String,
     pub line_start: Option<usize>,
     pub line_end: Option<usize>,
+    /// Optional project root to resolve relative paths against.
+    pub root: Option<String>,
+    /// Namespace to look up the stored root path.
+    pub namespace: Option<String>,
+}
+
+/// Try to resolve a relative file path to an absolute one.
+/// Priority: explicit root → namespace root from DB → CWD → as-is.
+fn resolve_file_path(
+    path: &str,
+    root: Option<&str>,
+    storage: &dyn codemem_core::StorageBackend,
+    namespace: Option<&str>,
+) -> std::path::PathBuf {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() && p.exists() {
+        return p.to_path_buf();
+    }
+
+    // If explicit root provided, try that first
+    if let Some(root) = root {
+        let candidate = std::path::Path::new(root).join(path);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    // Try namespace root from DB (stored by `codemem analyze`)
+    if let Some(ns) = namespace {
+        if let Ok(Some(ns_root)) = storage.get_namespace_root(ns) {
+            let candidate = std::path::Path::new(&ns_root).join(path);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    // Try CWD
+    if let Ok(cwd) = std::env::current_dir() {
+        let candidate = cwd.join(path);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    // Fallback: return as-is
+    p.to_path_buf()
 }
 
 #[derive(Debug, Serialize)]
@@ -498,9 +545,9 @@ pub struct FileContentResponse {
     pub language: String,
 }
 
-/// Serve file content for the code viewer. Resolves paths relative to
-/// the namespace root (project directory). Only serves files that exist
-/// as graph nodes to prevent arbitrary file reads.
+/// Serve file content for the code viewer. Resolves relative paths
+/// against CWD (the directory `codemem ui` was launched from).
+/// Only serves files that exist as graph nodes to prevent arbitrary reads.
 pub async fn get_file_content(
     State(state): State<Arc<AppState>>,
     Query(query): Query<FileContentQuery>,
@@ -524,8 +571,16 @@ pub async fn get_file_content(
         ));
     }
 
+    // Resolve relative paths using stored namespace root, explicit root, or CWD.
+    let resolved = resolve_file_path(
+        file_path,
+        query.root.as_deref(),
+        state.server.engine.storage(),
+        query.namespace.as_deref(),
+    );
+
     // Read the file
-    let content = std::fs::read_to_string(file_path).map_err(|e| {
+    let content = std::fs::read_to_string(&resolved).map_err(|e| {
         (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": format!("Cannot read file: {e}")})),
