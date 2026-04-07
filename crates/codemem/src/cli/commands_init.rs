@@ -466,17 +466,17 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
     // ── Step 5: Write default config ────────────────────────────────────
     let config_path = codemem_core::CodememConfig::default_path();
     let config = if config_path.exists() {
-        println!("[config] Config already exists at {}", config_path.display());
+        println!(
+            "[config] Config already exists at {}",
+            config_path.display()
+        );
         status_lines.push(format!("Config: {}", config_path.display()));
         codemem_core::CodememConfig::load_or_default()
     } else {
         let default_config = codemem_core::CodememConfig::default();
         match default_config.save(&config_path) {
             Ok(()) => {
-                println!(
-                    "[config] Wrote default config to {}",
-                    config_path.display()
-                );
+                println!("[config] Wrote default config to {}", config_path.display());
                 status_lines.push(format!("Config: created {}", config_path.display()));
             }
             Err(e) => {

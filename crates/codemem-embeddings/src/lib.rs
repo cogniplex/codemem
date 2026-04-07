@@ -169,8 +169,9 @@ impl EmbeddingService {
 
         let (model, arch_name) = if is_alibi {
             // JinaBERT (ALiBi positional embeddings)
-            let config: JinaBertConfig = serde_json::from_str(&config_str)
-                .map_err(|e| CodememError::Embedding(format!("Failed to parse JinaBERT config: {e}")))?;
+            let config: JinaBertConfig = serde_json::from_str(&config_str).map_err(|e| {
+                CodememError::Embedding(format!("Failed to parse JinaBERT config: {e}"))
+            })?;
             let vb = unsafe {
                 VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device)
                     .map_err(|e| CodememError::Embedding(format!("Failed to load weights: {e}")))?
@@ -182,15 +183,17 @@ impl EmbeddingService {
             (ModelBackend::JinaBert(jina_model), "JinaBERT (ALiBi)")
         } else {
             // Standard BERT (absolute positional embeddings)
-            let config: BertConfig = serde_json::from_str(&config_str)
-                .map_err(|e| CodememError::Embedding(format!("Failed to parse BERT config: {e}")))?;
+            let config: BertConfig = serde_json::from_str(&config_str).map_err(|e| {
+                CodememError::Embedding(format!("Failed to parse BERT config: {e}"))
+            })?;
             // Load model weights from safetensors via memory-mapped IO.
             // Scope vb so it drops before a potential retry, avoiding two VarBuilders
             // holding materialized Metal tensors simultaneously.
             let bert_model = {
                 let vb = unsafe {
-                    VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device)
-                        .map_err(|e| CodememError::Embedding(format!("Failed to load weights: {e}")))?
+                    VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device).map_err(
+                        |e| CodememError::Embedding(format!("Failed to load weights: {e}")),
+                    )?
                 };
                 BertModel::load(vb.pp("bert"), &config)
             };
@@ -199,9 +202,10 @@ impl EmbeddingService {
                 Ok(m) => m,
                 Err(_) => {
                     let vb2 = unsafe {
-                        VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device).map_err(
-                            |e| CodememError::Embedding(format!("Failed to load weights: {e}")),
-                        )?
+                        VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device)
+                            .map_err(|e| {
+                                CodememError::Embedding(format!("Failed to load weights: {e}"))
+                            })?
                     };
                     BertModel::load(vb2, &config).map_err(|e| {
                         CodememError::Embedding(format!("Failed to load BERT model: {e}"))
@@ -341,7 +345,11 @@ impl EmbeddingService {
                     .zeros_like()
                     .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
                 let result = bert
-                    .forward(&input_ids_tensor, &token_type_ids, Some(&attention_mask_tensor))
+                    .forward(
+                        &input_ids_tensor,
+                        &token_type_ids,
+                        Some(&attention_mask_tensor),
+                    )
                     .map_err(|e| CodememError::Embedding(format!("Model forward error: {e}")))?;
                 drop(token_type_ids);
                 result
