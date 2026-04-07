@@ -88,8 +88,8 @@ export interface TemporalEntry {
   message: string
   author: string
   timestamp: string
-  files: string[]
-  symbols: string[]
+  changed_files: string[]
+  changed_symbols: string[]
 }
 
 export interface FileContentResponse {

@@ -61,7 +61,7 @@ export function TemporalView() {
           />
           <StatCard
             label="Files Changed"
-            value={new Set(data.entries.flatMap((e) => e.files ?? [])).size}
+            value={new Set(data.entries.flatMap((e) => e.changed_files ?? [])).size}
             icon={<FileText size={16} className="text-cyan-400" />}
           />
           <StatCard
@@ -134,8 +134,8 @@ function CommitRow({ entry }: { entry: import('../../api/types').TemporalEntry }
   const [expanded, setExpanded] = useState(false)
   const date = new Date(entry.timestamp)
   const relDate = formatRelative(date)
-  const files = entry.files ?? []
-  const symbols = entry.symbols ?? []
+  const files = entry.changed_files ?? []
+  const symbols = entry.changed_symbols ?? []
 
   return (
     <div className="px-5 py-3">
