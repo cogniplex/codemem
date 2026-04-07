@@ -173,7 +173,6 @@ enum Commands {
     },
 
     // ── Hidden backward-compat aliases ──────────────────────────────
-
     /// (hidden) Alias for `mcp serve`
     #[command(hide = true)]
     Serve {
