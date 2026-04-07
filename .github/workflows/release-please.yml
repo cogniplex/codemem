@@ -44,7 +44,7 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: linux-amd64
-          - target: blacksmith-4vcpu-ubuntu-2404-arm
+          - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             name: linux-arm64
             cross: true
