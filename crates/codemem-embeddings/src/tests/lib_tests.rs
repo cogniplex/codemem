@@ -354,7 +354,8 @@ fn constants_are_sensible() {
 fn parse_dtype_f32() {
     assert!(matches!(parse_dtype("f32").unwrap(), DType::F32));
     assert!(matches!(parse_dtype("float32").unwrap(), DType::F32));
-    assert!(matches!(parse_dtype("").unwrap(), DType::F32));
+    // Empty string defaults to F16 (changed from F32 for better perf on Metal)
+    assert!(matches!(parse_dtype("").unwrap(), DType::F16));
 }
 
 #[test]
