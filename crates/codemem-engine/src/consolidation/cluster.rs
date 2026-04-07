@@ -160,14 +160,34 @@ impl CodememEngine {
                 continue;
             }
 
-            let mut members: Vec<(usize, f64)> = cluster
+            // Tiered winner selection: agent-curated/verified memories win over
+            // raw static-analysis, which wins over archived. Within each tier,
+            // highest importance wins. This prevents enrichment outputs from
+            // displacing agent-refined analysis during dedup.
+            let mut members: Vec<(usize, u8, f64)> = cluster
                 .iter()
-                .map(|&idx| (idx, memories[idx].importance))
+                .map(|&idx| {
+                    let tags = &memories[idx].tags;
+                    let tier = if tags.contains(&"agent-curated".to_string())
+                        || tags.contains(&"agent-verified".to_string())
+                        || tags.contains(&"human-verified".to_string())
+                    {
+                        0 // highest priority: agent/human reviewed
+                    } else if tags.contains(&"archived".to_string()) {
+                        2 // lowest: archived noise
+                    } else {
+                        1 // middle: unreviewed (including raw static-analysis)
+                    };
+                    (idx, tier, memories[idx].importance)
+                })
                 .collect();
-            members.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            members.sort_by(|a, b| {
+                a.1.cmp(&b.1)
+                    .then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal))
+            });
             kept_count += 1;
 
-            for &(idx, _) in members.iter().skip(1) {
+            for &(idx, _, _) in members.iter().skip(1) {
                 ids_to_delete.push(memories[idx].id.clone());
                 merged_count += 1;
             }
