@@ -390,7 +390,7 @@ impl super::CodememEngine {
         }
         let existing_ids: std::collections::HashSet<String> = referenced_ids
             .iter()
-            .filter(|id| self.storage.get_graph_node(id).is_ok())
+            .filter(|id| self.storage.get_graph_node(id).ok().flatten().is_some())
             .map(|id| id.to_string())
             .collect();
 
