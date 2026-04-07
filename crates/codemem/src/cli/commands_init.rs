@@ -463,12 +463,50 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         std::fs::write(&mcp_json_path, serde_json::to_string_pretty(&mcp_config)?)?;
     }
 
-    // ── Step 5: Download embedding model ──────────────────────────────────
+    // ── Step 5: Write default config ────────────────────────────────────
+    let config_path = codemem_core::CodememConfig::default_path();
+    let config = if config_path.exists() {
+        println!(
+            "[config] Config already exists at {}",
+            config_path.display()
+        );
+        status_lines.push(format!("Config: {}", config_path.display()));
+        codemem_core::CodememConfig::load_or_default()
+    } else {
+        let default_config = codemem_core::CodememConfig::default();
+        match default_config.save(&config_path) {
+            Ok(()) => {
+                println!("[config] Wrote default config to {}", config_path.display());
+                status_lines.push(format!("Config: created {}", config_path.display()));
+            }
+            Err(e) => {
+                println!("[config] Failed to write config: {e}");
+                status_lines.push("Config: write failed (using defaults)".to_string());
+            }
+        }
+        default_config
+    };
+
+    // ── Step 6: Download embedding model ──────────────────────────────────
     if skip_model {
         println!("[model] Skipped (--skip-model)");
         status_lines.push("Model: skipped (--skip-model)".to_string());
     } else {
-        let model_dir = codemem_engine::EmbeddingService::default_model_dir();
+        // Resolve model from env var → config → default
+        let model_id = std::env::var("CODEMEM_EMBED_MODEL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| config.embedding.model.clone());
+        let (hf_repo, dir_name) = match codemem_engine::resolve_model_id(&model_id) {
+            Ok(pair) => pair,
+            Err(e) => {
+                println!("[model] Invalid model identifier: {e}");
+                status_lines.push("Model: invalid identifier".to_string());
+                // Fall through to summary
+                return Ok(());
+            }
+        };
+        let model_dir = codemem_engine::EmbeddingService::model_dir_for(&dir_name);
         if model_dir.join("model.safetensors").exists() {
             println!(
                 "[model] Embedding model already downloaded at {}",
@@ -476,8 +514,8 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
             );
             status_lines.push("Model: already present".to_string());
         } else {
-            println!("[model] Downloading embedding model (BAAI/bge-base-en-v1.5)...");
-            match codemem_engine::EmbeddingService::download_default_model() {
+            println!("[model] Downloading embedding model ({hf_repo})...");
+            match codemem_engine::EmbeddingService::download_model(&model_dir, &hf_repo) {
                 Ok(_) => {
                     println!("[model] Downloaded to {}", model_dir.display());
                     status_lines.push(format!("Model: downloaded to {}", model_dir.display()));
@@ -492,7 +530,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         }
     }
 
-    // ── Step 6: Batch embed existing memories ─────────────────────────────
+    // ── Step 7: Batch embed existing memories ─────────────────────────────
     if !skip_model {
         batch_embed_existing(&db_path);
     }
