@@ -98,7 +98,7 @@ export function TemporalSection() {
           {staleLoading ? (
             <div className="flex items-center justify-center py-8"><Loader2 size={16} className="animate-spin text-zinc-600" /></div>
           ) : staleData && staleData.files.length > 0 ? (
-            <div className="max-h-[400px] overflow-y-auto">
+            <div>
               <div className="px-5 py-2">
                 <p className="text-[11px] text-zinc-600">{staleData.stale_files} file(s) unchanged for {staleData.stale_days}+ days</p>
               </div>

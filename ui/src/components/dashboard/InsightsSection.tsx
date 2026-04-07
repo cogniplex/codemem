@@ -15,7 +15,7 @@ function InsightFeed({ insights, accent }: { insights: MemoryItem[]; accent: str
   if (insights.length === 0) return <p className="py-4 text-center text-[13px] text-zinc-600">No data yet.</p>
 
   return (
-    <div className="max-h-[320px] space-y-1.5 overflow-y-auto">
+    <div className="space-y-1.5">
       {insights.slice(0, 8).map((item) => (
         <div key={item.id} className="rounded-lg border border-zinc-700/30 bg-zinc-900 px-3.5 py-2.5 transition-colors hover:bg-zinc-800/80">
           <p className="min-w-0 break-words text-[12px] leading-relaxed text-zinc-300 line-clamp-2">{item.content}</p>

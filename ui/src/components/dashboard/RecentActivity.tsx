@@ -25,7 +25,7 @@ export function RecentActivity() {
       actions={<span className="text-[11px] text-zinc-600">{data?.total ?? 0} total</span>}
       padded={false}
     >
-      <div className="max-h-[420px] overflow-y-auto">
+      <div>
         {isLoading ? (
           <div className="space-y-0 divide-y divide-zinc-800/30">
             {Array.from({ length: 5 }).map((_, i) => (
