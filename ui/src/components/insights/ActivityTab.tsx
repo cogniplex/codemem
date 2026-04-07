@@ -7,7 +7,7 @@ import type { MemoryItem } from '../../api/types'
 function InsightFeed({ insights }: { insights: MemoryItem[] }) {
   if (insights.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-zinc-500">
+      <p className="py-8 text-center text-[13px] text-zinc-600">
         No activity insights yet. Run the enrichment pipeline to generate insights.
       </p>
     )
@@ -18,15 +18,15 @@ function InsightFeed({ insights }: { insights: MemoryItem[] }) {
       {insights.map((item) => (
         <div
           key={item.id}
-          className="rounded-md border border-zinc-800 bg-zinc-900/50 px-4 py-3"
+          className="rounded-xl border border-zinc-800/40 bg-zinc-900/50 px-4 py-3 transition-colors hover:bg-zinc-800/20"
         >
           <div className="flex items-start justify-between gap-3">
-            <p className="text-sm text-zinc-300">{item.content}</p>
-            <span className="shrink-0 rounded-full bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-400">
+            <p className="text-[13px] leading-relaxed text-zinc-300">{item.content}</p>
+            <span className="shrink-0 rounded-md bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium tabular-nums text-violet-400">
               {(item.importance * 100).toFixed(0)}%
             </span>
           </div>
-          <p className="mt-1 text-xs text-zinc-600">
+          <p className="mt-1 text-[11px] text-zinc-600">
             {new Date(item.created_at).toLocaleDateString()}
           </p>
         </div>
@@ -44,37 +44,21 @@ export function ActivityTab() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-4">
-        <MetricCard
-          label="Annotated Files"
-          value={data?.git_summary.total_annotated_files ?? 0}
-          icon={FileText}
-          color="text-violet-400"
-          isLoading={isLoading}
-        />
-        <MetricCard
-          label="Insights Generated"
-          value={data?.insights.length ?? 0}
-          icon={GitCommit}
-          color="text-cyan-400"
-          isLoading={isLoading}
-        />
-        <MetricCard
-          label="Contributors"
-          value={data?.git_summary.top_authors.length ?? 0}
-          icon={Users}
-          color="text-emerald-400"
-          isLoading={isLoading}
-        />
+        <MetricCard label="Annotated Files" value={data?.git_summary.total_annotated_files ?? 0} icon={FileText} color="text-violet-400" isLoading={isLoading} />
+        <MetricCard label="Insights Generated" value={data?.insights.length ?? 0} icon={GitCommit} color="text-cyan-400" isLoading={isLoading} />
+        <MetricCard label="Contributors" value={data?.git_summary.top_authors.length ?? 0} icon={Users} color="text-emerald-400" isLoading={isLoading} />
       </div>
 
       {data?.git_summary.top_authors && data.git_summary.top_authors.length > 0 && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <h3 className="mb-3 text-sm font-medium text-zinc-300">Top Contributors</h3>
-          <div className="flex flex-wrap gap-2">
+        <div className="overflow-hidden rounded-xl border border-zinc-800/50 bg-zinc-900">
+          <div className="bg-zinc-800/40 px-5 py-3">
+            <h3 className="text-[13px] font-medium text-zinc-100">Top Contributors</h3>
+          </div>
+          <div className="flex flex-wrap gap-2 p-4">
             {data.git_summary.top_authors.map((author) => (
               <span
                 key={author}
-                className="rounded-full border border-zinc-700 bg-zinc-800 px-3 py-1 text-xs text-zinc-300"
+                className="rounded-lg border border-zinc-700/40 bg-zinc-800/50 px-3 py-1 text-[12px] text-zinc-300"
               >
                 {author}
               </span>
@@ -83,9 +67,13 @@ export function ActivityTab() {
         </div>
       )}
 
-      <div>
-        <h3 className="mb-3 text-sm font-medium text-zinc-300">Activity Insights</h3>
-        <InsightFeed insights={data?.insights ?? []} />
+      <div className="overflow-hidden rounded-xl border border-zinc-800/50 bg-zinc-900">
+        <div className="bg-zinc-800/40 px-5 py-3">
+          <h3 className="text-[13px] font-medium text-zinc-100">Activity Insights</h3>
+        </div>
+        <div className="p-4">
+          <InsightFeed insights={data?.insights ?? []} />
+        </div>
       </div>
     </div>
   )

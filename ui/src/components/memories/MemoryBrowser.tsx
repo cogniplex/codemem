@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Search, ChevronLeft, ChevronRight, Brain } from 'lucide-react'
-import { useMemories, useNamespaces, useSearch } from '../../api/hooks'
+import { useMemories, useSearch } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
 import { MemoryDetail } from './MemoryDetail'
 import type { ScoreBreakdown } from '../../api/types'
@@ -20,17 +20,13 @@ const typeStyles: Record<string, { pill: string; dot: string }> = {
 }
 
 export function MemoryBrowser() {
-  const globalNamespace = useNamespaceStore((s) => s.active)
-  const { data: namespaces } = useNamespaces()
+  const activeNamespace = useNamespaceStore((s) => s.active) ?? undefined
 
   const [typeFilter, setTypeFilter] = useState<string>('')
-  const [nsFilter, setNsFilter] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
   const [page, setPage] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedBreakdown, setSelectedBreakdown] = useState<ScoreBreakdown | undefined>()
-
-  const activeNamespace = nsFilter || globalNamespace || undefined
   const isSearching = searchQuery.trim().length > 0
 
   const { data: listData, isLoading: listLoading } = useMemories({
@@ -115,19 +111,6 @@ export function MemoryBrowser() {
             )
           })}
 
-          {/* Namespace filter */}
-          <select
-            value={nsFilter}
-            onChange={(e) => { setNsFilter(e.target.value); setPage(0) }}
-            className="ml-auto rounded-lg border border-zinc-800/50 bg-zinc-900 px-2.5 py-1 text-[12px] text-zinc-400 outline-none transition-colors hover:border-zinc-700"
-          >
-            <option value="">
-              {globalNamespace ? `${globalNamespace}` : 'All namespaces'}
-            </option>
-            {namespaces?.map((ns) => (
-              <option key={ns.name} value={ns.name}>{ns.name}</option>
-            ))}
-          </select>
         </div>
 
         {/* Card list */}

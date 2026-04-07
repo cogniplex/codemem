@@ -31,7 +31,7 @@ export function RecentActivity() {
 
   return (
     <div className="rounded-xl border border-zinc-800/50 bg-zinc-900">
-      <div className="flex items-center gap-2 border-b border-zinc-800/40 px-5 py-3.5">
+      <div className="flex items-center gap-2 bg-zinc-800/40 px-5 py-3">
         <Activity size={14} className="text-zinc-500" />
         <h3 className="text-[13px] font-medium text-zinc-100">Recent Activity</h3>
         <span className="ml-auto text-[11px] text-zinc-600">

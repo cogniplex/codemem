@@ -1,5 +1,4 @@
-import { Sidebar } from './Sidebar'
-import { Header } from './Header'
+import { Navbar } from './Navbar'
 import { SearchModal } from './SearchModal'
 import { useUiStore } from '../../stores/ui'
 import { DashboardView } from '../dashboard/DashboardView'
@@ -16,7 +15,6 @@ const views: Record<string, React.FC> = {
   temporal: TemporalView,
 }
 
-// Views that need full-bleed (no padding) — they manage their own layout
 const fullBleedViews = new Set(['graph'])
 
 export function Shell() {
@@ -25,14 +23,11 @@ export function Shell() {
   const isFullBleed = fullBleedViews.has(activeView)
 
   return (
-    <div className="flex h-screen bg-zinc-950 text-zinc-300 antialiased">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
-        <main className={`flex-1 overflow-y-auto ${isFullBleed ? '' : 'p-6'}`}>
-          <View />
-        </main>
-      </div>
+    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-300 antialiased">
+      <Navbar />
+      <main className={`flex-1 overflow-y-auto ${isFullBleed ? '' : 'p-6'}`}>
+        <View />
+      </main>
       <SearchModal />
     </div>
   )

@@ -1,4 +1,4 @@
-import { Play, Loader2 } from 'lucide-react'
+import { Play, Loader2, Recycle } from 'lucide-react'
 import { useConsolidationStatus, useRunConsolidation } from '../../api/hooks'
 
 export function ConsolidationSection() {
@@ -6,50 +6,43 @@ export function ConsolidationSection() {
   const runConsolidation = useRunConsolidation()
 
   return (
-    <div className="rounded-xl border border-zinc-800/60 bg-zinc-900">
-      <div className="flex items-center gap-2 border-b border-zinc-800/60 px-5 py-3">
-        <h3 className="text-[13px] font-medium text-zinc-100">
-          Consolidation Cycles
-        </h3>
+    <div className="rounded-xl border border-zinc-800/50 bg-zinc-900 overflow-hidden">
+      <div className="flex items-center gap-2 bg-zinc-800/40 px-5 py-3">
+        <Recycle size={14} className="text-zinc-500" />
+        <h3 className="text-[13px] font-medium text-zinc-100">Consolidation</h3>
       </div>
-      <div className="divide-y divide-zinc-800/50">
+      <div className="divide-y divide-zinc-800/30">
         {isLoading ? (
           Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="flex items-center gap-3 px-5 py-3">
-              <span className="h-4 w-20 animate-pulse rounded bg-zinc-800" />
-              <span className="ml-auto h-4 w-28 animate-pulse rounded bg-zinc-800" />
+              <span className="h-4 w-20 animate-pulse rounded-md bg-zinc-800/60" />
+              <span className="ml-auto h-4 w-28 animate-pulse rounded-md bg-zinc-800/40" />
             </div>
           ))
         ) : !data?.cycles.length ? (
-          <p className="px-5 py-6 text-center text-sm text-zinc-500">
+          <p className="px-5 py-8 text-center text-[13px] text-zinc-600">
             No consolidation data
           </p>
         ) : (
           data.cycles.map((c) => (
-            <div
-              key={c.cycle}
-              className="flex items-center gap-4 px-5 py-3"
-            >
-              <span className="text-sm font-medium capitalize text-zinc-200">
-                {c.cycle}
-              </span>
-              <span className="text-xs text-zinc-500">
-                {c.last_run
-                  ? `Last run: ${new Date(c.last_run).toLocaleDateString()}`
-                  : 'Never run'}
-              </span>
-              <span className="text-xs text-zinc-600">
-                {c.affected_count} affected
-              </span>
+            <div key={c.cycle} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-zinc-800/10">
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium capitalize text-zinc-200">{c.cycle}</p>
+                <p className="text-[11px] text-zinc-600">
+                  {c.last_run
+                    ? `${new Date(c.last_run).toLocaleDateString()} · ${c.affected_count} affected`
+                    : 'Never run'}
+                </p>
+              </div>
               <button
                 onClick={() => runConsolidation.mutate(c.cycle)}
                 disabled={runConsolidation.isPending}
-                className="ml-auto flex items-center gap-1.5 rounded bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-lg border border-zinc-700/50 bg-zinc-800/50 px-2.5 py-1 text-[11px] font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-700/50 disabled:opacity-50"
               >
                 {runConsolidation.isPending ? (
-                  <Loader2 size={12} className="animate-spin" />
+                  <Loader2 size={11} className="animate-spin" />
                 ) : (
-                  <Play size={12} />
+                  <Play size={11} />
                 )}
                 Run
               </button>
