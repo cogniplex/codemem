@@ -1,5 +1,5 @@
 import {
-  FileText, GitCommit, Users, FileSearch, Network, Layers,
+  GitCommit, FileSearch, Network,
   ShieldAlert, Link2, Zap,
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
@@ -8,15 +8,15 @@ import {
   useSecurityInsights, usePerformanceInsights,
 } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
-import { Card, MetricCard } from '../shared/Card'
+import { Card } from '../shared/Card'
 import type { MemoryItem } from '../../api/types'
 
 function InsightFeed({ insights, accent }: { insights: MemoryItem[]; accent: string }) {
   if (insights.length === 0) return <p className="py-4 text-center text-[13px] text-zinc-600">No data yet.</p>
 
   return (
-    <div className="space-y-1.5">
-      {insights.slice(0, 4).map((item) => (
+    <div className="max-h-[320px] space-y-1.5 overflow-y-auto">
+      {insights.slice(0, 8).map((item) => (
         <div key={item.id} className="rounded-lg border border-zinc-700/30 bg-zinc-900 px-3.5 py-2.5 transition-colors hover:bg-zinc-800/80">
           <p className="min-w-0 break-words text-[12px] leading-relaxed text-zinc-300 line-clamp-2">{item.content}</p>
           <div className="mt-1.5 flex items-center justify-between">
@@ -44,10 +44,10 @@ export function InsightsSection() {
   const namespace = useNamespaceStore((s) => s.active)
   const ns = namespace ? { namespace } : undefined
 
-  const { data: activity, isLoading: actLoading } = useActivityInsights(ns)
-  const { data: health, isLoading: healthLoading } = useCodeHealthInsights(ns)
-  const { data: security, isLoading: secLoading } = useSecurityInsights(ns)
-  const { data: perf, isLoading: perfLoading } = usePerformanceInsights(ns)
+  const { data: activity } = useActivityInsights(ns)
+  const { data: health } = useCodeHealthInsights(ns)
+  const { data: security } = useSecurityInsights(ns)
+  const { data: perf } = usePerformanceInsights(ns)
 
   const hotspotData = (health?.file_hotspots ?? []).slice(0, 6).map((h) => ({
     name: h.description.split(' — ')[0] ?? h.description, count: h.frequency,
@@ -58,16 +58,6 @@ export function InsightsSection() {
 
   return (
     <div className="space-y-6">
-      {/* ── Metrics row ── */}
-      <div className="grid grid-cols-3 gap-3 lg:grid-cols-6">
-        <MetricCard label="Files Analyzed" value={activity?.git_summary.total_annotated_files ?? 0} icon={<FileText size={13} className="text-violet-400" />} isLoading={actLoading} />
-        <MetricCard label="Contributors" value={activity?.git_summary.top_authors.length ?? 0} icon={<Users size={13} className="text-emerald-400" />} isLoading={actLoading} />
-        <MetricCard label="Hotspots" value={health?.file_hotspots.length ?? 0} icon={<FileSearch size={13} className="text-amber-400" />} isLoading={healthLoading} />
-        <MetricCard label="Communities" value={health?.community_count ?? 0} icon={<Layers size={13} className="text-violet-400" />} isLoading={healthLoading} />
-        <MetricCard label="Security" value={security?.sensitive_file_count ?? 0} icon={<ShieldAlert size={13} className="text-red-400" />} isLoading={secLoading} />
-        <MetricCard label="Coupling" value={perf?.high_coupling_nodes.length ?? 0} icon={<Link2 size={13} className="text-amber-400" />} isLoading={perfLoading} />
-      </div>
-
       {/* ── Charts + ranked lists ── */}
       <div className="grid gap-6 lg:grid-cols-2">
         {hotspotData.length > 0 ? (
@@ -120,7 +110,7 @@ export function InsightsSection() {
             <p className="py-4 text-center text-[13px] text-zinc-600">No security findings.</p>
           ) : (
             <div className="space-y-1.5">
-              {(security?.insights ?? []).slice(0, 4).map((item) => {
+              {(security?.insights ?? []).slice(0, 8).map((item) => {
                 const b = severityBadge(item.tags)
                 return (
                   <div key={item.id} className="rounded-lg border border-zinc-700/30 bg-zinc-900 px-3.5 py-2.5 transition-colors hover:bg-zinc-800/80">

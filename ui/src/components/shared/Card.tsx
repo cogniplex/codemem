@@ -25,7 +25,7 @@ export function Card({ title, icon, actions, children, className = '', padded = 
           {actions}
         </div>
       )}
-      <div className={`bg-zinc-850 ${padded ? 'p-5' : ''}`}>{children}</div>
+      <div className={`bg-zinc-850 ${padded ? 'px-5 py-4' : ''}`}>{children}</div>
     </div>
   )
 }
