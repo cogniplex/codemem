@@ -15,7 +15,7 @@ env:
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       tag_name: ${{ steps.tag.outputs.tag_name }}
@@ -44,7 +44,7 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: linux-amd64
-          - target: aarch64-unknown-linux-gnu
+          - target: blacksmith-4vcpu-ubuntu-2404-arm
             os: ubuntu-latest
             name: linux-arm64
             cross: true
@@ -113,7 +113,7 @@ jobs:
     name: Upload Release Artifacts
     needs: [release-please, build]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -131,7 +131,7 @@ jobs:
     name: Publish to crates.io
     needs: [release-please, build]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
 
@@ -194,7 +194,7 @@ jobs:
     name: Update Homebrew Tap
     needs: [release-please, upload-release-artifacts]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/download-artifact@v8
         with:
