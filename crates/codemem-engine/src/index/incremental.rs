@@ -93,7 +93,11 @@ impl ChangeDetector {
     fn hash_content(content: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content);
-        format!("{:x}", hasher.finalize())
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>()
     }
 }
 

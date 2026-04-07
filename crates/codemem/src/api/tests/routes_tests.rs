@@ -6,7 +6,12 @@ use http_body_util::BodyExt;
 use std::sync::Arc;
 
 /// Create a test `ApiServer` backed by a temp database.
+///
+/// Forces `CODEMEM_EMBED_PROVIDER=candle` so that lazy embedding init doesn't
+/// create a `reqwest::blocking::Client` (which spawns a Tokio runtime internally
+/// and panics when dropped inside `#[tokio::test]` async context in Tokio ≥1.50).
 fn test_api_server(tmp: &tempfile::TempDir) -> ApiServer {
+    std::env::set_var("CODEMEM_EMBED_PROVIDER", "candle");
     let db_path = tmp.path().join("test.db");
     let server = McpServer::from_db_path(&db_path).expect("create test server");
     ApiServer::new(Arc::new(server))
