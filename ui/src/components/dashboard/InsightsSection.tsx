@@ -1,5 +1,5 @@
 import {
-  GitCommit, FileSearch, Network,
+  GitCommit, FileText, Users, FileSearch, Network, Layers,
   ShieldAlert, Link2, Zap,
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
@@ -8,7 +8,7 @@ import {
   useSecurityInsights, usePerformanceInsights,
 } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
-import { Card } from '../shared/Card'
+import { Card, MetricCard } from '../shared/Card'
 import type { MemoryItem } from '../../api/types'
 
 function InsightFeed({ insights, accent }: { insights: MemoryItem[]; accent: string }) {
@@ -58,6 +58,16 @@ export function InsightsSection() {
 
   return (
     <div className="space-y-6">
+      {/* ── Insight metrics ── */}
+      <div className="grid grid-cols-3 gap-3 lg:grid-cols-6">
+        <MetricCard label="Files Analyzed" value={activity?.git_summary.total_annotated_files ?? 0} icon={<FileText size={13} className="text-violet-400" />} />
+        <MetricCard label="Contributors" value={activity?.git_summary.top_authors.length ?? 0} icon={<Users size={13} className="text-emerald-400" />} />
+        <MetricCard label="Hotspots" value={health?.file_hotspots.length ?? 0} icon={<FileSearch size={13} className="text-amber-400" />} />
+        <MetricCard label="Communities" value={health?.community_count ?? 0} icon={<Layers size={13} className="text-violet-400" />} />
+        <MetricCard label="Security" value={security?.sensitive_file_count ?? 0} icon={<ShieldAlert size={13} className="text-red-400" />} />
+        <MetricCard label="Coupling" value={perf?.high_coupling_nodes.length ?? 0} icon={<Link2 size={13} className="text-amber-400" />} />
+      </div>
+
       {/* ── Charts + ranked lists ── */}
       <div className="grid gap-6 lg:grid-cols-2">
         {hotspotData.length > 0 ? (
