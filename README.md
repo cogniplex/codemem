@@ -320,10 +320,10 @@ See [bench/locomo/](bench/locomo/) and [bench/longmemeval/](bench/longmemeval/) 
 
 ```mermaid
 graph LR
-    A[AI Assistant] -->|SessionStart hook| B[codemem context]
-    A -->|PostToolUse hooks| C[codemem ingest]
-    A -->|Stop hook| E[codemem summarize]
-    A -->|MCP tools| D[codemem serve]
+    A[AI Assistant] -->|SessionStart hook| B[codemem mcp context]
+    A -->|PostToolUse hooks| C[codemem mcp ingest]
+    A -->|Stop hook| E[codemem mcp summarize]
+    A -->|MCP tools| D[codemem mcp serve]
     B -->|Inject context| A
     C --> F[Storage + Vector + Graph]
     D --> F
@@ -357,18 +357,18 @@ graph LR
 codemem init          # Initialize project (model + hooks + MCP)
 codemem search        # Search memories
 codemem stats         # Database statistics
-codemem serve         # Start MCP server (JSON-RPC stdio, or --api/--http for HTTP)
 codemem ui            # Open control plane UI (REST API + embedded React frontend)
-codemem index         # Index codebase with tree-sitter
 codemem analyze       # Full pipeline: index + SCIP + enrich + PageRank + clusters
 codemem review        # Diff-aware blast radius analysis (reads diff from stdin)
 codemem consolidate   # Run consolidation cycles
-codemem watch         # Real-time file watcher
 codemem export/import # Backup and restore (JSONL, JSON, CSV, Markdown)
 codemem sessions      # Session management (list, start, end)
 codemem doctor        # Health checks on installation
 codemem config        # Get/set configuration values
 codemem migrate       # Run pending schema migrations
+codemem mcp serve     # Start MCP server (JSON-RPC stdio, or --api/--http for HTTP)
+codemem mcp ingest    # Process hook payload from stdin
+codemem mcp context   # SessionStart hook (+ 7 more lifecycle hooks)
 ```
 
 See [CLI Reference](docs/cli-reference.md) for full usage.

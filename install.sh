@@ -107,6 +107,31 @@ install() {
     echo "  codemem init        # Initialize in your project"
     echo "  codemem --help      # See all commands"
     echo ""
+
+    # Suggest SCIP indexers for deeper code analysis
+    echo "Optional: install SCIP indexers for compiler-grade cross-references:"
+    echo ""
+    if command -v rustup >/dev/null 2>&1; then
+        if ! command -v rust-analyzer >/dev/null 2>&1; then
+            echo "  Rust:       rustup component add rust-analyzer"
+        fi
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        if ! command -v scip-typescript >/dev/null 2>&1; then
+            echo "  TypeScript: npm install -g @sourcegraph/scip-typescript"
+        fi
+        if ! command -v scip-python >/dev/null 2>&1; then
+            echo "  Python:     npm install -g @sourcegraph/scip-python"
+        fi
+    fi
+    if command -v go >/dev/null 2>&1; then
+        if ! command -v scip-go >/dev/null 2>&1; then
+            echo "  Go:         go install github.com/sourcegraph/scip-go/cmd/scip-go@latest"
+        fi
+    fi
+    echo ""
+    echo "See https://github.com/$REPO#scip-indexers for more."
+    echo ""
 }
 
 # --- Main ---

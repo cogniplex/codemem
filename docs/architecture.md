@@ -166,7 +166,7 @@ When `CODEMEM_COMPRESS_PROVIDER` is set, raw observations are sent to an LLM for
 ```mermaid
 sequenceDiagram
     participant AI as AI Assistant
-    participant Hook as codemem ingest
+    participant Hook as codemem mcp ingest
     participant LLM as Compress Provider
     participant Store as codemem-storage
 
@@ -201,15 +201,15 @@ Codemem registers 9 lifecycle hooks during `codemem init` for full session cover
 ```mermaid
 sequenceDiagram
     participant AI as AI Assistant
-    participant Ctx as codemem context
-    participant Prm as codemem prompt
-    participant Ing as codemem ingest
-    participant Err as codemem tool-error
-    participant AgS as codemem agent-start
-    participant Sum as codemem summarize
-    participant AgR as codemem agent-result
-    participant End as codemem session-close
-    participant Chk as codemem checkpoint
+    participant Ctx as codemem mcp context
+    participant Prm as codemem mcp prompt
+    participant Ing as codemem mcp ingest
+    participant Err as codemem mcp tool-error
+    participant AgS as codemem mcp agent-start
+    participant Sum as codemem mcp summarize
+    participant AgR as codemem mcp agent-result
+    participant End as codemem mcp session-close
+    participant Chk as codemem mcp checkpoint
     participant DB as Storage
 
     Note over AI,DB: Session Start
@@ -247,23 +247,23 @@ sequenceDiagram
     End->>DB: Close session with termination reason
 ```
 
-**SessionStart (`codemem context`):** Queries 5 data sources -- recent sessions with summaries, Decision/Insight/Pattern memories, file hotspots, detected patterns, and stats. Handles the `source` field: `startup` (full context injection), `resume` (brief note — session continuing with context intact), `compact` (save checkpoint then full context), `clear` (treated like startup). Formats as compact markdown wrapped in `<codemem-context>` tags and outputs via `hookSpecificOutput.additionalContext` for silent context injection.
+**SessionStart (`codemem mcp context`):** Queries 5 data sources -- recent sessions with summaries, Decision/Insight/Pattern memories, file hotspots, detected patterns, and stats. Handles the `source` field: `startup` (full context injection), `resume` (brief note — session continuing with context intact), `compact` (save checkpoint then full context), `clear` (treated like startup). Formats as compact markdown wrapped in `<codemem-context>` tags and outputs via `hookSpecificOutput.additionalContext` for silent context injection.
 
-**UserPromptSubmit (`codemem prompt`):** Stores the user's prompt as a Context memory (importance 0.3) with `source: UserPromptSubmit` metadata. Auto-starts a session if one isn't active. Skips trivial prompts (<30 chars or <5 words).
+**UserPromptSubmit (`codemem mcp prompt`):** Stores the user's prompt as a Context memory (importance 0.3) with `source: UserPromptSubmit` metadata. Auto-starts a session if one isn't active. Skips trivial prompts (<30 chars or <5 words).
 
-**PostToolUse (`codemem ingest`):** The existing capture pipeline. Extracts observations from Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/SendMessage/ListDir, optionally compresses via LLM, embeds, and stores with graph nodes and edges. Also runs trigger-based auto-insights (directory focus, module exploration, debugging detection, repeated search patterns). The `tool_response` field is `serde_json::Value` — structured responses are unpacked (e.g., `file.content` for Read, `stdout` for Bash, `text` for text-bearing responses) before storage.
+**PostToolUse (`codemem mcp ingest`):** The existing capture pipeline. Extracts observations from Read/Glob/Grep/Edit/Write/Bash/WebFetch/WebSearch/Agent/SendMessage/ListDir, optionally compresses via LLM, embeds, and stores with graph nodes and edges. Also runs trigger-based auto-insights (directory focus, module exploration, debugging detection, repeated search patterns). The `tool_response` field is `serde_json::Value` — structured responses are unpacked (e.g., `file.content` for Read, `stdout` for Bash, `text` for text-bearing responses) before storage.
 
-**PostToolUseFailure (`codemem tool-error`):** Captures tool error patterns as Context memories (importance 0.4) with `error`, `tool-failure`, and `tool:<name>` tags. Includes input context (file_path/command/pattern) for actionable error messages. Skips user interrupts.
+**PostToolUseFailure (`codemem mcp tool-error`):** Captures tool error patterns as Context memories (importance 0.4) with `error`, `tool-failure`, and `tool:<name>` tags. Includes input context (file_path/command/pattern) for actionable error messages. Skips user interrupts.
 
-**Stop (`codemem summarize`):** Collects all memories created during the session (by timestamp), categorizes them (files read, files edited, searches, decisions, prompts), builds a structured summary, stores it as an Insight memory, and ends the session. Appends a truncated excerpt of `last_assistant_message` for richer context. Guards against recursive hook loops via `stop_hook_active`.
+**Stop (`codemem mcp summarize`):** Collects all memories created during the session (by timestamp), categorizes them (files read, files edited, searches, decisions, prompts), builds a structured summary, stores it as an Insight memory, and ends the session. Appends a truncated excerpt of `last_assistant_message` for richer context. Guards against recursive hook loops via `stop_hook_active`.
 
-**SubagentStart (`codemem agent-start`):** Logs agent spawn events via tracing. No database write — agent spawns are transient operational events.
+**SubagentStart (`codemem mcp agent-start`):** Logs agent spawn events via tracing. No database write — agent spawns are transient operational events.
 
-**SubagentStop (`codemem agent-result`):** Captures subagent findings from `last_assistant_message` as Insight memories (importance 0.5) with `agent-result` and `agent:<type>` tags. Skips messages shorter than 20 characters. Guards against `stop_hook_active` loops.
+**SubagentStop (`codemem mcp agent-result`):** Captures subagent findings from `last_assistant_message` as Insight memories (importance 0.5) with `agent-result` and `agent:<type>` tags. Skips messages shorter than 20 characters. Guards against `stop_hook_active` loops.
 
-**SessionEnd (`codemem session-close`):** Cleanly closes the session in the database with the termination reason (e.g., `user_request`, `api_request`).
+**SessionEnd (`codemem mcp session-close`):** Cleanly closes the session in the database with the termination reason (e.g., `user_request`, `api_request`).
 
-**PreCompact (`codemem checkpoint`):** Saves a checkpoint memory before context compaction, summarizing up to 5 recent Decision/Insight/Pattern memories. Tagged `pre-compact` + `checkpoint`. Also triggered by SessionStart with `source: compact`.
+**PreCompact (`codemem mcp checkpoint`):** Saves a checkpoint memory before context compaction, summarizing up to 5 recent Decision/Insight/Pattern memories. Tagged `pre-compact` + `checkpoint`. Also triggered by SessionStart with `source: compact`.
 
 ---
 
@@ -373,7 +373,7 @@ Each consolidation run is logged in the `consolidation_log` table with cycle typ
 
 ## 7.5. Data Flow -- Code Indexing & Graph Compaction
 
-When `codemem analyze` (CLI) or `codemem index` (CLI) is called, the codebase goes through a multi-phase pipeline: directory walking, ast-grep parsing, optional SCIP enrichment, CST-aware chunking, reference resolution, graph construction (files, packages, symbols, chunks, commits), contextual embedding, graph compaction, temporal layer ingestion, and centrality recomputation.
+When `codemem analyze` (CLI) is called, the codebase goes through a multi-phase pipeline: directory walking, ast-grep parsing, optional SCIP enrichment, CST-aware chunking, reference resolution, graph construction (files, packages, symbols, chunks, commits), contextual embedding, graph compaction, temporal layer ingestion, and centrality recomputation.
 
 ```mermaid
 sequenceDiagram

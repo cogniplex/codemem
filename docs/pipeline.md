@@ -15,7 +15,7 @@ Source Files → Index (tree-sitter + SCIP) → Persist (nodes, edges, embedding
 ```
 
 The pipeline runs via two entry points:
-- **CLI**: `codemem analyze` (full pipeline) or `codemem index` (indexing only)
+- **CLI**: `codemem analyze` (full pipeline)
 - **CLI**: `codemem review` (diff-aware blast radius analysis, reads diff from stdin)
 
 ---

@@ -110,14 +110,14 @@ codemem stats
 
 ---
 
-## `codemem serve`
+## `codemem mcp serve`
 
 Start the MCP server using JSON-RPC over stdio (default). Composable with `--api` for REST API + embedded frontend, and `--http` for HTTP-based MCP transport.
 
 **Syntax**
 
 ```
-codemem serve [--api] [--http] [--port <port>]
+codemem mcp serve [--api] [--http] [--port <port>]
 ```
 
 **Flags**
@@ -131,16 +131,16 @@ codemem serve [--api] [--http] [--port <port>]
 **Example**
 
 ```bash
-codemem serve              # JSON-RPC stdio (default)
-codemem serve --api        # REST API + UI on port 4242
-codemem serve --http       # MCP over HTTP on port 4242
+codemem mcp serve              # JSON-RPC stdio (default)
+codemem mcp serve --api        # REST API + UI on port 4242
+codemem mcp serve --http       # MCP over HTTP on port 4242
 ```
 
 ---
 
 ## `codemem ui`
 
-Open the control plane UI. Alias for `codemem serve --api` with auto-browser-open.
+Open the control plane UI. Alias for `codemem mcp serve --api` with auto-browser-open.
 
 **Syntax**
 
@@ -164,7 +164,7 @@ codemem ui --port 8080 --no-open
 
 ---
 
-## `codemem ingest`
+## `codemem mcp ingest`
 
 Process a PostToolUse hook payload from stdin. This command is called automatically by the configured hooks whenever an AI assistant uses a tool (Read, Glob, Grep, Edit, Write, Bash, WebFetch, WebSearch, Agent, SendMessage, ListDir). It extracts relevant information, optionally compresses via LLM, and stores it as a memory with embeddings and graph nodes.
 
@@ -173,13 +173,13 @@ Uses the embedding provider configured via `CODEMEM_EMBED_*` env vars (see [Glob
 **Syntax**
 
 ```
-codemem ingest
+codemem mcp ingest
 ```
 
 **Example**
 
 ```bash
-echo '{"tool":"Read","path":"/src/main.rs","content":"..."}' | codemem ingest
+echo '{"tool":"Read","path":"/src/main.rs","content":"..."}' | codemem mcp ingest
 ```
 
 ---
@@ -210,32 +210,6 @@ codemem consolidate --status
 ```
 
 ---
-
----
-
-## `codemem index`
-
-Index a codebase for structural analysis using ast-grep. Parses source files across 14 supported languages (Rust, TypeScript/JS/JSX, Python, Go, C/C++, Java, Ruby, C#, Kotlin, Swift, PHP, Scala, HCL/Terraform) and extracts functions, structs, classes, imports, and call relationships.
-
-**Syntax**
-
-```
-codemem index [--path <dir>] [--verbose]
-```
-
-**Flags**
-
-| Flag | Description |
-|------|-------------|
-| `--path <dir>` | Directory to index (defaults to current directory) |
-| `--verbose` | Print detailed progress and per-file output |
-
-**Example**
-
-```bash
-codemem index
-codemem index --path ~/projects/my-app --verbose
-```
 
 ---
 
@@ -373,31 +347,6 @@ codemem import --input backup.jsonl --skip-duplicates
 
 ---
 
-## `codemem watch`
-
-Watch a directory for file changes and automatically re-index modified files. Uses `notify` with 50ms debouncing. Respects `.gitignore` patterns and common ignore directories (`node_modules`, `target`, `.git`, etc.).
-
-**Syntax**
-
-```
-codemem watch [--path <dir>]
-```
-
-**Flags**
-
-| Flag | Description |
-|------|-------------|
-| `--path <dir>` | Directory to watch (defaults to current directory) |
-
-**Example**
-
-```bash
-codemem watch
-codemem watch --path ~/projects/my-app
-```
-
----
-
 ## `codemem sessions`
 
 Manage memory sessions for cross-session continuity. Sessions track interaction periods with AI assistants and can be used to scope memories and detect patterns.
@@ -437,7 +386,7 @@ These commands are called automatically by registered hooks. They are not intend
 
 ---
 
-## `codemem context`
+## `codemem mcp context`
 
 **Hook:** SessionStart
 
@@ -461,12 +410,12 @@ Reads JSON `{session_id, cwd, source}` from stdin. Outputs JSON with `hookSpecif
 **Syntax**
 
 ```
-codemem context
+codemem mcp context
 ```
 
 ---
 
-## `codemem prompt`
+## `codemem mcp prompt`
 
 **Hook:** UserPromptSubmit
 
@@ -479,12 +428,12 @@ Prompts shorter than 5 characters are ignored. Trivial prompts (fewer than 30 ch
 **Syntax**
 
 ```
-codemem prompt
+codemem mcp prompt
 ```
 
 ---
 
-## `codemem summarize`
+## `codemem mcp summarize`
 
 **Hook:** Stop
 
@@ -497,12 +446,12 @@ Reads JSON `{session_id, cwd, stop_hook_active, last_assistant_message}` from st
 **Syntax**
 
 ```
-codemem summarize
+codemem mcp summarize
 ```
 
 ---
 
-## `codemem agent-result`
+## `codemem mcp agent-result`
 
 **Hook:** SubagentStop
 
@@ -513,12 +462,12 @@ Reads JSON `{session_id, cwd, agent_type, agent_id, last_assistant_message, stop
 **Syntax**
 
 ```
-codemem agent-result
+codemem mcp agent-result
 ```
 
 ---
 
-## `codemem agent-start`
+## `codemem mcp agent-start`
 
 **Hook:** SubagentStart
 
@@ -529,12 +478,12 @@ Reads JSON `{session_id, cwd, agent_type, agent_id}` from stdin. Outputs JSON `{
 **Syntax**
 
 ```
-codemem agent-start
+codemem mcp agent-start
 ```
 
 ---
 
-## `codemem tool-error`
+## `codemem mcp tool-error`
 
 **Hook:** PostToolUseFailure
 
@@ -545,12 +494,12 @@ Reads JSON `{session_id, cwd, tool_name, tool_input, error, is_interrupt}` from 
 **Syntax**
 
 ```
-codemem tool-error
+codemem mcp tool-error
 ```
 
 ---
 
-## `codemem session-close`
+## `codemem mcp session-close`
 
 **Hook:** SessionEnd
 
@@ -561,12 +510,12 @@ Reads JSON `{session_id, cwd, reason}` from stdin. Outputs JSON `{}`.
 **Syntax**
 
 ```
-codemem session-close
+codemem mcp session-close
 ```
 
 ---
 
-## `codemem checkpoint`
+## `codemem mcp checkpoint`
 
 **Hook:** PreCompact
 
@@ -577,7 +526,7 @@ Reads JSON `{session_id, cwd}` from stdin. Outputs JSON `{}`.
 **Syntax**
 
 ```
-codemem checkpoint
+codemem mcp checkpoint
 ```
 
 ---
