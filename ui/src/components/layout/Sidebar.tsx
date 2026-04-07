@@ -1,12 +1,8 @@
 import {
   LayoutDashboard,
-  GitFork,
   Network,
   Brain,
-  CalendarClock,
-  Bot,
   Lightbulb,
-  Settings,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -14,13 +10,9 @@ import { useUiStore } from '../../stores/ui'
 
 const navItems = [
   { key: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard },
-  { key: 'repos' as const, label: 'Repos', icon: GitFork },
   { key: 'graph' as const, label: 'Graph', icon: Network },
   { key: 'memories' as const, label: 'Memories', icon: Brain },
-  { key: 'timeline' as const, label: 'Timeline', icon: CalendarClock },
-  { key: 'agents' as const, label: 'Agents', icon: Bot },
   { key: 'insights' as const, label: 'Insights', icon: Lightbulb },
-  { key: 'settings' as const, label: 'Settings', icon: Settings },
 ]
 
 export function Sidebar() {

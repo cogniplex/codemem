@@ -5,21 +5,13 @@ import { useUiStore } from '../../stores/ui'
 import { DashboardView } from '../dashboard/DashboardView'
 import { GraphView } from '../graph/GraphView'
 import { MemoryBrowser } from '../memories/MemoryBrowser'
-import { RepoManager } from '../repos/RepoManager'
-import { TimelineView } from '../timeline/TimelineView'
-import { AgentRunner } from '../agents/AgentRunner'
 import { InsightsView } from '../insights/InsightsView'
-import { SettingsView } from '../settings/SettingsView'
 
 const views: Record<string, React.FC> = {
   dashboard: DashboardView,
-  repos: RepoManager,
   graph: GraphView,
   memories: MemoryBrowser,
-  timeline: TimelineView,
-  agents: AgentRunner,
   insights: InsightsView,
-  settings: SettingsView,
 }
 
 export function Shell() {

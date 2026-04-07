@@ -2,6 +2,7 @@ import { Search } from 'lucide-react'
 import { useNamespaces } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
 import { useUiStore } from '../../stores/ui'
+import { HealthIndicator } from '../dashboard/HealthIndicator'
 
 export function Header() {
   const { data: namespaces } = useNamespaces()
@@ -22,6 +23,8 @@ export function Header() {
       </button>
 
       <div className="ml-auto flex items-center gap-3">
+        <HealthIndicator />
+
         <label className="text-xs text-zinc-500">Namespace</label>
         <select
           value={active ?? ''}

@@ -46,44 +46,9 @@ export const useVectors = (namespace?: string) =>
 // Namespaces
 export const useNamespaces = () => useQuery({ queryKey: ['namespaces'], queryFn: api.namespaces })
 
-// Repos
-export const useRepos = () =>
-  useQuery({
-    queryKey: ['repos'],
-    queryFn: api.repos,
-    refetchInterval: (query) => {
-      const repos = query.state.data
-      const indexing = repos?.some((r: { status: string }) => r.status === 'indexing')
-      return indexing ? 2000 : false
-    },
-  })
-
-export const useRegisterRepo = () => {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: api.registerRepo,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['repos'] }),
-  })
-}
-
-export const useIndexRepo = () => {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) => api.indexRepo(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['repos'] })
-      qc.invalidateQueries({ queryKey: ['stats'] })
-    },
-  })
-}
-
 // Sessions
 export const useSessions = (params?: Parameters<typeof api.sessions>[0]) =>
   useQuery({ queryKey: ['sessions', params], queryFn: () => api.sessions(params) })
-
-// Timeline & Distribution
-export const useTimeline = (params?: Parameters<typeof api.timeline>[0]) =>
-  useQuery({ queryKey: ['timeline', params], queryFn: () => api.timeline(params) })
 
 export const useDistribution = (namespace?: string) =>
   useQuery({ queryKey: ['distribution', namespace], queryFn: () => api.distribution(namespace) })
@@ -113,17 +78,3 @@ export const useSecurityInsights = (params?: Parameters<typeof api.securityInsig
 export const usePerformanceInsights = (params?: Parameters<typeof api.performanceInsights>[0]) =>
   useQuery({ queryKey: ['insights-performance', params], queryFn: () => api.performanceInsights(params) })
 
-// Agent Recipes
-export const useRecipes = () => useQuery({ queryKey: ['recipes'], queryFn: api.recipes })
-
-// Config
-export const useConfig = () => useQuery({ queryKey: ['config'], queryFn: api.config })
-
-export const useUpdateScoringWeights = () => {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (weights: Partial<import('./types').ScoreBreakdown>) =>
-      api.updateScoringWeights(weights),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['config'] }),
-  })
-}
