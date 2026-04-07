@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
-import { Loader2, AlertTriangle } from 'lucide-react'
+import { Loader2, AlertTriangle, X } from 'lucide-react'
 import { useSubgraph, useCommunities, useNeighbors } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
 import { ALL_RELATIONSHIPS } from './constants'
@@ -145,21 +145,23 @@ export function GraphExplorer() {
       {/* Main area: horizontal split — top: tree+graph+inspector, bottom: code */}
       <div className="flex min-h-0 flex-1 flex-col">
         {/* Top row */}
-        <div className={`flex min-h-0 ${showCode ? 'flex-[3]' : 'flex-1'}`}>
+        <div className={`flex min-h-0 overflow-hidden ${showCode ? 'flex-[3]' : 'flex-1'}`}>
           {/* File Tree */}
           {showFileTree && (
-            <div className="w-56 shrink-0 border-r border-zinc-800/40 bg-zinc-950">
+            <div className="h-full w-56 shrink-0 overflow-hidden border-r border-zinc-800/40 bg-zinc-950">
               <FileTree nodes={displayNodes} onSelectNode={handleNodeClick} selectedNodeId={selectedNodeId} />
             </div>
           )}
 
           {/* Graph */}
-          <div className="relative min-w-0 flex-1 bg-zinc-950">
+          <div className="relative h-full min-w-0 flex-1 bg-zinc-950">
             <SigmaGraph
               nodes={displayNodes} edges={displayEdges}
               communities={focusMode ? null : (communitiesData?.communities ?? null)}
               showCommunities={!focusMode && showCommunities} showEdges={showEdges}
-              onNodeClick={handleNodeClick} highlightNodeId={selectedNodeId}
+              onNodeClick={handleNodeClick}
+              onBackgroundClick={() => { setSelectedNodeId(null); setShowCode(false) }}
+              highlightNodeId={selectedNodeId}
               searchLabel={searchLabel} onLayoutRunning={setLayoutRunning}
               activeRelationships={activeRelationships} focusNodeId={focusMode?.nodeId ?? null}
             />
@@ -183,7 +185,7 @@ export function GraphExplorer() {
 
           {/* Right panel: Node context */}
           {selectedNode && (
-            <div className="w-72 shrink-0 border-l border-zinc-800/40 bg-zinc-950">
+            <div className="h-full w-72 shrink-0 overflow-hidden border-l border-zinc-800/40 bg-zinc-950">
               <NodeInspector
                 node={selectedNode} edges={displayEdges} allNodes={displayNodes}
                 onClose={() => setSelectedNodeId(null)}
@@ -198,8 +200,20 @@ export function GraphExplorer() {
 
         {/* Bottom: Code panel (horizontal split) */}
         {showCode && selectedNode && hasSourceFile && (
-          <div className="flex-[2] border-t border-zinc-800/40 bg-zinc-950">
-            <CodeTab node={selectedNode} />
+          <div className="flex min-h-0 flex-[2] flex-col border-t border-zinc-800/40 bg-zinc-950">
+            <div className="flex items-center justify-between bg-zinc-900 px-4 py-1.5">
+              <span className="text-[13px] font-medium text-zinc-300">Source</span>
+              <button
+                onClick={() => setShowCode(false)}
+                className="rounded-md p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-400"
+                title="Close code panel"
+              >
+                <X size={13} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              <CodeTab node={selectedNode} />
+            </div>
           </div>
         )}
       </div>

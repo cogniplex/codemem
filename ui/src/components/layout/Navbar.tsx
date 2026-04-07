@@ -28,7 +28,7 @@ export function Navbar() {
   const { data: namespaces } = useNamespaces()
 
   return (
-    <nav className="flex h-12 shrink-0 items-center gap-1.5 border-b border-zinc-800/50 bg-zinc-950 px-4">
+    <nav className="flex h-[52px] shrink-0 items-center gap-2 border-b border-zinc-800/50 bg-zinc-950 px-5">
       {/* Logo */}
       <div className="flex items-center gap-2 pr-4">
         <div className="flex h-5 w-5 items-center justify-center rounded bg-violet-500/15">
@@ -45,7 +45,7 @@ export function Navbar() {
             <button
               key={key}
               onClick={() => setActiveView(key)}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 active
                   ? 'bg-zinc-800/80 text-zinc-100'
                   : 'text-zinc-500 hover:bg-zinc-800/40 hover:text-zinc-300'
@@ -64,7 +64,7 @@ export function Navbar() {
       {/* Search */}
       <button
         onClick={() => setSearchOpen(true)}
-        className="flex items-center gap-1.5 rounded-md border border-zinc-800/50 bg-zinc-900/40 px-2.5 py-1 text-[12px] text-zinc-500 transition-colors hover:border-zinc-700 hover:text-zinc-400"
+        className="flex h-8 items-center gap-1.5 rounded-lg border border-zinc-800/50 bg-zinc-900/40 px-3 text-[13px] text-zinc-500 transition-colors hover:border-zinc-700 hover:text-zinc-400"
       >
         <Search size={12} />
         <span className="hidden sm:inline">Search</span>
@@ -111,7 +111,7 @@ function NamespaceDropdown({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 rounded-md border border-zinc-800/50 bg-zinc-900/40 px-2.5 py-1 text-[12px] text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-300"
+        className="flex h-8 items-center gap-1.5 rounded-lg border border-zinc-800/50 bg-zinc-900/40 px-3 text-[13px] text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-300"
       >
         <span className="max-w-[120px] truncate">
           {value ?? 'All namespaces'}

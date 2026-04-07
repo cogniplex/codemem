@@ -182,7 +182,7 @@ function TreeItem({
     <>
       <button
         onClick={handleClick}
-        className={`flex w-full items-center gap-1.5 rounded-md py-[3px] text-left font-mono text-[11px] leading-tight transition-colors ${
+        className={`flex w-full items-center gap-1.5 rounded-md py-[3px] text-left font-mono text-[12px] leading-snug transition-colors ${
           isSelected
             ? 'bg-violet-500/10 text-violet-300'
             : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
@@ -248,7 +248,7 @@ export function FileTree({ nodes, onSelectNode, selectedNodeId }: Props) {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter..."
-            className="w-full bg-transparent text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700"
+            className="w-full bg-transparent text-[12px] text-zinc-300 outline-none placeholder:text-zinc-700"
           />
         </div>
       </div>
