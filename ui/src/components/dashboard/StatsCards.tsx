@@ -2,10 +2,10 @@ import { Brain, GitFork, Network, Timer } from 'lucide-react'
 import { useStats } from '../../api/hooks'
 
 const cards = [
-  { key: 'memory_count', label: 'Memories', icon: Brain, color: 'text-violet-400' },
-  { key: 'node_count', label: 'Graph Nodes', icon: Network, color: 'text-cyan-400' },
-  { key: 'edge_count', label: 'Edges', icon: GitFork, color: 'text-emerald-400' },
-  { key: 'session_count', label: 'Sessions', icon: Timer, color: 'text-amber-400' },
+  { key: 'memory_count', label: 'Memories', icon: Brain, accent: 'bg-violet-500/10 text-violet-400' },
+  { key: 'node_count', label: 'Graph Nodes', icon: Network, accent: 'bg-cyan-500/10 text-cyan-400' },
+  { key: 'edge_count', label: 'Edges', icon: GitFork, accent: 'bg-emerald-500/10 text-emerald-400' },
+  { key: 'session_count', label: 'Sessions', icon: Timer, accent: 'bg-amber-500/10 text-amber-400' },
 ] as const
 
 export function StatsCards() {
@@ -13,16 +13,16 @@ export function StatsCards() {
 
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      {cards.map(({ key, label, icon: Icon, color }) => (
+      {cards.map(({ key, label, icon: Icon, accent }) => (
         <div
           key={key}
-          className="rounded-lg border border-zinc-800 bg-zinc-850 p-5"
+          className="rounded-xl border border-zinc-800/60 bg-zinc-900 p-5"
         >
           <div className="flex items-center gap-3">
-            <div className={`rounded-md bg-zinc-800 p-2 ${color}`}>
-              <Icon size={18} />
+            <div className={`rounded-lg p-2 ${accent}`}>
+              <Icon size={16} strokeWidth={1.5} />
             </div>
-            <span className="text-sm text-zinc-400">{label}</span>
+            <span className="text-[13px] font-medium text-zinc-400">{label}</span>
           </div>
           <p className="mt-3 text-2xl font-semibold tabular-nums text-zinc-100">
             {isLoading ? (

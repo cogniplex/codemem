@@ -6,9 +6,9 @@ export function ConsolidationSection() {
   const runConsolidation = useRunConsolidation()
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-850">
-      <div className="border-b border-zinc-800 px-5 py-3">
-        <h3 className="text-sm font-medium text-zinc-300">
+    <div className="rounded-xl border border-zinc-800/60 bg-zinc-900">
+      <div className="flex items-center gap-2 border-b border-zinc-800/60 px-5 py-3">
+        <h3 className="text-[13px] font-medium text-zinc-100">
           Consolidation Cycles
         </h3>
       </div>

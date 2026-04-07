@@ -22,9 +22,9 @@ export function TypeDistribution() {
   }))
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-850">
-      <div className="border-b border-zinc-800 px-5 py-3">
-        <h3 className="text-sm font-medium text-zinc-300">Type Distribution</h3>
+    <div className="rounded-xl border border-zinc-800/60 bg-zinc-900">
+      <div className="flex items-center gap-2 border-b border-zinc-800/60 px-5 py-3">
+        <h3 className="text-[13px] font-medium text-zinc-100">Type Distribution</h3>
       </div>
       <div className="flex items-center justify-center px-5 py-4">
         {isLoading ? (

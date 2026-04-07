@@ -4,10 +4,8 @@ import { useSubgraph, useCommunities, useNeighbors } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
 import { ALL_RELATIONSHIPS } from './constants'
 import { SigmaGraph } from './SigmaGraph'
-import { GraphControls } from './GraphControls'
+import { GraphToolbar } from './GraphToolbar'
 import { NodeInspector } from './NodeInspector'
-import { CommunityLegend } from './CommunityLegend'
-import { RelationshipFilters } from './RelationshipFilters'
 import { FocusToolbar } from './FocusToolbar'
 import { FileTree } from './FileTree'
 
@@ -122,7 +120,7 @@ export function GraphExplorer() {
   }, [])
 
   const handleFocusDepthChange = useCallback((depth: number) => {
-    setFocusMode((prev) => prev ? { ...prev, depth } : null)
+    setFocusMode((prev) => (prev ? { ...prev, depth } : null))
   }, [])
 
   const handleExitFocus = useCallback(() => {
@@ -132,8 +130,8 @@ export function GraphExplorer() {
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 size={24} className="animate-spin text-zinc-500" />
-        <span className="ml-3 text-sm text-zinc-400">Loading graph...</span>
+        <Loader2 size={20} className="animate-spin text-zinc-600" />
+        <span className="ml-3 text-sm text-zinc-500">Loading graph...</span>
       </div>
     )
   }
@@ -141,7 +139,7 @@ export function GraphExplorer() {
   if (error) {
     return (
       <div className="flex h-full items-center justify-center">
-        <AlertTriangle size={20} className="text-amber-400" />
+        <AlertTriangle size={18} className="text-amber-400" />
         <span className="ml-2 text-sm text-zinc-400">Failed to load graph data</span>
       </div>
     )
@@ -150,7 +148,13 @@ export function GraphExplorer() {
   if (!displayNodes.length) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-zinc-500">No graph nodes found. Index a repository first.</p>
+        <p className="text-sm text-zinc-500">
+          No graph nodes found. Run{' '}
+          <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300">
+            codemem analyze
+          </code>{' '}
+          to index a repository.
+        </p>
       </div>
     )
   }
@@ -160,101 +164,88 @@ export function GraphExplorer() {
     : ''
 
   return (
-    <div className="flex h-full">
-      {/* Left: File Tree */}
-      {showFileTree && (
-        <div className="flex w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
-          <FileTree
-            nodes={displayNodes}
-            onSelectNode={handleNodeClick}
-            selectedNodeId={selectedNodeId}
-          />
-        </div>
-      )}
+    <div className="flex h-full flex-col">
+      {/* Toolbar */}
+      <GraphToolbar
+        searchLabel={searchLabel}
+        onSearchChange={setSearchLabel}
+        kinds={kinds}
+        onToggleKind={handleToggleKind}
+        maxNodes={maxNodes}
+        onMaxNodesChange={setMaxNodes}
+        showCommunities={showCommunities}
+        onToggleCommunities={() => setShowCommunities((v) => !v)}
+        showEdges={showEdges}
+        onToggleEdges={() => setShowEdges((v) => !v)}
+        activeRelationships={activeRelationships}
+        edgeCounts={edgeCounts}
+        onToggleRelationship={handleToggleRelationship}
+        showFileTree={showFileTree}
+        onToggleFileTree={() => setShowFileTree((v) => !v)}
+      />
 
-      {/* Center: Force Graph */}
-      <div className="relative min-w-0 flex-1">
-        <SigmaGraph
-          nodes={displayNodes}
-          edges={displayEdges}
-          communities={focusMode ? null : (communitiesData?.communities ?? null)}
-          showCommunities={!focusMode && showCommunities}
-          showEdges={showEdges}
-          onNodeClick={handleNodeClick}
-          highlightNodeId={selectedNodeId}
-          searchLabel={searchLabel}
-          onLayoutRunning={setLayoutRunning}
-          activeRelationships={activeRelationships}
-          focusNodeId={focusMode?.nodeId ?? null}
-        />
-
-        {focusMode && (
-          <FocusToolbar
-            nodeLabel={focusNodeLabel}
-            depth={focusMode.depth}
-            onDepthChange={handleFocusDepthChange}
-            onExit={handleExitFocus}
-          />
-        )}
-
-        {layoutRunning && (
-          <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
-            <div className="flex items-center gap-2 rounded-full bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-400 backdrop-blur-sm">
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" />
-              Stabilizing layout...
-            </div>
+      {/* Main panels */}
+      <div className="flex min-h-0 flex-1">
+        {/* Left: File Tree */}
+        {showFileTree && (
+          <div className="w-60 shrink-0 border-r border-zinc-800/60 bg-zinc-950">
+            <FileTree
+              nodes={displayNodes}
+              onSelectNode={handleNodeClick}
+              selectedNodeId={selectedNodeId}
+            />
           </div>
         )}
 
-        {/* Toggle file tree button */}
-        <button
-          onClick={() => setShowFileTree((v) => !v)}
-          className="absolute left-2 top-2 z-10 rounded-md bg-zinc-800/80 px-2 py-1 text-xs text-zinc-400 backdrop-blur-sm hover:bg-zinc-700 hover:text-zinc-200"
-        >
-          {showFileTree ? 'Hide Tree' : 'Show Tree'}
-        </button>
-
-        {!focusMode && (
-          <GraphControls
-            kinds={kinds}
-            onToggleKind={handleToggleKind}
-            maxNodes={maxNodes}
-            onMaxNodesChange={setMaxNodes}
-            showCommunities={showCommunities}
-            onToggleCommunities={() => setShowCommunities((v) => !v)}
+        {/* Center: Force Graph */}
+        <div className="relative min-w-0 flex-1 bg-zinc-950">
+          <SigmaGraph
+            nodes={displayNodes}
+            edges={displayEdges}
+            communities={focusMode ? null : (communitiesData?.communities ?? null)}
+            showCommunities={!focusMode && showCommunities}
             showEdges={showEdges}
-            onToggleEdges={() => setShowEdges((v) => !v)}
+            onNodeClick={handleNodeClick}
+            highlightNodeId={selectedNodeId}
             searchLabel={searchLabel}
-            onSearchChange={setSearchLabel}
-          />
-        )}
-
-        {showEdges && (
-          <RelationshipFilters
+            onLayoutRunning={setLayoutRunning}
             activeRelationships={activeRelationships}
-            edgeCounts={edgeCounts}
-            onToggle={handleToggleRelationship}
+            focusNodeId={focusMode?.nodeId ?? null}
           />
-        )}
 
-        {!focusMode && showCommunities && communitiesData?.communities && (
-          <CommunityLegend communities={communitiesData.communities} />
+          {focusMode && (
+            <FocusToolbar
+              nodeLabel={focusNodeLabel}
+              depth={focusMode.depth}
+              onDepthChange={handleFocusDepthChange}
+              onExit={handleExitFocus}
+            />
+          )}
+
+          {layoutRunning && (
+            <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+              <div className="flex items-center gap-2 rounded-full bg-zinc-900/90 px-3 py-1.5 text-[11px] text-zinc-500 backdrop-blur-sm">
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-500" />
+                Stabilizing...
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Detail Panel */}
+        {selectedNode && (
+          <div className="w-80 shrink-0 border-l border-zinc-800/60 bg-zinc-950">
+            <NodeInspector
+              node={selectedNode}
+              edges={displayEdges}
+              allNodes={displayNodes}
+              onClose={() => setSelectedNodeId(null)}
+              onExpandNeighbors={handleExpandNeighbors}
+              onFocus={handleFocus}
+            />
+          </div>
         )}
       </div>
-
-      {/* Right: Detail Panel */}
-      {selectedNode && (
-        <div className="w-72 shrink-0 border-l border-zinc-800 bg-zinc-950">
-          <NodeInspector
-            node={selectedNode}
-            edges={displayEdges}
-            allNodes={displayNodes}
-            onClose={() => setSelectedNodeId(null)}
-            onExpandNeighbors={handleExpandNeighbors}
-            onFocus={handleFocus}
-          />
-        </div>
-      )}
     </div>
   )
 }

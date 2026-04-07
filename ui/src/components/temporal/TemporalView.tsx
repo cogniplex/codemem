@@ -46,8 +46,8 @@ export function TemporalView() {
       </div>
 
       {/* Drift Section */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-850">
-        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
+      <div className="rounded-xl border border-zinc-800/60 bg-zinc-900">
+        <div className="flex items-center justify-between border-b border-zinc-800/60 px-5 py-3">
           <div className="flex items-center gap-2">
             <GitBranch size={14} className="text-violet-400" />
             <h3 className="text-sm font-medium text-zinc-300">Architectural Drift</h3>
@@ -134,8 +134,8 @@ export function TemporalView() {
       </div>
 
       {/* Stale Files Section */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-850">
-        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
+      <div className="rounded-xl border border-zinc-800/60 bg-zinc-900">
+        <div className="flex items-center justify-between border-b border-zinc-800/60 px-5 py-3">
           <div className="flex items-center gap-2">
             <FileWarning size={14} className="text-amber-400" />
             <h3 className="text-sm font-medium text-zinc-300">Stale Files</h3>
