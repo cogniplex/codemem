@@ -112,27 +112,25 @@ codemem stats
 
 ## `codemem mcp serve`
 
-Start the MCP server using JSON-RPC over stdio (default). Composable with `--api` for REST API + embedded frontend, and `--http` for HTTP-based MCP transport.
+Start the MCP server using JSON-RPC over stdio (default), or `--http` for HTTP-based MCP transport. For the REST API and web UI, use `codemem ui` instead.
 
 **Syntax**
 
 ```
-codemem mcp serve [--api] [--http] [--port <port>]
+codemem mcp serve [--http] [--port <port>]
 ```
 
 **Flags**
 
 | Flag | Description |
 |------|-------------|
-| `--api` | Enable REST API + embedded frontend on HTTP |
 | `--http` | Use HTTP transport for MCP (instead of stdio) |
-| `--port <port>` | HTTP server port (default: 4242, used when `--api` or `--http` is set) |
+| `--port <port>` | HTTP server port (default: 4242, used when `--http` is set) |
 
 **Example**
 
 ```bash
 codemem mcp serve              # JSON-RPC stdio (default)
-codemem mcp serve --api        # REST API + UI on port 4242
 codemem mcp serve --http       # MCP over HTTP on port 4242
 ```
 
@@ -140,7 +138,7 @@ codemem mcp serve --http       # MCP over HTTP on port 4242
 
 ## `codemem ui`
 
-Open the control plane UI. Alias for `codemem mcp serve --api` with auto-browser-open.
+Open the control plane UI. Starts the REST API + embedded React frontend and opens a browser.
 
 **Syntax**
 

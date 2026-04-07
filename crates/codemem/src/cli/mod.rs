@@ -240,15 +240,12 @@ enum ConfigAction {
 
 #[derive(Subcommand)]
 enum McpAction {
-    /// Start MCP server (stdio by default, composable with --api and --http)
+    /// Start MCP server (stdio by default, or --http for HTTP transport)
     Serve {
-        /// Enable REST API + embedded frontend on HTTP
-        #[arg(long)]
-        api: bool,
         /// Use HTTP transport for MCP (instead of stdio)
         #[arg(long)]
         http: bool,
-        /// HTTP server port (used when --api or --http is set)
+        /// HTTP server port (used when --http is set)
         #[arg(long, default_value = "4242")]
         port: u16,
     },
@@ -432,7 +429,12 @@ pub fn run() -> anyhow::Result<()> {
 
         // ── Hidden backward-compat aliases → delegate to mcp subcommand ──
         Commands::Serve { api, http, port } => {
-            run_mcp_action(McpAction::Serve { api, http, port })?;
+            if api {
+                // Old `codemem serve --api` → now `codemem ui`
+                commands_data::cmd_ui(port, false)?;
+            } else {
+                run_mcp_action(McpAction::Serve { http, port })?;
+            }
         }
         Commands::Ingest => {
             run_mcp_action(McpAction::Ingest)?;
@@ -468,8 +470,8 @@ pub fn run() -> anyhow::Result<()> {
 
 fn run_mcp_action(action: McpAction) -> anyhow::Result<()> {
     match action {
-        McpAction::Serve { api, http, port } => {
-            commands_data::cmd_serve(api, http, port)?;
+        McpAction::Serve { http, port } => {
+            commands_data::cmd_serve(false, http, port)?;
         }
         McpAction::Ingest => {
             commands_data::cmd_ingest()?;

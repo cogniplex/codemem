@@ -366,7 +366,7 @@ codemem sessions      # Session management (list, start, end)
 codemem doctor        # Health checks on installation
 codemem config        # Get/set configuration values
 codemem migrate       # Run pending schema migrations
-codemem mcp serve     # Start MCP server (JSON-RPC stdio, or --api/--http for HTTP)
+codemem mcp serve     # Start MCP server (JSON-RPC stdio, or --http for HTTP)
 codemem mcp ingest    # Process hook payload from stdin
 codemem mcp context   # SessionStart hook (+ 7 more lifecycle hooks)
 ```
