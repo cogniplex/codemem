@@ -1,5 +1,12 @@
-import { Brain, GitFork, Network, Timer } from 'lucide-react'
-import { useStats } from '../../api/hooks'
+import {
+  Brain, GitFork, Network, Timer,
+  FileText, Users, FileSearch, Layers, ShieldAlert, Link2,
+} from 'lucide-react'
+import {
+  useStats, useActivityInsights, useCodeHealthInsights,
+  useSecurityInsights, usePerformanceInsights,
+} from '../../api/hooks'
+import { useNamespaceStore } from '../../stores/namespace'
 import { MetricCard } from '../shared/Card'
 import { RecentActivity } from './RecentActivity'
 import { ConsolidationSection } from './ConsolidationSection'
@@ -7,16 +14,28 @@ import { TemporalSection } from './TemporalSection'
 import { InsightsSection } from './InsightsSection'
 
 export function DashboardView() {
-  const { data: stats, isLoading } = useStats()
+  const namespace = useNamespaceStore((s) => s.active)
+  const ns = namespace ? { namespace } : undefined
+  const { data: stats, isLoading: sL } = useStats()
+  const { data: activity, isLoading: aL } = useActivityInsights(ns)
+  const { data: health, isLoading: hL } = useCodeHealthInsights(ns)
+  const { data: security, isLoading: secL } = useSecurityInsights(ns)
+  const { data: perf, isLoading: pL } = usePerformanceInsights(ns)
 
   return (
     <div className="mx-auto max-w-7xl space-y-8">
-      {/* ── Core stats ── */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <MetricCard label="Memories" value={stats?.memory_count ?? 0} icon={<Brain size={13} className="text-violet-400" />} isLoading={isLoading} />
-        <MetricCard label="Graph Nodes" value={stats?.node_count ?? 0} icon={<Network size={13} className="text-cyan-400" />} isLoading={isLoading} />
-        <MetricCard label="Edges" value={stats?.edge_count ?? 0} icon={<GitFork size={13} className="text-emerald-400" />} isLoading={isLoading} />
-        <MetricCard label="Sessions" value={stats?.session_count ?? 0} icon={<Timer size={13} className="text-amber-400" />} isLoading={isLoading} />
+      {/* ── All metrics — one place ── */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+        <MetricCard label="Memories" value={stats?.memory_count ?? 0} icon={<Brain size={13} className="text-violet-400" />} isLoading={sL} />
+        <MetricCard label="Graph Nodes" value={stats?.node_count ?? 0} icon={<Network size={13} className="text-cyan-400" />} isLoading={sL} />
+        <MetricCard label="Edges" value={stats?.edge_count ?? 0} icon={<GitFork size={13} className="text-emerald-400" />} isLoading={sL} />
+        <MetricCard label="Sessions" value={stats?.session_count ?? 0} icon={<Timer size={13} className="text-amber-400" />} isLoading={sL} />
+        <MetricCard label="Contributors" value={activity?.git_summary.top_authors.length ?? 0} icon={<Users size={13} className="text-emerald-400" />} isLoading={aL} />
+        <MetricCard label="Files Analyzed" value={activity?.git_summary.total_annotated_files ?? 0} icon={<FileText size={13} className="text-violet-400" />} isLoading={aL} />
+        <MetricCard label="Hotspots" value={health?.file_hotspots.length ?? 0} icon={<FileSearch size={13} className="text-amber-400" />} isLoading={hL} />
+        <MetricCard label="Communities" value={health?.community_count ?? 0} icon={<Layers size={13} className="text-violet-400" />} isLoading={hL} />
+        <MetricCard label="Security" value={security?.sensitive_file_count ?? 0} icon={<ShieldAlert size={13} className="text-red-400" />} isLoading={secL} />
+        <MetricCard label="Coupling" value={perf?.high_coupling_nodes.length ?? 0} icon={<Link2 size={13} className="text-amber-400" />} isLoading={pL} />
       </div>
 
       {/* ── Activity + Consolidation ── */}
