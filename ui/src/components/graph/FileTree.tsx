@@ -7,7 +7,7 @@ interface TreeNode {
   name: string
   path: string
   kind: 'directory' | 'file' | 'symbol'
-  nodeId?: string // graph node ID
+  nodeId?: string
   graphKind?: string
   children: TreeNode[]
 }
@@ -18,32 +18,51 @@ interface Props {
   selectedNodeId: string | null
 }
 
-const SKIP_KINDS = new Set([
-  'memory', 'chunk', 'commit', 'pull_request', 'external',
-])
+const SKIP_KINDS = new Set(['memory', 'chunk', 'commit', 'pull_request', 'external'])
 
-/** Build a hierarchical tree from flat graph nodes. */
+// File extension → color for file icons
+const EXT_COLORS: Record<string, string> = {
+  rs: 'text-orange-400',
+  ts: 'text-blue-400',
+  tsx: 'text-blue-400',
+  js: 'text-yellow-400',
+  jsx: 'text-yellow-400',
+  py: 'text-green-400',
+  go: 'text-cyan-400',
+  java: 'text-red-400',
+  rb: 'text-red-400',
+  toml: 'text-zinc-400',
+  json: 'text-amber-400',
+  md: 'text-zinc-500',
+  yml: 'text-pink-400',
+  yaml: 'text-pink-400',
+  css: 'text-violet-400',
+  html: 'text-orange-400',
+  sql: 'text-cyan-400',
+}
+
+function getExtColor(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return EXT_COLORS[ext] ?? 'text-zinc-500'
+}
+
 function buildTree(nodes: GraphNode[]): TreeNode[] {
   const root: TreeNode = { name: '', path: '', kind: 'directory', children: [] }
-
   const fileNodes = nodes.filter((n) => n.kind === 'file')
   const symbolNodes = nodes.filter(
     (n) => !SKIP_KINDS.has(n.kind) && n.kind !== 'file' && n.kind !== 'package' && n.kind !== 'module',
   )
 
-  // Build directory structure from file paths
   const filesByPath = new Map<string, GraphNode>()
   for (const node of fileNodes) {
     const path = node.label || node.id.replace(/^file:/, '')
     filesByPath.set(path, node)
   }
 
-  // Insert file nodes into tree
   for (const [path, node] of filesByPath) {
     insertPath(root, path, node.id, node.kind)
   }
 
-  // Attach symbols to their parent files
   for (const sym of symbolNodes) {
     const filePath = sym.payload?.file_path as string | undefined
     if (filePath && filesByPath.has(filePath)) {
@@ -61,16 +80,12 @@ function buildTree(nodes: GraphNode[]): TreeNode[] {
       }
     }
 
-    // Fallback: if no file nodes exist, build tree from symbol module paths.
-    // Symbol IDs look like "sym:cli::Commands::Analyze" — use "::" segments as tree levels.
     if (filesByPath.size === 0) {
       const symPath = sym.id.replace(/^sym:/, '')
       const segments = symPath.split('::')
       if (segments.length > 1) {
-        // Use all but last segment as directory path, last as the symbol name
         const modulePath = segments.slice(0, -1).join('/')
         const symName = segments[segments.length - 1]
-        // Ensure the module directory exists
         insertPath(root, modulePath, undefined, undefined)
         const parentDir = findTreeNodeByPath(root, modulePath)
         if (parentDir) {
@@ -84,7 +99,6 @@ function buildTree(nodes: GraphNode[]): TreeNode[] {
           })
         }
       } else {
-        // Single-segment symbol — add to root
         root.children.push({
           name: sym.label,
           path: `#${sym.label}`,
@@ -97,9 +111,7 @@ function buildTree(nodes: GraphNode[]): TreeNode[] {
     }
   }
 
-  // Sort: directories first, then files, then alphabetical
   sortTree(root)
-
   return root.children
 }
 
@@ -149,87 +161,69 @@ function sortTree(node: TreeNode) {
     if (a.kind !== 'directory' && b.kind === 'directory') return 1
     return a.name.localeCompare(b.name)
   })
-  for (const child of node.children) {
-    sortTree(child)
-  }
+  for (const child of node.children) sortTree(child)
 }
 
 function TreeItem({
-  node,
-  depth,
-  onSelect,
-  selectedId,
+  node, depth, onSelect, selectedId,
 }: {
-  node: TreeNode
-  depth: number
-  onSelect: (nodeId: string) => void
-  selectedId: string | null
+  node: TreeNode; depth: number; onSelect: (nodeId: string) => void; selectedId: string | null
 }) {
-  const [expanded, setExpanded] = useState(depth < 2)
+  const [expanded, setExpanded] = useState(depth < 1)
   const hasChildren = node.children.length > 0
   const isSelected = node.nodeId === selectedId
 
   const handleClick = () => {
-    if (node.nodeId) {
-      onSelect(node.nodeId)
-    }
-    if (hasChildren) {
-      setExpanded(!expanded)
-    }
+    if (node.nodeId) onSelect(node.nodeId)
+    if (hasChildren) setExpanded(!expanded)
   }
-
-  const icon =
-    node.kind === 'directory' ? (
-      <Folder size={14} className="shrink-0 text-zinc-500" />
-    ) : node.kind === 'file' ? (
-      <File size={14} className="shrink-0 text-zinc-500" />
-    ) : (
-      <span
-        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-        style={{ backgroundColor: KIND_COLORS[node.graphKind ?? ''] ?? '#71717a' }}
-      />
-    )
 
   return (
     <>
       <button
         onClick={handleClick}
-        className={`flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-left text-xs transition-colors ${
+        className={`flex w-full items-center gap-1.5 rounded-md py-[3px] text-left font-mono text-[11px] leading-tight transition-colors ${
           isSelected
-            ? 'bg-violet-500/15 text-violet-300'
-            : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            ? 'bg-violet-500/10 text-violet-300'
+            : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
         }`}
-        style={{ paddingLeft: `${depth * 12 + 4}px` }}
+        style={{ paddingLeft: `${depth * 14 + 8}px`, paddingRight: '8px' }}
       >
         {hasChildren ? (
           expanded ? (
-            <ChevronDown size={12} className="shrink-0 text-zinc-600" />
+            <ChevronDown size={10} className="shrink-0 text-zinc-600" />
           ) : (
-            <ChevronRight size={12} className="shrink-0 text-zinc-600" />
+            <ChevronRight size={10} className="shrink-0 text-zinc-600" />
           )
         ) : (
-          <span className="w-3 shrink-0" />
+          <span className="w-[10px] shrink-0" />
         )}
-        {icon}
-        <span className="truncate">{node.name}</span>
-      </button>
-      {expanded &&
-        node.children.map((child) => (
-          <TreeItem
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            onSelect={onSelect}
-            selectedId={selectedId}
+        {node.kind === 'directory' ? (
+          <Folder size={12} className={`shrink-0 ${expanded ? 'text-zinc-400' : 'text-zinc-600'}`} />
+        ) : node.kind === 'file' ? (
+          <File size={12} className={`shrink-0 ${getExtColor(node.name)}`} />
+        ) : (
+          <span
+            className="inline-block h-[7px] w-[7px] shrink-0 rounded-sm"
+            style={{ backgroundColor: KIND_COLORS[node.graphKind ?? ''] ?? '#52525b' }}
           />
-        ))}
+        )}
+        <span className="truncate">{node.name}</span>
+        {hasChildren && !expanded && (
+          <span className="ml-auto shrink-0 text-[9px] tabular-nums text-zinc-700">
+            {node.children.length}
+          </span>
+        )}
+      </button>
+      {expanded && node.children.map((child) => (
+        <TreeItem key={child.path} node={child} depth={depth + 1} onSelect={onSelect} selectedId={selectedId} />
+      ))}
     </>
   )
 }
 
 export function FileTree({ nodes, onSelectNode, selectedNodeId }: Props) {
   const [filter, setFilter] = useState('')
-
   const tree = useMemo(() => buildTree(nodes), [nodes])
 
   const filteredTree = useMemo(() => {
@@ -237,12 +231,8 @@ export function FileTree({ nodes, onSelectNode, selectedNodeId }: Props) {
     const lower = filter.toLowerCase()
     function filterNode(node: TreeNode): TreeNode | null {
       if (node.name.toLowerCase().includes(lower)) return node
-      const filteredChildren = node.children
-        .map(filterNode)
-        .filter((c): c is TreeNode => c !== null)
-      if (filteredChildren.length > 0) {
-        return { ...node, children: filteredChildren }
-      }
+      const fc = node.children.map(filterNode).filter((c): c is TreeNode => c !== null)
+      if (fc.length > 0) return { ...node, children: fc }
       return null
     }
     return tree.map(filterNode).filter((c): c is TreeNode => c !== null)
@@ -250,30 +240,24 @@ export function FileTree({ nodes, onSelectNode, selectedNodeId }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-zinc-800 p-2">
-        <div className="flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1">
-          <Search size={12} className="text-zinc-500" />
+      <div className="px-2 py-2">
+        <div className="flex items-center gap-1.5 rounded-md border border-zinc-800/50 bg-zinc-900/50 px-2 py-[5px]">
+          <Search size={11} className="text-zinc-600" />
           <input
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter files..."
-            className="w-full bg-transparent text-xs text-zinc-300 outline-none placeholder:text-zinc-600"
+            placeholder="Filter..."
+            className="w-full bg-transparent text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700"
           />
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-1">
+      <div className="flex-1 overflow-y-auto px-1 pb-2">
         {filteredTree.length === 0 ? (
-          <p className="p-3 text-center text-xs text-zinc-600">No files found</p>
+          <p className="px-3 py-6 text-center text-[11px] text-zinc-700">No files</p>
         ) : (
           filteredTree.map((node) => (
-            <TreeItem
-              key={node.path}
-              node={node}
-              depth={0}
-              onSelect={onSelectNode}
-              selectedId={selectedNodeId}
-            />
+            <TreeItem key={node.path} node={node} depth={0} onSelect={onSelectNode} selectedId={selectedNodeId} />
           ))
         )}
       </div>

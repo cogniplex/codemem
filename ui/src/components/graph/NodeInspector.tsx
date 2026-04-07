@@ -1,9 +1,7 @@
-import { useState } from 'react'
-import { X, Expand, Target, Code2, Info } from 'lucide-react'
+import { X, Expand, Target, Code2 } from 'lucide-react'
 import type { GraphNode, GraphEdge } from '../../api/types'
 import { KIND_COLORS } from './constants'
 import { trimLabel } from '../../utils/paths'
-import { CodeTab } from './CodeTab'
 
 interface Props {
   node: GraphNode
@@ -12,149 +10,119 @@ interface Props {
   onClose: () => void
   onExpandNeighbors: (nodeId: string) => void
   onFocus?: (nodeId: string) => void
+  onToggleCode?: () => void
+  showCode?: boolean
 }
 
-type Tab = 'context' | 'code'
-
-export function NodeInspector({ node, edges, allNodes, onClose, onExpandNeighbors, onFocus }: Props) {
-  const [activeTab, setActiveTab] = useState<Tab>('context')
+export function NodeInspector({
+  node, edges, allNodes, onClose, onExpandNeighbors, onFocus, onToggleCode, showCode,
+}: Props) {
   const connectedEdges = edges.filter((e) => e.src === node.id || e.dst === node.id)
   const nodeMap = new Map(allNodes.map((n) => [n.id, n]))
-
-  // Show code tab only for nodes that have source files
-  const hasSourceFile =
-    node.kind === 'file' ||
-    node.payload?.file_path ||
-    node.id.startsWith('file:')
-
-  const tabs: { id: Tab; label: string; icon: typeof Info }[] = [
-    { id: 'context', label: 'Context', icon: Info },
-    ...(hasSourceFile ? [{ id: 'code' as Tab, label: 'Code', icon: Code2 }] : []),
-  ]
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-        <span className="text-sm font-medium text-zinc-200 truncate" title={node.label}>
+      <div className="flex items-center gap-2 bg-zinc-800/30 px-4 py-2.5">
+        <span
+          className="inline-block h-2 w-2 shrink-0 rounded-full"
+          style={{ backgroundColor: KIND_COLORS[node.kind] ?? '#52525b' }}
+        />
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-zinc-100" title={node.label}>
           {trimLabel(node.label)}
         </span>
         <button
           onClick={onClose}
-          className="shrink-0 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+          className="shrink-0 rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-400"
         >
-          <X size={14} />
+          <X size={12} />
         </button>
       </div>
 
-      {/* Tabs */}
-      {tabs.length > 1 && (
-        <div className="flex border-b border-zinc-800">
-          {tabs.map(({ id, label, icon: Icon }) => (
+      <div className="flex-1 overflow-y-auto">
+        {/* Meta */}
+        <div className="space-y-2 px-4 py-3">
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="text-zinc-600">Kind</span>
+            <span className="rounded bg-zinc-800/60 px-1.5 py-0.5 text-zinc-300">{node.kind}</span>
+          </div>
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="text-zinc-600">Centrality</span>
+            <span className="tabular-nums text-zinc-300">{node.centrality.toFixed(4)}</span>
+          </div>
+          {node.namespace && (
+            <div className="flex items-center gap-3 text-[11px]">
+              <span className="text-zinc-600">Namespace</span>
+              <span className="truncate text-zinc-400">{node.namespace}</span>
+            </div>
+          )}
+          <div className="text-[10px] font-mono text-zinc-700 break-all">{node.id}</div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-1.5 border-y border-zinc-800/30 px-4 py-2.5">
+          <button
+            onClick={() => onExpandNeighbors(node.id)}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-zinc-800/50 py-1.5 text-[11px] font-medium text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200"
+          >
+            <Expand size={11} /> Expand
+          </button>
+          {onFocus && (
             <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-xs transition-colors ${
-                activeTab === id
-                  ? 'border-b-2 border-violet-500 text-zinc-200'
-                  : 'text-zinc-500 hover:text-zinc-300'
+              onClick={() => onFocus(node.id)}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-zinc-800/50 py-1.5 text-[11px] font-medium text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200"
+            >
+              <Target size={11} /> Focus
+            </button>
+          )}
+          {onToggleCode && (
+            <button
+              onClick={onToggleCode}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-md border py-1.5 text-[11px] font-medium transition-colors ${
+                showCode
+                  ? 'border-violet-500/30 bg-violet-500/10 text-violet-400'
+                  : 'border-zinc-800/50 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'
               }`}
             >
-              <Icon size={12} />
-              {label}
+              <Code2 size={11} /> Code
             </button>
-          ))}
+          )}
         </div>
-      )}
 
-      {/* Tab content */}
-      <div className="flex-1 overflow-y-auto">
-        {activeTab === 'context' && (
-          <div className="space-y-3 p-4">
-            <div>
-              <p className="text-xs text-zinc-500">Label</p>
-              <p className="text-sm font-medium text-zinc-200 break-words">{trimLabel(node.label)}</p>
-            </div>
-
-            <div className="flex gap-4">
-              <div>
-                <p className="text-xs text-zinc-500">Kind</p>
-                <span className="inline-flex items-center gap-1.5 rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
-                  <span
-                    className="inline-block h-2 w-2 rounded-full"
-                    style={{ backgroundColor: KIND_COLORS[node.kind] ?? '#71717a' }}
-                  />
-                  {node.kind}
-                </span>
-              </div>
-              <div>
-                <p className="text-xs text-zinc-500">Centrality</p>
-                <p className="text-sm tabular-nums text-zinc-300">{node.centrality.toFixed(4)}</p>
-              </div>
-            </div>
-
-            {node.namespace && (
-              <div>
-                <p className="text-xs text-zinc-500">Namespace</p>
-                <p className="truncate text-sm text-zinc-300">{node.namespace}</p>
-              </div>
+        {/* Connections */}
+        <div className="px-4 py-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+            Connections ({connectedEdges.length})
+          </p>
+          <div className="space-y-0.5">
+            {connectedEdges.length === 0 ? (
+              <p className="text-[11px] text-zinc-700">No connections</p>
+            ) : (
+              connectedEdges.slice(0, 30).map((edge) => {
+                const targetId = edge.src === node.id ? edge.dst : edge.src
+                const target = nodeMap.get(targetId)
+                return (
+                  <div
+                    key={edge.id}
+                    className="flex items-center gap-1.5 rounded py-1 pl-1 pr-2 text-[11px] transition-colors hover:bg-zinc-800/30"
+                  >
+                    <span className="shrink-0 rounded bg-zinc-800/60 px-1 py-0.5 text-[9px] font-medium text-zinc-500">
+                      {edge.relationship}
+                    </span>
+                    <span className="min-w-0 truncate text-zinc-400">
+                      {trimLabel(target?.label ?? targetId)}
+                    </span>
+                  </div>
+                )
+              })
             )}
-
-            <div>
-              <p className="text-xs text-zinc-500">ID</p>
-              <p className="truncate text-xs font-mono text-zinc-500">{node.id}</p>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => onExpandNeighbors(node.id)}
-                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:border-violet-500 hover:text-violet-300"
-              >
-                <Expand size={14} />
-                Expand
-              </button>
-              {onFocus && (
-                <button
-                  onClick={() => onFocus(node.id)}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:border-violet-500 hover:text-violet-300"
-                >
-                  <Target size={14} />
-                  Focus
-                </button>
-              )}
-            </div>
-
-            {/* Connected edges */}
-            <div>
-              <p className="mb-1.5 text-xs font-medium text-zinc-400">
-                Connections ({connectedEdges.length})
+            {connectedEdges.length > 30 && (
+              <p className="pt-1 text-[10px] text-zinc-600">
+                +{connectedEdges.length - 30} more
               </p>
-              <div className="max-h-64 space-y-1 overflow-y-auto">
-                {connectedEdges.length === 0 && (
-                  <p className="text-xs text-zinc-600">No connections</p>
-                )}
-                {connectedEdges.map((edge) => {
-                  const targetId = edge.src === node.id ? edge.dst : edge.src
-                  const target = nodeMap.get(targetId)
-                  return (
-                    <div
-                      key={edge.id}
-                      className="flex min-w-0 items-center gap-2 rounded bg-zinc-850 px-2 py-1 text-xs"
-                    >
-                      <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400">
-                        {edge.relationship}
-                      </span>
-                      <span className="truncate text-zinc-300">{trimLabel(target?.label ?? targetId)}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+            )}
           </div>
-        )}
-
-        {activeTab === 'code' && <CodeTab node={node} />}
+        </div>
       </div>
     </div>
   )

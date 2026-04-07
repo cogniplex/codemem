@@ -1,17 +1,8 @@
 import { X, Trash2, Clock, Eye, Star } from 'lucide-react'
 import { useMemory, useDeleteMemory } from '../../api/hooks'
 import { ScoreRadar } from './ScoreRadar'
+import { getTypeColors } from '../../utils/colors'
 import type { ScoreBreakdown } from '../../api/types'
-
-const typeStyles: Record<string, string> = {
-  decision: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
-  pattern: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
-  preference: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  style: 'bg-pink-500/10 text-pink-400 border-pink-500/20',
-  habit: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  insight: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  context: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
-}
 
 interface MemoryDetailProps {
   memoryId: string
@@ -58,7 +49,7 @@ export function MemoryDetail({ memoryId, scoreBreakdown, onClose }: MemoryDetail
         <div className="flex items-center gap-2">
           <span
             className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
-              typeStyles[memory.memory_type] ?? typeStyles.context
+              (() => { const c = getTypeColors(memory.memory_type); return `${c.bg} ${c.text} ${c.border}` })()
             }`}
           >
             {memory.memory_type}

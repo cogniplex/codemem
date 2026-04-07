@@ -1,16 +1,7 @@
 import { Activity, Clock } from 'lucide-react'
 import { useMemories } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
-
-const typeConfig: Record<string, { bg: string; text: string; dot: string }> = {
-  decision: { bg: 'bg-violet-500/10', text: 'text-violet-400', dot: 'bg-violet-400' },
-  pattern: { bg: 'bg-cyan-500/10', text: 'text-cyan-400', dot: 'bg-cyan-400' },
-  preference: { bg: 'bg-amber-500/10', text: 'text-amber-400', dot: 'bg-amber-400' },
-  style: { bg: 'bg-pink-500/10', text: 'text-pink-400', dot: 'bg-pink-400' },
-  habit: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400' },
-  insight: { bg: 'bg-blue-500/10', text: 'text-blue-400', dot: 'bg-blue-400' },
-  context: { bg: 'bg-zinc-500/10', text: 'text-zinc-400', dot: 'bg-zinc-500' },
-}
+import { getTypeColors } from '../../utils/colors'
 
 function formatRelative(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -59,7 +50,7 @@ export function RecentActivity() {
         ) : (
           <div className="divide-y divide-zinc-800/30">
             {data.memories.map((m) => {
-              const cfg = typeConfig[m.memory_type] ?? typeConfig.context
+              const cfg = getTypeColors(m.memory_type)
               return (
                 <div
                   key={m.id}

@@ -28,7 +28,7 @@ export function Navbar() {
   const { data: namespaces } = useNamespaces()
 
   return (
-    <nav className="flex h-11 shrink-0 items-center gap-1 border-b border-zinc-800/50 bg-zinc-950 px-3">
+    <nav className="flex h-12 shrink-0 items-center gap-1.5 border-b border-zinc-800/50 bg-zinc-950 px-4">
       {/* Logo */}
       <div className="flex items-center gap-2 pr-4">
         <div className="flex h-5 w-5 items-center justify-center rounded bg-violet-500/15">
@@ -45,7 +45,7 @@ export function Navbar() {
             <button
               key={key}
               onClick={() => setActiveView(key)}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${
                 active
                   ? 'bg-zinc-800/80 text-zinc-100'
                   : 'text-zinc-500 hover:bg-zinc-800/40 hover:text-zinc-300'

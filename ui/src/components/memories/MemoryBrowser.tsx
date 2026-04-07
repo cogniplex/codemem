@@ -3,21 +3,10 @@ import { Search, ChevronLeft, ChevronRight, Brain } from 'lucide-react'
 import { useMemories, useSearch } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
 import { MemoryDetail } from './MemoryDetail'
+import { getTypeColors, KNOWN_TYPES } from '../../utils/colors'
 import type { ScoreBreakdown } from '../../api/types'
 
 const PAGE_SIZE = 20
-
-const memoryTypes = ['decision', 'pattern', 'preference', 'style', 'habit', 'insight', 'context']
-
-const typeStyles: Record<string, { pill: string; dot: string }> = {
-  decision: { pill: 'bg-violet-500/10 text-violet-400 border-violet-500/20', dot: 'bg-violet-400' },
-  pattern: { pill: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20', dot: 'bg-cyan-400' },
-  preference: { pill: 'bg-amber-500/10 text-amber-400 border-amber-500/20', dot: 'bg-amber-400' },
-  style: { pill: 'bg-pink-500/10 text-pink-400 border-pink-500/20', dot: 'bg-pink-400' },
-  habit: { pill: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', dot: 'bg-emerald-400' },
-  insight: { pill: 'bg-blue-500/10 text-blue-400 border-blue-500/20', dot: 'bg-blue-400' },
-  context: { pill: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20', dot: 'bg-zinc-500' },
-}
 
 export function MemoryBrowser() {
   const activeNamespace = useNamespaceStore((s) => s.active) ?? undefined
@@ -94,18 +83,18 @@ export function MemoryBrowser() {
           >
             All
           </button>
-          {memoryTypes.map((t) => {
+          {KNOWN_TYPES.map((t) => {
             const active = typeFilter === t
-            const s = typeStyles[t] ?? typeStyles.context
+            const c = getTypeColors(t)
             return (
               <button
                 key={t}
                 onClick={() => { setTypeFilter(active ? '' : t); setPage(0) }}
                 className={`flex items-center gap-1.5 rounded-lg border px-3 py-1 text-[12px] font-medium capitalize transition-colors ${
-                  active ? `${s.pill} border` : 'border-zinc-800/50 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
+                  active ? `${c.bg} ${c.text} ${c.border}` : 'border-zinc-800/50 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
                 }`}
               >
-                <span className={`h-1.5 w-1.5 rounded-full ${active ? s.dot : 'bg-zinc-600'}`} />
+                <span className={`h-1.5 w-1.5 rounded-full ${active ? c.dot : 'bg-zinc-600'}`} />
                 {t}
               </button>
             )
@@ -135,7 +124,7 @@ export function MemoryBrowser() {
             </div>
           ) : (
             rows.map((row) => {
-              const s = typeStyles[row.memory_type] ?? typeStyles.context
+              const s = getTypeColors(row.memory_type)
               const isSelected = selectedId === row.id
               return (
                 <button
@@ -149,7 +138,7 @@ export function MemoryBrowser() {
                 >
                   <div className="flex items-start gap-3">
                     {/* Type badge */}
-                    <span className={`mt-0.5 shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${s.pill}`}>
+                    <span className={`mt-0.5 shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${s.bg} ${s.text} ${s.border}`}>
                       {row.memory_type}
                     </span>
 
