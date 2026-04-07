@@ -11,6 +11,8 @@
 pub struct DocumentNode {
     /// File this node came from (relative to the indexed root).
     pub file_path: String,
+    /// 0-based index of this section within its file (stable across files).
+    pub index_in_file: usize,
     /// Short name for the node — the heading text or YAML resource name.
     pub name: String,
     /// Full text content of the section (the heading line + body, or the full
@@ -22,6 +24,20 @@ pub struct DocumentNode {
     pub line_end: usize,
     /// Source format.
     pub format: DocumentFormat,
+}
+
+/// Build a deterministic graph-node ID for a document section.
+///
+/// Format: `doc:{file_path}:{index_in_file}`
+pub fn doc_node_id(doc: &DocumentNode) -> String {
+    format!("doc:{}:{}", doc.file_path, doc.index_in_file)
+}
+
+/// Build the prefix for all doc node IDs belonging to a file.
+///
+/// Use with `delete_graph_nodes_by_prefix` to clean stale doc nodes.
+pub fn doc_prefix_for_file(file_path: &str) -> String {
+    format!("doc:{file_path}:")
 }
 
 /// The format of the source file.
@@ -72,9 +88,12 @@ pub fn parse_document(path: &str, content: &[u8]) -> Vec<DocumentNode> {
 
 /// Split Markdown source on `##` / `###` headings.
 ///
-/// Each heading starts a new section that runs until the next same-or-higher
-/// level heading (or end of file). The heading line is included in the content.
+/// Each heading starts a new section that runs until the next `##` or `###`
+/// heading (or end of file). The heading line is included in the content.
 /// Falls back to a single whole-file node if no `##` / `###` headings exist.
+///
+/// Per CommonMark, headings may have up to 3 leading spaces and a space or tab
+/// after the hash run.
 fn parse_markdown(path: &str, source: &str) -> Vec<DocumentNode> {
     let lines: Vec<&str> = source.lines().collect();
     let total = lines.len();
@@ -82,10 +101,19 @@ fn parse_markdown(path: &str, source: &str) -> Vec<DocumentNode> {
     // Collect positions of all ## / ### headings.
     let mut cuts: Vec<(usize, String)> = Vec::new(); // (0-based line index, heading text)
     for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim_start_matches('#');
-        let hashes = line.len() - trimmed.len();
-        if (hashes == 2 || hashes == 3) && trimmed.starts_with(' ') {
-            cuts.push((i, trimmed.trim().to_string()));
+        // CommonMark: up to 3 leading spaces are allowed before the heading.
+        let stripped = line.trim_start_matches(' ');
+        let leading_spaces = line.len() - stripped.len();
+        if leading_spaces > 3 {
+            continue;
+        }
+        let after_hashes = stripped.trim_start_matches('#');
+        let hashes = stripped.len() - after_hashes.len();
+        // Accept ## or ### followed by a space or tab (CommonMark requirement).
+        if (hashes == 2 || hashes == 3)
+            && (after_hashes.starts_with(' ') || after_hashes.starts_with('\t'))
+        {
+            cuts.push((i, after_hashes.trim().to_string()));
         }
     }
 
@@ -94,6 +122,7 @@ fn parse_markdown(path: &str, source: &str) -> Vec<DocumentNode> {
         let name = heading_from_h1(&lines).unwrap_or_else(|| file_stem(path));
         return vec![DocumentNode {
             file_path: path.to_string(),
+            index_in_file: 0,
             name,
             content: source.to_string(),
             line_start: 1,
@@ -111,6 +140,7 @@ fn parse_markdown(path: &str, source: &str) -> Vec<DocumentNode> {
         let content = lines[*start_line..=end_line].join("\n");
         nodes.push(DocumentNode {
             file_path: path.to_string(),
+            index_in_file: idx,
             name: heading.clone(),
             content,
             line_start: start_line + 1,
@@ -122,10 +152,19 @@ fn parse_markdown(path: &str, source: &str) -> Vec<DocumentNode> {
 }
 
 /// Extract the text of the first `# ` heading, if any.
+/// Handles up to 3 leading spaces (CommonMark).
 fn heading_from_h1(lines: &[&str]) -> Option<String> {
-    lines
-        .iter()
-        .find_map(|line| line.strip_prefix("# ").map(|t| t.trim().to_string()))
+    lines.iter().find_map(|line| {
+        let stripped = line.trim_start_matches(' ');
+        let leading = line.len() - stripped.len();
+        if leading > 3 {
+            return None;
+        }
+        stripped
+            .strip_prefix("# ")
+            .or_else(|| stripped.strip_prefix("#\t"))
+            .map(|t| t.trim().to_string())
+    })
 }
 
 /// Return the file stem (filename without extension) as a fallback name.
@@ -157,21 +196,27 @@ fn parse_yaml(path: &str, source: &str) -> Vec<DocumentNode> {
     }
 
     let mut nodes = Vec::new();
+    let mut file_idx = 0usize;
     for (block, line_start) in doc_blocks {
         let trimmed = block.trim();
         if trimmed.is_empty() {
             continue;
         }
         let line_end = line_start + trimmed.lines().count().saturating_sub(1);
-        let name = extract_yaml_name(trimmed).unwrap_or_else(|| file_stem(path));
+        let name = extract_yaml_name(trimmed).unwrap_or_else(|| {
+            tracing::debug!("YAML block in {path} at line {line_start} has no identifiable name, using file stem");
+            file_stem(path)
+        });
         nodes.push(DocumentNode {
             file_path: path.to_string(),
+            index_in_file: file_idx,
             name,
             content: trimmed.to_string(),
             line_start,
             line_end,
             format: DocumentFormat::Yaml,
         });
+        file_idx += 1;
     }
 
     if nodes.is_empty() {
@@ -185,6 +230,7 @@ fn whole_file_yaml_node(path: &str, source: &str) -> DocumentNode {
     let total = source.lines().count().max(1);
     DocumentNode {
         file_path: path.to_string(),
+        index_in_file: 0,
         name: file_stem(path),
         content: source.to_string(),
         line_start: 1,
@@ -330,6 +376,33 @@ mod tests {
         let nodes = parse_yaml("config.yml", src);
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].name, "config");
+    }
+
+    #[test]
+    fn markdown_leading_whitespace_and_tabs() {
+        // CommonMark allows up to 3 leading spaces before ATX headings.
+        let src = "## Normal\n\nA.\n\n  ## Indented 2\n\nB.\n\n   ###\tTab after hashes\n\nC.\n";
+        let nodes = parse_markdown("doc.md", src);
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0].name, "Normal");
+        assert_eq!(nodes[1].name, "Indented 2");
+        assert_eq!(nodes[2].name, "Tab after hashes");
+    }
+
+    #[test]
+    fn markdown_4_spaces_not_heading() {
+        // 4+ spaces = code block, not a heading.
+        let src = "## Real heading\n\n    ## Not a heading\n";
+        let nodes = parse_markdown("doc.md", src);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].name, "Real heading");
+    }
+
+    #[test]
+    fn doc_node_ids_are_per_file() {
+        let nodes = parse_markdown("README.md", "## A\n\nContent A.\n\n## B\n\nContent B.\n");
+        assert_eq!(doc_node_id(&nodes[0]), "doc:README.md:0");
+        assert_eq!(doc_node_id(&nodes[1]), "doc:README.md:1");
     }
 
     #[test]

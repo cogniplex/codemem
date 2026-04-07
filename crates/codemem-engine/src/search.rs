@@ -196,11 +196,15 @@ impl CodememEngine {
                     continue;
                 }
                 if id.starts_with("doc:") {
+                    // Documents contain natural language that often directly matches
+                    // search queries (unlike code chunks which match indirectly).
+                    // Apply a small confidence boost (5%) capped at 1.0.
+                    let boosted = (similarity * 1.05).min(1.0);
                     output.push(CodeSearchResult {
                         id: id.clone(),
                         kind: "document".to_string(),
                         label: node.label,
-                        similarity,
+                        similarity: boosted,
                         file_path: node.payload.get("file_path").cloned(),
                         line_start: node.payload.get("line_start").cloned(),
                         line_end: node.payload.get("line_end").cloned(),

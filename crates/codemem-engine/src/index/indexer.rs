@@ -205,10 +205,13 @@ impl Indexer {
 
             if is_doc {
                 let doc_nodes = parse_document(&path_str, &content);
+                // Always record hash so unchanged files are skipped next run,
+                // even if the document produced no sections (empty/invalid).
+                self.change_detector.record_hash(&path_str, hash);
+                files_parsed += 1;
+
                 if !doc_nodes.is_empty() {
                     total_documents += doc_nodes.len();
-                    files_parsed += 1;
-                    self.change_detector.record_hash(&path_str, hash);
 
                     // Wrap doc nodes in a ParseResult with no symbols/references/chunks
                     // so the file path is tracked and file nodes are created downstream.
@@ -220,15 +223,15 @@ impl Indexer {
                         chunks: Vec::new(),
                         doc_nodes,
                     });
+                }
 
-                    if let Some(tx) = tx {
-                        let _ = tx.send(IndexProgress {
-                            files_scanned,
-                            files_parsed,
-                            total_symbols,
-                            current_file: path_str.clone(),
-                        });
-                    }
+                if let Some(tx) = tx {
+                    let _ = tx.send(IndexProgress {
+                        files_scanned,
+                        files_parsed,
+                        total_symbols,
+                        current_file: path_str.clone(),
+                    });
                 }
                 continue;
             }

@@ -419,6 +419,12 @@ impl CodememEngine {
             tracing::warn!("Failed to delete chunk nodes for {file_path}: {e}");
         }
 
+        // Remove all document nodes for this file
+        let doc_prefix = crate::index::document_indexer::doc_prefix_for_file(file_path);
+        if let Err(e) = self.storage.delete_graph_nodes_by_prefix(&doc_prefix) {
+            tracing::warn!("Failed to delete doc nodes for {file_path}: {e}");
+        }
+
         // Remove symbol nodes for this file by checking graph
         let graph = self.lock_graph()?;
         let sym_ids: Vec<String> = graph

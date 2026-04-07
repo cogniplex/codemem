@@ -275,14 +275,6 @@ static LANGUAGE_RULES: &[EmbeddedRules] = &[
         symbols_yaml: include_str!("../../rules/hcl/symbols.yml"),
         references_yaml: include_str!("../../rules/hcl/references.yml"),
     },
-    EmbeddedRules {
-        name: "bash",
-        lang: SupportLang::Bash,
-        extensions: &["sh", "bash"],
-        scope_separator: ".",
-        symbols_yaml: include_str!("../../rules/bash/symbols.yml"),
-        references_yaml: include_str!("../../rules/bash/references.yml"),
-    },
 ];
 
 /// Load and deserialize all language rules.

@@ -24,7 +24,8 @@ pub use api_surface::{
 };
 pub use chunker::{ChunkConfig, CodeChunk};
 pub use document_indexer::{
-    parse_document, supports_document_extension, DocumentFormat, DocumentNode,
+    doc_node_id, doc_prefix_for_file, parse_document, supports_document_extension, DocumentFormat,
+    DocumentNode,
 };
 pub use indexer::{IndexAndResolveResult, IndexProgress, IndexResult, Indexer};
 pub use linker::{

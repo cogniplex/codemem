@@ -360,6 +360,18 @@ impl super::CodememEngine {
         self.persist_edges_to_storage_and_graph(&chunk_edges, &mut **graph);
 
         // ── Document nodes + file→document CONTAINS edges
+        // Clean stale doc nodes for files that were re-indexed (mirrors chunk cleanup).
+        {
+            let doc_files: std::collections::HashSet<&str> = results
+                .doc_nodes
+                .iter()
+                .map(|d| d.file_path.as_str())
+                .collect();
+            for file_path in &doc_files {
+                let prefix = super::index::document_indexer::doc_prefix_for_file(file_path);
+                let _ = self.storage.delete_graph_nodes_by_prefix(&prefix);
+            }
+        }
         let (doc_nodes, doc_edges) =
             Self::build_document_nodes(&results.doc_nodes, &ns_string, contains_weight, now);
         let doc_count = doc_nodes.len();
@@ -798,9 +810,8 @@ impl super::CodememEngine {
         let mut nodes = Vec::with_capacity(doc_nodes.len());
         let mut edges = Vec::with_capacity(doc_nodes.len());
 
-        for (idx, doc) in doc_nodes.iter().enumerate() {
-            // Stable ID: prefix + file path + index within file.
-            let doc_id = format!("doc:{}:{}", doc.file_path, idx);
+        for doc in doc_nodes.iter() {
+            let doc_id = super::index::document_indexer::doc_node_id(doc);
             let label = format!("{} ({}:{})", doc.name, doc.file_path, doc.line_start);
 
             let mut payload = HashMap::new();
@@ -897,9 +908,8 @@ impl super::CodememEngine {
             .collect();
         let doc_texts: Vec<(String, String)> = doc_nodes
             .iter()
-            .enumerate()
-            .map(|(idx, doc)| {
-                let id = format!("doc:{}:{}", doc.file_path, idx);
+            .map(|doc| {
+                let id = super::index::document_indexer::doc_node_id(doc);
                 // Prefix with name so semantic search finds it by heading/resource name.
                 let text = format!("{}\n\n{}", doc.name, doc.content);
                 (id, text)
