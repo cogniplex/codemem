@@ -706,4 +706,4 @@ pub use file_indexing::{AnalyzeOptions, AnalyzeProgress, AnalyzeResult, SessionC
 // Re-export embeddings types so downstream crates need not depend on codemem-embeddings directly.
 /// Create an embedding provider from environment configuration.
 pub use codemem_embeddings::from_env as embeddings_from_env;
-pub use codemem_embeddings::{EmbeddingProvider, EmbeddingService};
+pub use codemem_embeddings::{resolve_model_id, EmbeddingProvider, EmbeddingService};

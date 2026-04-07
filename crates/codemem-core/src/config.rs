@@ -189,7 +189,7 @@ pub struct EmbeddingConfig {
     pub cache_capacity: usize,
     /// Batch size for embedding forward passes (GPU memory trade-off).
     pub batch_size: usize,
-    /// Weight dtype: "f32" (default), "f16" (half precision), "bf16".
+    /// Weight dtype: "f16" (default, half precision), "f32" (full), "bf16".
     /// F16 halves memory and is faster on Metal GPU.
     pub dtype: String,
 }
@@ -203,7 +203,7 @@ impl Default for EmbeddingConfig {
             dimensions: 768,
             cache_capacity: 10_000,
             batch_size: 16,
-            dtype: "f32".to_string(),
+            dtype: "f16".to_string(),
         }
     }
 }

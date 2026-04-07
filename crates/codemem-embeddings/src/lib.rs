@@ -11,8 +11,11 @@ pub mod ollama;
 pub mod openai;
 
 use candle_core::{DType, Device, Tensor};
-use candle_nn::VarBuilder;
+use candle_nn::{Module, VarBuilder};
 use candle_transformers::models::bert::{BertModel, Config as BertConfig};
+use candle_transformers::models::jina_bert::{
+    BertModel as JinaBertModel, Config as JinaBertConfig,
+};
 use codemem_core::CodememError;
 use lru::LruCache;
 use std::num::NonZeroUsize;
@@ -31,8 +34,8 @@ pub const DEFAULT_HF_REPO: &str = "BAAI/bge-base-en-v1.5";
 /// Candle reads `hidden_size` from the model's config.json instead.
 pub const DEFAULT_REMOTE_DIMENSIONS: usize = 768;
 
-/// Max sequence length for BERT models.
-const MAX_SEQ_LENGTH: usize = 512;
+/// Default max sequence length for standard BERT models (used when config doesn't specify).
+const DEFAULT_MAX_SEQ_LENGTH: usize = 512;
 
 /// Default LRU cache capacity.
 pub const CACHE_CAPACITY: usize = 10_000;
@@ -86,9 +89,17 @@ fn select_device() -> Device {
     Device::Cpu
 }
 
+/// Model backend enum — dispatches forward passes to the correct architecture.
+enum ModelBackend {
+    /// Standard BERT (absolute positional embeddings). Used by BGE, MiniLM, etc.
+    Bert(BertModel),
+    /// JinaBERT (ALiBi positional embeddings). Used by Jina embeddings v2.
+    JinaBert(JinaBertModel),
+}
+
 /// Embedding service with Candle inference (no internal cache — use `CachedProvider` wrapper).
 pub struct EmbeddingService {
-    model: Mutex<BertModel>,
+    model: Mutex<ModelBackend>,
     /// Tokenizer pre-configured with truncation (no padding).
     /// Used directly for single embeds; cloned and augmented with padding for batch.
     tokenizer: tokenizers::Tokenizer,
@@ -97,12 +108,29 @@ pub struct EmbeddingService {
     batch_size: usize,
     /// Hidden size read from model config (e.g. 768 for bge-base, 384 for bge-small).
     hidden_size: usize,
+    /// Max sequence length (512 for BERT, up to 8192 for JinaBERT).
+    max_seq_length: usize,
+}
+
+/// Minimal struct for sniffing model architecture from config.json before full parsing.
+#[derive(serde::Deserialize)]
+struct ConfigProbe {
+    #[serde(default)]
+    position_embedding_type: Option<String>,
+    hidden_size: usize,
+    #[serde(default = "default_max_position_embeddings")]
+    max_position_embeddings: usize,
+}
+
+fn default_max_position_embeddings() -> usize {
+    DEFAULT_MAX_SEQ_LENGTH
 }
 
 impl EmbeddingService {
     /// Create a new embedding service, loading model from the given directory.
     /// Expects `model.safetensors`, `config.json`, and `tokenizer.json` in the directory.
     ///
+    /// Auto-detects model architecture (BERT vs JinaBERT) from config.json.
     /// `dtype` controls precision: `DType::F32` (default) or `DType::F16` (half memory, faster on Metal).
     pub fn new(model_dir: &Path, batch_size: usize, dtype: DType) -> Result<Self, CodememError> {
         let model_path = model_dir.join("model.safetensors");
@@ -125,38 +153,70 @@ impl EmbeddingService {
             device
         );
 
-        // Load BERT config
         let config_str = std::fs::read_to_string(&config_path)
             .map_err(|e| CodememError::Embedding(format!("Failed to read config: {e}")))?;
-        let config: BertConfig = serde_json::from_str(&config_str)
-            .map_err(|e| CodememError::Embedding(format!("Failed to parse config: {e}")))?;
 
-        let hidden_size = config.hidden_size;
+        // Probe config to detect architecture before full parsing
+        let probe: ConfigProbe = serde_json::from_str(&config_str)
+            .map_err(|e| CodememError::Embedding(format!("Failed to probe config: {e}")))?;
+        let hidden_size = probe.hidden_size;
+        let is_alibi = probe
+            .position_embedding_type
+            .as_deref()
+            .is_some_and(|t| t == "alibi");
+        // Cap at 8192 to avoid excessive memory usage even if model claims more
+        let max_seq_length = probe.max_position_embeddings.min(8192);
 
-        // Load model weights from safetensors via memory-mapped IO.
-        // Scope vb so it drops before a potential retry, avoiding two VarBuilders
-        // holding materialized Metal tensors simultaneously.
-        let model = {
+        let (model, arch_name) = if is_alibi {
+            // JinaBERT (ALiBi positional embeddings)
+            let config: JinaBertConfig = serde_json::from_str(&config_str)
+                .map_err(|e| CodememError::Embedding(format!("Failed to parse JinaBERT config: {e}")))?;
             let vb = unsafe {
                 VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device)
                     .map_err(|e| CodememError::Embedding(format!("Failed to load weights: {e}")))?
             };
-            BertModel::load(vb.pp("bert"), &config)
-        };
-        // Try with "bert." prefix first (standard HF BERT models), then without
-        let model = match model {
-            Ok(m) => m,
-            Err(_) => {
-                let vb2 = unsafe {
-                    VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device).map_err(
-                        |e| CodememError::Embedding(format!("Failed to load weights: {e}")),
-                    )?
+            // JinaBERT weights use "bert." prefix
+            let jina_model = JinaBertModel::new(vb.pp("bert"), &config).map_err(|e| {
+                CodememError::Embedding(format!("Failed to load JinaBERT model: {e}"))
+            })?;
+            (ModelBackend::JinaBert(jina_model), "JinaBERT (ALiBi)")
+        } else {
+            // Standard BERT (absolute positional embeddings)
+            let config: BertConfig = serde_json::from_str(&config_str)
+                .map_err(|e| CodememError::Embedding(format!("Failed to parse BERT config: {e}")))?;
+            // Load model weights from safetensors via memory-mapped IO.
+            // Scope vb so it drops before a potential retry, avoiding two VarBuilders
+            // holding materialized Metal tensors simultaneously.
+            let bert_model = {
+                let vb = unsafe {
+                    VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device)
+                        .map_err(|e| CodememError::Embedding(format!("Failed to load weights: {e}")))?
                 };
-                BertModel::load(vb2, &config).map_err(|e| {
-                    CodememError::Embedding(format!("Failed to load BERT model: {e}"))
-                })?
-            }
+                BertModel::load(vb.pp("bert"), &config)
+            };
+            // Try with "bert." prefix first (standard HF BERT models), then without
+            let bert_model = match bert_model {
+                Ok(m) => m,
+                Err(_) => {
+                    let vb2 = unsafe {
+                        VarBuilder::from_mmaped_safetensors(&[&model_path], dtype, &device).map_err(
+                            |e| CodememError::Embedding(format!("Failed to load weights: {e}")),
+                        )?
+                    };
+                    BertModel::load(vb2, &config).map_err(|e| {
+                        CodememError::Embedding(format!("Failed to load BERT model: {e}"))
+                    })?
+                }
+            };
+            (ModelBackend::Bert(bert_model), "BERT (absolute)")
         };
+
+        tracing::info!(
+            "Loaded {} model (hidden_size={}, max_seq_length={})",
+            arch_name,
+            hidden_size,
+            max_seq_length
+        );
 
         let mut tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| CodememError::Embedding(e.to_string()))?;
@@ -164,7 +224,7 @@ impl EmbeddingService {
         // Pre-configure truncation once so we don't need to clone on every embed call.
         tokenizer
             .with_truncation(Some(tokenizers::TruncationParams {
-                max_length: MAX_SEQ_LENGTH,
+                max_length: max_seq_length,
                 ..Default::default()
             }))
             .map_err(|e| CodememError::Embedding(format!("Truncation error: {e}")))?;
@@ -175,7 +235,13 @@ impl EmbeddingService {
             device,
             batch_size,
             hidden_size,
+            max_seq_length,
         })
+    }
+
+    /// Maximum sequence length this model supports.
+    pub fn max_seq_length(&self) -> usize {
+        self.max_seq_length
     }
 
     /// Get the model directory path for a given model name.
@@ -260,10 +326,6 @@ impl EmbeddingService {
             .and_then(|t| t.unsqueeze(0))
             .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
 
-        let token_type_ids = input_ids_tensor
-            .zeros_like()
-            .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
-
         let attention_mask_tensor = Tensor::new(&attention_mask[..], &self.device)
             .and_then(|t| t.unsqueeze(0))
             .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
@@ -273,18 +335,23 @@ impl EmbeddingService {
             .model
             .lock()
             .map_err(|e| CodememError::LockPoisoned(format!("embedding model: {e}")))?;
-        let hidden_states = model
-            .forward(
-                &input_ids_tensor,
-                &token_type_ids,
-                Some(&attention_mask_tensor),
-            )
-            .map_err(|e| CodememError::Embedding(format!("Model forward error: {e}")))?;
+        let hidden_states = match &*model {
+            ModelBackend::Bert(bert) => {
+                let token_type_ids = input_ids_tensor
+                    .zeros_like()
+                    .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
+                let result = bert
+                    .forward(&input_ids_tensor, &token_type_ids, Some(&attention_mask_tensor))
+                    .map_err(|e| CodememError::Embedding(format!("Model forward error: {e}")))?;
+                drop(token_type_ids);
+                result
+            }
+            ModelBackend::JinaBert(jina) => jina
+                .forward(&input_ids_tensor)
+                .map_err(|e| CodememError::Embedding(format!("Model forward error: {e}")))?,
+        };
         drop(model);
-
-        // Drop intermediate GPU tensors before pooling
         drop(input_ids_tensor);
-        drop(token_type_ids);
 
         // Cast hidden states to F32 for pooling math (model may output F16/BF16)
         let hidden_states = hidden_states
@@ -370,10 +437,6 @@ impl EmbeddingService {
                 .and_then(|t| t.reshape((batch_len, seq_len)))
                 .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
 
-            let token_type_ids = input_ids
-                .zeros_like()
-                .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
-
             let attention_mask = Tensor::new(all_masks.as_slice(), &self.device)
                 .and_then(|t| t.reshape((batch_len, seq_len)))
                 .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
@@ -383,14 +446,23 @@ impl EmbeddingService {
                 .model
                 .lock()
                 .map_err(|e| CodememError::LockPoisoned(format!("embedding model: {e}")))?;
-            let hidden_states = model
-                .forward(&input_ids, &token_type_ids, Some(&attention_mask))
-                .map_err(|e| CodememError::Embedding(format!("Forward error: {e}")))?;
+            let hidden_states = match &*model {
+                ModelBackend::Bert(bert) => {
+                    let token_type_ids = input_ids
+                        .zeros_like()
+                        .map_err(|e| CodememError::Embedding(format!("Tensor error: {e}")))?;
+                    let result = bert
+                        .forward(&input_ids, &token_type_ids, Some(&attention_mask))
+                        .map_err(|e| CodememError::Embedding(format!("Forward error: {e}")))?;
+                    drop(token_type_ids);
+                    result
+                }
+                ModelBackend::JinaBert(jina) => jina
+                    .forward(&input_ids)
+                    .map_err(|e| CodememError::Embedding(format!("Forward error: {e}")))?,
+            };
             drop(model);
-
-            // Drop intermediate GPU tensors before pooling
             drop(input_ids);
-            drop(token_type_ids);
 
             // Cast hidden states to F32 for pooling math (model may output F16/BF16)
             let hidden_states = hidden_states
@@ -569,14 +641,14 @@ impl EmbeddingProvider for CachedProvider {
 
 /// Parse a dtype string into a Candle DType.
 ///
-/// Supported values: "f32" (default), "f16" (half precision — less memory, faster on Metal).
+/// Supported values: "f16" (default, half precision — less memory, faster on Metal), "f32", "bf16".
 pub fn parse_dtype(s: &str) -> Result<DType, CodememError> {
     match s.to_lowercase().as_str() {
-        "f32" | "float32" | "" => Ok(DType::F32),
-        "f16" | "float16" | "half" => Ok(DType::F16),
+        "f16" | "float16" | "half" | "" => Ok(DType::F16),
+        "f32" | "float32" => Ok(DType::F32),
         "bf16" | "bfloat16" => Ok(DType::BF16),
         other => Err(CodememError::Embedding(format!(
-            "Unknown dtype: '{}'. Use 'f32', 'f16', or 'bf16'.",
+            "Unknown dtype: '{}'. Use 'f16', 'f32', or 'bf16'.",
             other
         ))),
     }
@@ -590,7 +662,7 @@ pub fn parse_dtype(s: &str) -> Result<DType, CodememError> {
 ///
 /// Returns `Err` if the model identifier is a bare name without an org prefix and isn't
 /// a recognized `bge-*` shorthand — HuggingFace requires `org/repo` format.
-fn resolve_model_id(model: &str) -> Result<(String, String), CodememError> {
+pub fn resolve_model_id(model: &str) -> Result<(String, String), CodememError> {
     if model.contains('/') {
         // Full repo ID — directory name is the part after the slash
         let dir_name = model.rsplit('/').next().unwrap_or(model);
@@ -619,7 +691,7 @@ fn resolve_model_id(model: &str) -> Result<(String, String), CodememError> {
 /// | `CODEMEM_EMBED_API_KEY` | API key | also reads `OPENAI_API_KEY` / `GEMINI_API_KEY` / `GOOGLE_API_KEY` |
 /// | `CODEMEM_EMBED_DIMENSIONS` | integer | read from model config |
 /// | `CODEMEM_EMBED_BATCH_SIZE` | integer | `16` |
-/// | `CODEMEM_EMBED_DTYPE` | `f32`, `f16`, `bf16` | `f32` |
+/// | `CODEMEM_EMBED_DTYPE` | `f16`, `f32`, `bf16` | `f16` |
 pub fn from_env(
     config: Option<&codemem_core::EmbeddingConfig>,
 ) -> Result<Box<dyn EmbeddingProvider>, CodememError> {
@@ -726,7 +798,7 @@ pub fn from_env(
                 config
                     .filter(|c| !c.dtype.is_empty())
                     .map(|c| c.dtype.clone())
-                    .unwrap_or_else(|| "f32".to_string())
+                    .unwrap_or_else(|| "f16".to_string())
             });
             let dtype = parse_dtype(&dtype_str)?;
 
