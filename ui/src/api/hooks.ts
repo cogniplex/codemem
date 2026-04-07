@@ -43,6 +43,13 @@ export const useGraphBrowse = (params?: Parameters<typeof api.graphBrowse>[0]) =
 export const useVectors = (namespace?: string) =>
   useQuery({ queryKey: ['vectors', namespace], queryFn: () => api.vectors(namespace) })
 
+export const useFileContent = (path: string | null, lineStart?: number, lineEnd?: number) =>
+  useQuery({
+    queryKey: ['file-content', path, lineStart, lineEnd],
+    queryFn: () => api.fileContent({ path: path!, line_start: lineStart, line_end: lineEnd }),
+    enabled: !!path,
+  })
+
 // Namespaces
 export const useNamespaces = () => useQuery({ queryKey: ['namespaces'], queryFn: api.namespaces })
 

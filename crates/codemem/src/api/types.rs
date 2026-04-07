@@ -143,6 +143,8 @@ pub struct GraphNodeResponse {
     pub centrality: f64,
     pub memory_id: Option<String>,
     pub namespace: Option<String>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub payload: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]

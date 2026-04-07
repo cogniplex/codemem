@@ -12,6 +12,7 @@ use axum::{
     Json,
 };
 use codemem_core::{GraphBackend, NodeKind};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -69,6 +70,7 @@ fn collect_subgraph(
             centrality: n.centrality,
             memory_id: n.memory_id,
             namespace: n.namespace,
+            payload: n.payload,
         })
         .collect();
 
@@ -95,6 +97,7 @@ fn build_subgraph_response(
             centrality: n.centrality,
             memory_id: n.memory_id,
             namespace: n.namespace,
+            payload: n.payload,
         })
         .collect();
 
@@ -474,4 +477,84 @@ pub async fn get_temporal_snapshot(
     })?;
 
     Ok(Json(serde_json::to_value(snapshot).unwrap_or_default()))
+}
+
+// ── File Content ────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct FileContentQuery {
+    pub path: String,
+    pub line_start: Option<usize>,
+    pub line_end: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FileContentResponse {
+    pub path: String,
+    pub content: String,
+    pub total_lines: usize,
+    pub line_start: usize,
+    pub line_end: usize,
+    pub language: String,
+}
+
+/// Serve file content for the code viewer. Resolves paths relative to
+/// the namespace root (project directory). Only serves files that exist
+/// as graph nodes to prevent arbitrary file reads.
+pub async fn get_file_content(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FileContentQuery>,
+) -> Result<Json<FileContentResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let file_path = &query.path;
+
+    // Security: verify the file exists as a graph node
+    let node_id = format!("file:{file_path}");
+    let exists = state
+        .server
+        .engine
+        .storage()
+        .get_graph_node(&node_id)
+        .ok()
+        .flatten()
+        .is_some();
+    if !exists {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "File not found in graph"})),
+        ));
+    }
+
+    // Read the file
+    let content = std::fs::read_to_string(file_path).map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("Cannot read file: {e}")})),
+        )
+    })?;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
+
+    let line_start = query.line_start.unwrap_or(1).max(1);
+    let line_end = query.line_end.unwrap_or(total_lines).min(total_lines);
+
+    let sliced = lines
+        .get(line_start.saturating_sub(1)..line_end)
+        .map(|s| s.join("\n"))
+        .unwrap_or_default();
+
+    let language = file_path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_string();
+
+    Ok(Json(FileContentResponse {
+        path: file_path.to_string(),
+        content: sliced,
+        total_lines,
+        line_start,
+        line_end,
+        language,
+    }))
 }

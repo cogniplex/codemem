@@ -75,6 +75,16 @@ export interface GraphNode {
   centrality: number
   memory_id?: string
   namespace?: string
+  payload?: Record<string, unknown>
+}
+
+export interface FileContentResponse {
+  path: string
+  content: string
+  total_lines: number
+  line_start: number
+  line_end: number
+  language: string
 }
 
 export interface GraphEdge {

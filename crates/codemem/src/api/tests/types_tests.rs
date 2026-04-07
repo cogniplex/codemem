@@ -165,6 +165,7 @@ fn graph_node_response_serialization() {
         centrality: 0.85,
         memory_id: Some("mem-123".to_string()),
         namespace: Some("codemem".to_string()),
+        payload: std::collections::HashMap::new(),
     };
 
     let json = serde_json::to_value(&node).unwrap();
