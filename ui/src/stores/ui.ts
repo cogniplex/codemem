@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-type View = 'dashboard' | 'graph' | 'memories' | 'insights' | 'temporal'
+type View = 'dashboard' | 'graph' | 'memories'
 
 interface UiState {
   sidebarCollapsed: boolean

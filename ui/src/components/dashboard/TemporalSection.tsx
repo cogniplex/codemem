@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
-  Clock, FileWarning, GitBranch, TrendingUp, Loader2, AlertTriangle,
+  GitBranch, FileWarning, TrendingUp, Loader2, AlertTriangle,
   ArrowLeftRight, FileText, Layers, Minus, Plus,
 } from 'lucide-react'
 import { useStaleFiles, useDrift } from '../../api/hooks'
@@ -11,50 +11,32 @@ function daysAgo(n: number): string {
   const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString()
 }
 
-function SegmentedControl({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
+function Segmented({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
   return (
     <div className="flex items-center gap-0.5 rounded-lg border border-zinc-800/40 bg-zinc-950 p-0.5">
       {options.map((o) => (
-        <button
-          key={o}
-          onClick={() => onChange(o)}
-          className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
-            value === o ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
-          }`}
-        >
-          {o}
-        </button>
+        <button key={o} onClick={() => onChange(o)}
+          className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${value === o ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >{o}</button>
       ))}
     </div>
   )
 }
 
-export function TemporalView() {
+export function TemporalSection() {
   const namespace = useNamespaceStore((s) => s.active)
   const [staleDays, setStaleDays] = useState(30)
   const [driftRange, setDriftRange] = useState('90d')
 
-  const driftFrom = useMemo(() => {
-    const days = driftRange === '30d' ? 30 : driftRange === '90d' ? 90 : 180
-    return daysAgo(days)
-  }, [driftRange])
+  const driftFrom = useMemo(() => daysAgo(driftRange === '30d' ? 30 : driftRange === '90d' ? 90 : 180), [driftRange])
   const driftTo = useMemo(() => new Date().toISOString(), [])
 
   const { data: staleData, isLoading: staleLoading } = useStaleFiles(namespace ?? undefined, staleDays)
   const { data: driftData, isLoading: driftLoading } = useDrift(driftFrom, driftTo, namespace ?? undefined)
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="rounded-lg bg-violet-500/10 p-2">
-          <Clock size={18} className="text-violet-400" />
-        </div>
-        <div>
-          <h2 className="text-lg font-semibold text-zinc-100">Temporal Analysis</h2>
-          <p className="text-[12px] text-zinc-500">Architecture drift, file staleness, and change patterns</p>
-        </div>
-      </div>
-
+    <div className="space-y-4">
+      {/* Drift metrics row */}
       {driftData && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <MetricCard label="Cross-Module Edges" value={driftData.new_cross_module_edges} icon={<ArrowLeftRight size={14} className="text-violet-400" />} />
@@ -65,10 +47,11 @@ export function TemporalView() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-2">
+        {/* Drift */}
         <Card
           title="Architectural Drift"
           icon={<GitBranch size={14} className="text-violet-400" />}
-          actions={<SegmentedControl options={['30d', '90d', '180d']} value={driftRange} onChange={setDriftRange} />}
+          actions={<Segmented options={['30d', '90d', '180d']} value={driftRange} onChange={setDriftRange} />}
         >
           {driftLoading ? (
             <div className="flex items-center justify-center py-8"><Loader2 size={16} className="animate-spin text-zinc-600" /></div>
@@ -76,7 +59,7 @@ export function TemporalView() {
             <div className="space-y-5">
               {driftData.hotspot_files?.length > 0 && (
                 <div>
-                  <div className="mb-2.5 flex items-center gap-1.5">
+                  <div className="mb-2 flex items-center gap-1.5">
                     <TrendingUp size={12} className="text-amber-400" />
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Hotspot Files</p>
                   </div>
@@ -93,7 +76,7 @@ export function TemporalView() {
               )}
               {driftData.coupling_increases?.length > 0 && (
                 <div>
-                  <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Top Coupling</p>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Top Coupling</p>
                   <div className="space-y-1">
                     {driftData.coupling_increases.map(([a, b, count], i) => (
                       <div key={i} className="flex items-center gap-2 rounded-lg border border-zinc-700/30 bg-zinc-900 px-3 py-2 text-[12px]">
@@ -115,22 +98,23 @@ export function TemporalView() {
           )}
         </Card>
 
+        {/* Stale Files */}
         <Card
           title="Stale Files"
           icon={<FileWarning size={14} className="text-amber-400" />}
-          actions={<SegmentedControl options={['14d', '30d', '60d', '90d']} value={`${staleDays}d`} onChange={(v) => setStaleDays(parseInt(v))} />}
+          actions={<Segmented options={['14d', '30d', '60d', '90d']} value={`${staleDays}d`} onChange={(v) => setStaleDays(parseInt(v))} />}
           padded={false}
         >
           {staleLoading ? (
             <div className="flex items-center justify-center py-8"><Loader2 size={16} className="animate-spin text-zinc-600" /></div>
           ) : staleData && staleData.files.length > 0 ? (
-            <div className="max-h-[500px] overflow-y-auto">
+            <div className="max-h-[400px] overflow-y-auto">
               <div className="px-5 py-2">
                 <p className="text-[11px] text-zinc-600">{staleData.stale_files} file(s) unchanged for {staleData.stale_days}+ days</p>
               </div>
               <div className="divide-y divide-zinc-800/20 px-2 pb-2">
-                {staleData.files.slice(0, 30).map((f) => (
-                  <div key={f.file_path} className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-zinc-900/40">
+                {staleData.files.slice(0, 20).map((f) => (
+                  <div key={f.file_path} className="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-zinc-900/40">
                     <FileText size={13} className="shrink-0 text-zinc-600" />
                     <span className="min-w-0 flex-1 truncate text-[12px] font-mono text-zinc-300">{f.file_path}</span>
                     <span className="text-[10px] tabular-nums text-zinc-600">c:{f.centrality.toFixed(3)}</span>

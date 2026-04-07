@@ -3,8 +3,6 @@ import {
   LayoutDashboard,
   Network,
   Brain,
-  Lightbulb,
-  Clock,
   Search,
   ChevronDown,
   Check,
@@ -18,8 +16,6 @@ const navItems = [
   { key: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard },
   { key: 'graph' as const, label: 'Graph', icon: Network },
   { key: 'memories' as const, label: 'Memories', icon: Brain },
-  { key: 'insights' as const, label: 'Insights', icon: Lightbulb },
-  { key: 'temporal' as const, label: 'Temporal', icon: Clock },
 ]
 
 export function Navbar() {

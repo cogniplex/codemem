@@ -4,15 +4,11 @@ import { useUiStore } from '../../stores/ui'
 import { DashboardView } from '../dashboard/DashboardView'
 import { GraphView } from '../graph/GraphView'
 import { MemoryBrowser } from '../memories/MemoryBrowser'
-import { InsightsView } from '../insights/InsightsView'
-import { TemporalView } from '../temporal/TemporalView'
 
 const views: Record<string, React.FC> = {
   dashboard: DashboardView,
   graph: GraphView,
   memories: MemoryBrowser,
-  insights: InsightsView,
-  temporal: TemporalView,
 }
 
 const fullBleedViews = new Set(['graph'])
