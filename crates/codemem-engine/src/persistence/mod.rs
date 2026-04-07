@@ -374,15 +374,41 @@ impl super::CodememEngine {
     }
 
     /// Batch-insert edges into both SQLite and the in-memory graph.
+    /// Filters out edges whose src or dst nodes don't exist in storage
+    /// to avoid FOREIGN KEY constraint violations (e.g. edges referencing
+    /// external symbols that weren't indexed).
     fn persist_edges_to_storage_and_graph(
         &self,
         edges: &[Edge],
         graph: &mut dyn codemem_core::GraphBackend,
     ) {
-        if let Err(e) = self.storage.insert_graph_edges_batch(edges) {
-            tracing::warn!("Failed to batch-insert {} graph edges: {e}", edges.len());
-        }
+        // Collect all referenced node IDs and check which exist in storage.
+        let mut referenced_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for edge in edges {
+            referenced_ids.insert(&edge.src);
+            referenced_ids.insert(&edge.dst);
+        }
+        let existing_ids: std::collections::HashSet<String> = referenced_ids
+            .iter()
+            .filter(|id| self.storage.get_graph_node(id).is_ok())
+            .map(|id| id.to_string())
+            .collect();
+
+        let valid_edges: Vec<&Edge> = edges
+            .iter()
+            .filter(|e| existing_ids.contains(&e.src) && existing_ids.contains(&e.dst))
+            .collect();
+
+        let skipped = edges.len() - valid_edges.len();
+        if skipped > 0 {
+            tracing::debug!("Skipped {} edges referencing non-existent nodes", skipped);
+        }
+
+        let owned: Vec<Edge> = valid_edges.into_iter().cloned().collect();
+        if let Err(e) = self.storage.insert_graph_edges_batch(&owned) {
+            tracing::warn!("Failed to batch-insert {} graph edges: {e}", owned.len());
+        }
+        for edge in &owned {
             let _ = graph.add_edge(edge.clone());
         }
     }

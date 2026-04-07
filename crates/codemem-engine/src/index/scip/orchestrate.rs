@@ -300,8 +300,15 @@ impl ScipOrchestrator {
             let expanded = cmd.replace("{namespace}", namespace);
             parse_shell_command(&expanded)?
         } else {
+            // Resolve the absolute path to the indexer binary so child processes
+            // work even when PATH doesn't include the user's shell additions
+            // (e.g. when invoked from hooks running under /bin/sh).
+            let binary_name = lang.indexer_binary();
+            let resolved = which_binary(binary_name)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| binary_name.to_string());
             (
-                lang.indexer_binary().to_string(),
+                resolved,
                 lang.default_args().iter().map(|s| s.to_string()).collect(),
             )
         };
@@ -313,9 +320,15 @@ impl ScipOrchestrator {
             args
         );
 
+        // Ensure the child process inherits a PATH that includes common
+        // tool locations (e.g. ~/.cargo/bin, homebrew paths, nvm paths).
+        // The parent process PATH may be minimal when run from hooks.
+        let path_env = augmented_path();
+
         let output = Command::new(&program)
             .args(&args)
             .current_dir(project_root)
+            .env("PATH", &path_env)
             .output()
             .map_err(|e| {
                 CodememError::ScipOrchestration(format!("Failed to spawn {program}: {e}"))
@@ -404,6 +417,30 @@ impl ScipOrchestrator {
 /// Check if a binary is available on PATH.
 fn which_binary(name: &str) -> Option<PathBuf> {
     which::which(name).ok()
+}
+
+/// Build an augmented PATH that includes common tool directories.
+/// Useful when the current process was spawned by /bin/sh which
+/// doesn't source shell profiles (~/.zshrc, ~/.bashrc).
+fn augmented_path() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+
+    let extra_dirs = [
+        home.join(".cargo/bin"),
+        home.join(".local/bin"),
+        home.join(".nvm/current/bin"),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/opt/homebrew/bin"),
+    ];
+
+    let mut parts: Vec<String> = vec![current];
+    for dir in &extra_dirs {
+        if dir.is_dir() {
+            parts.push(dir.display().to_string());
+        }
+    }
+    parts.join(":")
 }
 
 /// Parse a shell command string into (program, args).
