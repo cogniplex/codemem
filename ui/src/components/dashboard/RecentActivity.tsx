@@ -1,56 +1,94 @@
-import { Activity } from 'lucide-react'
+import { Activity, Clock } from 'lucide-react'
 import { useMemories } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
 
-const typeColors: Record<string, string> = {
-  decision: 'bg-violet-500/15 text-violet-400',
-  pattern: 'bg-cyan-500/15 text-cyan-400',
-  preference: 'bg-amber-500/15 text-amber-400',
-  style: 'bg-pink-500/15 text-pink-400',
-  habit: 'bg-emerald-500/15 text-emerald-400',
-  insight: 'bg-blue-500/15 text-blue-400',
-  context: 'bg-zinc-500/15 text-zinc-400',
+const typeConfig: Record<string, { bg: string; text: string; dot: string }> = {
+  decision: { bg: 'bg-violet-500/10', text: 'text-violet-400', dot: 'bg-violet-400' },
+  pattern: { bg: 'bg-cyan-500/10', text: 'text-cyan-400', dot: 'bg-cyan-400' },
+  preference: { bg: 'bg-amber-500/10', text: 'text-amber-400', dot: 'bg-amber-400' },
+  style: { bg: 'bg-pink-500/10', text: 'text-pink-400', dot: 'bg-pink-400' },
+  habit: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400' },
+  insight: { bg: 'bg-blue-500/10', text: 'text-blue-400', dot: 'bg-blue-400' },
+  context: { bg: 'bg-zinc-500/10', text: 'text-zinc-400', dot: 'bg-zinc-500' },
+}
+
+function formatRelative(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  return `${days}d`
 }
 
 export function RecentActivity() {
   const namespace = useNamespaceStore((s) => s.active)
   const { data, isLoading } = useMemories({
     namespace: namespace ?? undefined,
-    limit: 15,
+    limit: 12,
   })
 
   return (
-    <div className="rounded-xl border border-zinc-800/60 bg-zinc-900">
-      <div className="flex items-center gap-2 border-b border-zinc-800/60 px-5 py-3">
+    <div className="rounded-xl border border-zinc-800/50 bg-zinc-900">
+      <div className="flex items-center gap-2 border-b border-zinc-800/40 px-5 py-3.5">
         <Activity size={14} className="text-zinc-500" />
         <h3 className="text-[13px] font-medium text-zinc-100">Recent Activity</h3>
+        <span className="ml-auto text-[11px] text-zinc-600">
+          {data?.total ?? 0} total
+        </span>
       </div>
-      <div className="divide-y divide-zinc-800/40">
+      <div className="max-h-[400px] overflow-y-auto">
         {isLoading ? (
-          Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex items-start gap-3 px-5 py-3">
-              <span className="mt-1 h-5 w-14 animate-pulse rounded bg-zinc-800" />
-              <span className="h-4 w-full animate-pulse rounded bg-zinc-800" />
-            </div>
-          ))
+          <div className="space-y-0 divide-y divide-zinc-800/30">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-start gap-3 px-5 py-3">
+                <span className="mt-1 h-5 w-14 animate-pulse rounded-md bg-zinc-800/60" />
+                <span className="h-4 w-full animate-pulse rounded-md bg-zinc-800/40" />
+              </div>
+            ))}
+          </div>
         ) : !data?.memories?.length ? (
-          <p className="px-5 py-8 text-center text-[13px] text-zinc-600">No memories yet</p>
-        ) : (
-          data.memories.map((m) => (
-            <div key={m.id} className="flex items-start gap-3 px-5 py-2.5">
-              <span
-                className={`mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-                  typeColors[m.memory_type] ?? typeColors.context
-                }`}
-              >
-                {m.memory_type}
-              </span>
-              <p className="min-w-0 line-clamp-2 break-words text-[13px] text-zinc-300">{m.content}</p>
-              <time className="ml-auto shrink-0 text-[11px] text-zinc-600">
-                {new Date(m.created_at).toLocaleDateString()}
-              </time>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="rounded-full bg-zinc-800/50 p-3">
+              <Activity size={20} className="text-zinc-600" />
             </div>
-          ))
+            <p className="mt-3 text-[13px] text-zinc-500">No memories captured yet</p>
+            <p className="mt-1 text-[11px] text-zinc-600">Start a coding session to begin</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-zinc-800/30">
+            {data.memories.map((m) => {
+              const cfg = typeConfig[m.memory_type] ?? typeConfig.context
+              return (
+                <div
+                  key={m.id}
+                  className="group flex items-start gap-3 px-5 py-3 transition-colors hover:bg-zinc-800/20"
+                >
+                  {/* Type indicator */}
+                  <div className="mt-1 flex shrink-0 items-center gap-2">
+                    <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
+                    <span
+                      className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cfg.bg} ${cfg.text}`}
+                    >
+                      {m.memory_type.slice(0, 3)}
+                    </span>
+                  </div>
+
+                  {/* Content */}
+                  <p className="min-w-0 flex-1 line-clamp-2 text-[13px] leading-relaxed text-zinc-300 group-hover:text-zinc-200">
+                    {m.content}
+                  </p>
+
+                  {/* Time */}
+                  <span className="mt-0.5 flex shrink-0 items-center gap-1 text-[11px] text-zinc-600">
+                    <Clock size={10} />
+                    {formatRelative(m.created_at)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
     </div>
