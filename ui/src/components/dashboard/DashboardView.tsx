@@ -45,11 +45,11 @@ export function DashboardView() {
         <MetricCard label="Hotspots" value={health?.file_hotspots.length ?? 0} icon={<FileSearch size={13} className="text-amber-400" />} isLoading={hL} />
         <MetricCard label="Communities" value={health?.community_count ?? 0} icon={<Layers size={13} className="text-violet-400" />} isLoading={hL} />
         <MetricCard label="Security" value={security?.sensitive_file_count ?? 0} icon={<ShieldAlert size={13} className="text-red-400" />} isLoading={secL} />
-        <MetricCard label="Coupling" value={perf?.high_coupling_nodes.length ?? 0} icon={<Link2 size={13} className="text-amber-400" />} isLoading={pL} />
+        <MetricCard label="High Coupling" value={perf?.high_coupling_nodes.length ?? 0} icon={<Link2 size={13} className="text-amber-400" />} isLoading={pL} />
         <MetricCard label="Cross-Module" value={drift?.new_cross_module_edges ?? 0} icon={<ArrowLeftRight size={13} className="text-violet-400" />} isLoading={dL} />
         <MetricCard label="Files Added" value={drift?.added_files ?? 0} icon={<Plus size={13} className="text-emerald-400" />} isLoading={dL} />
         <MetricCard label="Files Removed" value={drift?.removed_files ?? 0} icon={<Minus size={13} className="text-red-400" />} isLoading={dL} />
-        <MetricCard label="Coupling Pairs" value={drift?.coupling_increases?.length ?? 0} icon={<Layers size={13} className="text-amber-400" />} isLoading={dL} />
+        <MetricCard label="Co-Changed" value={drift?.coupling_increases?.length ?? 0} icon={<Layers size={13} className="text-amber-400" />} isLoading={dL} />
       </div>
 
       {/* ── Activity + Consolidation ── */}
