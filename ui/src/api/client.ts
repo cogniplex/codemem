@@ -101,6 +101,17 @@ export const api = {
   },
   temporalSnapshot: (at: string) =>
     request<unknown>(`/api/graph/temporal/snapshot?at=${encodeURIComponent(at)}`),
+  staleFiles: (params?: { namespace?: string; stale_days?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.namespace) search.set('namespace', params.namespace)
+    if (params?.stale_days !== undefined) search.set('stale_days', String(params.stale_days))
+    return request<import('./types').StaleFilesResponse>(`/api/graph/stale-files?${search}`)
+  },
+  drift: (params: { from: string; to: string; namespace?: string }) => {
+    const search = new URLSearchParams({ from: params.from, to: params.to })
+    if (params.namespace) search.set('namespace', params.namespace)
+    return request<import('./types').DriftResponse>(`/api/graph/drift?${search}`)
+  },
 
   // Sessions
   sessions: (params?: { namespace?: string; limit?: number }) => {

@@ -51,6 +51,19 @@ export const useTemporalChanges = (from: string, to: string, namespace?: string,
     enabled,
   })
 
+export const useStaleFiles = (namespace?: string, staleDays?: number) =>
+  useQuery({
+    queryKey: ['stale-files', namespace, staleDays],
+    queryFn: () => api.staleFiles({ namespace, stale_days: staleDays }),
+  })
+
+export const useDrift = (from: string, to: string, namespace?: string, enabled = true) =>
+  useQuery({
+    queryKey: ['drift', from, to, namespace],
+    queryFn: () => api.drift({ from, to, namespace }),
+    enabled,
+  })
+
 export const useFileContent = (path: string | null, lineStart?: number, lineEnd?: number, namespace?: string) =>
   useQuery({
     queryKey: ['file-content', path, lineStart, lineEnd, namespace],

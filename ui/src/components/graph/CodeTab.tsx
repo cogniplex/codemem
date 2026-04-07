@@ -183,16 +183,19 @@ function HighlightedCode({
   highlightStart?: number
   highlightEnd?: number
 }) {
-  // Extract lines from Shiki's output — they are wrapped in <span class="line">
-  const lineRegex = /<span class="line">(.*?)<\/span>/g
-  const lineMatches: string[] = []
-  let match
-  while ((match = lineRegex.exec(html)) !== null) {
-    lineMatches.push(match[1])
-  }
+  // Shiki wraps each line in <span class="line">...nested spans...</span>.
+  // We split on the line boundary tags to preserve all nested token spans.
+  const lines = html
+    .split(/<span class="line">/)
+    .slice(1) // first element is the pre/code wrapper
+    .map((chunk) => {
+      // Remove trailing </span> that closes the .line wrapper
+      // (may also have </code></pre> at the very end)
+      const endIdx = chunk.lastIndexOf('</span>')
+      return endIdx >= 0 ? chunk.slice(0, endIdx) : chunk
+    })
 
-  // Fallback if regex didn't match Shiki's format
-  if (lineMatches.length === 0) {
+  if (lines.length === 0) {
     return (
       <div
         className="p-3 font-mono [&_pre]:!bg-transparent [&_code]:!bg-transparent"
@@ -204,7 +207,7 @@ function HighlightedCode({
   return (
     <table className="w-full border-collapse">
       <tbody>
-        {lineMatches.map((lineHtml, i) => {
+        {lines.map((lineHtml, i) => {
           const lineNum = startLine + i
           const isHighlighted =
             highlightStart !== undefined &&

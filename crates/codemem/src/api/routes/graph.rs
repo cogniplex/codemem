@@ -479,6 +479,72 @@ pub async fn get_temporal_snapshot(
     Ok(Json(serde_json::to_value(snapshot).unwrap_or_default()))
 }
 
+// ── Stale Files & Drift ────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct StaleFilesQuery {
+    pub namespace: Option<String>,
+    pub stale_days: Option<u64>,
+}
+
+pub async fn get_stale_files(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<StaleFilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let stale_days = query.stale_days.unwrap_or(30);
+    let files = state
+        .server
+        .engine
+        .find_stale_files(query.namespace.as_deref(), stale_days)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+
+    Ok(Json(serde_json::json!({
+        "stale_days": stale_days,
+        "stale_files": files.len(),
+        "files": files,
+    })))
+}
+
+pub async fn get_drift(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<crate::api::types::TemporalChangesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let from = chrono::DateTime::parse_from_rfc3339(&query.from)
+        .map(|dt| dt.to_utc())
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid 'from' date: {e}")})),
+            )
+        })?;
+    let to = chrono::DateTime::parse_from_rfc3339(&query.to)
+        .map(|dt| dt.to_utc())
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid 'to' date: {e}")})),
+            )
+        })?;
+
+    let report = state
+        .server
+        .engine
+        .detect_drift(from, to, query.namespace.as_deref())
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+
+    Ok(Json(serde_json::to_value(report).unwrap_or_default()))
+}
+
 // ── File Content ────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
