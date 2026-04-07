@@ -374,6 +374,9 @@ pub struct EnrichmentConfig {
     pub insight_confidence: f64,
     /// Cosine similarity threshold for deduplicating insights.
     pub dedup_similarity_threshold: f64,
+    /// Maximum number of code smell memories to store per analysis run.
+    /// Higher-severity smells are kept first.
+    pub max_code_smells: usize,
     /// Dead code detection settings.
     pub dead_code: DeadCodeConfig,
 }
@@ -432,6 +435,7 @@ impl Default for EnrichmentConfig {
             perf_min_symbol_count: 30,
             insight_confidence: 0.5,
             dedup_similarity_threshold: 0.90,
+            max_code_smells: 50,
             dead_code: DeadCodeConfig::default(),
         }
     }
