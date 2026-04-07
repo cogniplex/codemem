@@ -71,12 +71,16 @@ Identify the active namespace for this project (typically the directory basename
 
 Walk the graph hierarchy top-down to build a complete inventory. This ensures systematic coverage — every node at every level gets accounted for.
 
-**Level 1 — Domain/Workspace**: Get all top-level packages:
+**Level 1 — Domain/Workspace**: Try to get top-level packages. Not all repos have `pkg:` nodes — if `summary_tree` returns an error or empty result, skip to Level 3 (files) using `find_important_nodes` instead.
 ```
 summary_tree { "start_id": "pkg:", "max_depth": 2 }
 ```
+If that fails, use this as your entry point instead:
+```
+find_important_nodes { "top_k": 50, "include_kinds": ["File"] }
+```
 
-**Level 2 — Packages**: For each top-level package, enumerate children:
+**Level 2 — Packages** (skip if no `pkg:` nodes): For each top-level package, enumerate children:
 ```
 graph_traverse { "start_id": "pkg:<name>/", "max_depth": 1, "include_relationships": ["CONTAINS"], "include_kinds": ["Package", "File"] }
 ```
@@ -566,7 +570,7 @@ At least 50% of stored memories should be Decision or Pattern type.
 
 ## Tips
 
-- `summary_tree { "start_id": "pkg:src/" }` for module hierarchy
+- `summary_tree { "start_id": "pkg:src/" }` for module hierarchy (if `pkg:` nodes exist; otherwise use `find_important_nodes`)
 - `find_important_nodes { "top_k": 100 }` for architectural weight
 - `graph_traverse` with `"exclude_kinds": ["chunk"]` for clean call graphs
 - `node_coverage` to batch-check many nodes at once
