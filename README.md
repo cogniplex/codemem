@@ -312,6 +312,8 @@ Although codemem is designed for code exploration memory (not generic conversati
 
 Both benchmarks use stricter conditions than published baselines: recall limit of 10 (vs 50-100), no evidence oracle, no embedding fallback. Both were run with OpenAI text-embedding-3-small. With the built-in local BERT model (BAAI/bge-base-en-v1.5), LoCoMo scores 89.58% -- a ~2% gap that graph expansion closes entirely (91.49% for both models in codemem-graph mode). Higher scores are achievable with better embedding models without any architectural changes.
 
+Running with Ollama (e.g. `nomic-embed-text` or `mxbai-embed-large`) typically yields significantly higher benchmark scores than the built-in Candle model, while still keeping everything local.
+
 See [bench/locomo/](bench/locomo/) and [bench/longmemeval/](bench/longmemeval/) for methodology, reproduction steps, and detailed breakdowns.
 
 ## How It Works
