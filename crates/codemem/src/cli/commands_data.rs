@@ -25,7 +25,12 @@ fn start_background_watcher() {
 
 pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> {
     let server = build_server()?;
-    start_background_watcher();
+    // Only start the background watcher for MCP stdio mode.
+    // In UI/API mode the watcher's CodememEngine can create a nested
+    // tokio runtime (via embedding provider) that panics on drop.
+    if !api {
+        start_background_watcher();
+    }
 
     match (api, http) {
         // Pure stdio mode (backwards compatible)
