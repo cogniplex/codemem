@@ -142,100 +142,100 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
         let hook_defs: Vec<(&str, &str, serde_json::Value)> = vec![
             (
                 "SessionStart",
-                "codemem context",
+                "codemem mcp context",
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem context",
+                        "command": "codemem mcp context",
                         "timeout": 10000
                     }]
                 }]),
             ),
             (
                 "UserPromptSubmit",
-                "codemem prompt",
+                "codemem mcp prompt",
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem prompt",
+                        "command": "codemem mcp prompt",
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "PostToolUse",
-                "codemem ingest",
+                "codemem mcp ingest",
                 serde_json::json!([{
                     "matcher": "Edit|Write|MultiEdit",
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem ingest",
+                        "command": "codemem mcp ingest",
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "PostToolUseFailure",
-                "codemem tool-error",
+                "codemem mcp tool-error",
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem tool-error",
+                        "command": "codemem mcp tool-error",
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "Stop",
-                "codemem summarize",
+                "codemem mcp summarize",
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem summarize",
+                        "command": "codemem mcp summarize",
                         "timeout": 10000
                     }]
                 }]),
             ),
             (
                 "SubagentStop",
-                "codemem agent-result",
+                "codemem mcp agent-result",
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem agent-result",
+                        "command": "codemem mcp agent-result",
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "SubagentStart",
-                "codemem agent-start",
+                "codemem mcp agent-start",
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem agent-start",
+                        "command": "codemem mcp agent-start",
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "SessionEnd",
-                "codemem session-close",
+                "codemem mcp session-close",
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem session-close",
+                        "command": "codemem mcp session-close",
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "PreCompact",
-                "codemem checkpoint",
+                "codemem mcp checkpoint",
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem checkpoint",
+                        "command": "codemem mcp checkpoint",
                         "timeout": 5000
                     }]
                 }]),
@@ -244,6 +244,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
 
         let mut hooks_added = 0;
         let mut hooks_skipped = 0;
+        let mut hooks_migrated = 0;
 
         for (event_name, cmd_name, hook_value) in &hook_defs {
             let event_hooks = hooks
@@ -256,29 +257,56 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                 *event_hooks = serde_json::json!([]);
             }
 
-            // Check if an codemem hook already exists for this event
-            let already_exists = event_hooks
+            // Check if a codemem hook already exists for this event.
+            // Also detect old-style hooks (e.g. "codemem context") and migrate
+            // them to the new "codemem mcp context" form.
+            let arr = event_hooks
                 .as_array()
-                .expect("event_hooks ensured as array above")
-                .iter()
-                .any(|h| {
-                    h.get("hooks")
-                        .and_then(|arr| arr.as_array())
-                        .map(|arr| {
-                            arr.iter().any(|entry| {
-                                entry
-                                    .get("command")
-                                    .and_then(|c| c.as_str())
-                                    .map(|c| c.starts_with("codemem "))
-                                    .unwrap_or(false)
-                            })
-                        })
-                        .unwrap_or(false)
-                });
+                .expect("event_hooks ensured as array above");
 
-            if already_exists {
+            let has_new_style = arr.iter().any(|h| {
+                h.get("hooks")
+                    .and_then(|a| a.as_array())
+                    .map(|a| {
+                        a.iter().any(|entry| {
+                            entry
+                                .get("command")
+                                .and_then(|c| c.as_str())
+                                .map(|c| c.starts_with("codemem mcp "))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
+            });
+
+            if has_new_style {
                 hooks_skipped += 1;
             } else {
+                // Remove old-style codemem hooks before inserting the new ones
+                let old_len = event_hooks.as_array().map(|a| a.len()).unwrap_or(0);
+                if let Some(arr) = event_hooks.as_array_mut() {
+                    arr.retain(|h| {
+                        !h.get("hooks")
+                            .and_then(|a| a.as_array())
+                            .map(|a| {
+                                a.iter().any(|entry| {
+                                    entry
+                                        .get("command")
+                                        .and_then(|c| c.as_str())
+                                        .map(|c| {
+                                            c.starts_with("codemem ")
+                                                && !c.starts_with("codemem mcp ")
+                                        })
+                                        .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false)
+                    });
+                }
+                let new_len = event_hooks.as_array().map(|a| a.len()).unwrap_or(0);
+                if old_len != new_len {
+                    hooks_migrated += 1;
+                }
                 // Append the hook entries from the value array
                 if let Some(entries) = hook_value.as_array() {
                     for entry in entries {
@@ -300,9 +328,15 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                 settings_path.display()
             ));
         }
+        if hooks_migrated > 0 {
+            println!(
+                "[hooks] Migrated {} hook(s) to `codemem mcp` subcommand",
+                hooks_migrated
+            );
+        }
         if hooks_skipped > 0 {
             println!("[hooks] {} hook(s) already present, skipped", hooks_skipped);
-            if hooks_added == 0 {
+            if hooks_added == 0 && hooks_migrated == 0 {
                 status_lines.push("Hooks: all already configured (no changes)".to_string());
             }
         }
@@ -450,7 +484,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                 "codemem".to_string(),
                 serde_json::json!({
                     "command": "codemem",
-                    "args": ["serve"]
+                    "args": ["mcp", "serve"]
                 }),
             );
             println!(

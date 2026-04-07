@@ -135,23 +135,6 @@ pub(crate) fn cmd_stats() -> anyhow::Result<()> {
     println!("  Graph nodes: {}", stats.node_count);
     println!("  Graph edges: {}", stats.edge_count);
 
-    // Vector index
-    {
-        let vector = engine.lock_vector()?;
-        let vstats = vector.stats();
-        println!("  Vector indexed: {}", vstats.count);
-    }
-
-    // Embedding provider
-    match engine.lock_embeddings()? {
-        Some(emb) => println!(
-            "  Embedding provider: {} ({}d)",
-            emb.name(),
-            emb.dimensions()
-        ),
-        None => println!("  Embedding provider: not configured"),
-    }
-
     Ok(())
 }
 

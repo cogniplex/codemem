@@ -17,7 +17,7 @@ Integrate via Claude Code's hook system. `codemem init` registers hooks in `.cla
 
 Key design choices:
 
-1. **Hooks use `open_without_migrations()` for speed.** Hook handlers open SQLite without running migrations to avoid blocking the assistant. Migrations run on `codemem serve` or `codemem analyze` instead.
+1. **Hooks use `open_without_migrations()` for speed.** Hook handlers open SQLite without running migrations to avoid blocking the assistant. Migrations run on `codemem mcp serve` or `codemem analyze` instead.
 
 2. **PostToolUse hooks are selective.** Only Edit/Write/MultiEdit tool calls trigger file re-indexing. Read/Glob/Grep calls are observed for focus detection (directory affinity, repeated searches) but don't trigger re-indexing.
 

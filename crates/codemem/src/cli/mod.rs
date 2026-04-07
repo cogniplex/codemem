@@ -56,19 +56,6 @@ enum Commands {
     /// Show database statistics
     Stats,
 
-    /// Start MCP server (stdio by default, composable with --api and --http)
-    Serve {
-        /// Enable REST API + embedded frontend on HTTP
-        #[arg(long)]
-        api: bool,
-        /// Use HTTP transport for MCP (instead of stdio)
-        #[arg(long)]
-        http: bool,
-        /// HTTP server port (used when --api or --http is set)
-        #[arg(long, default_value = "4242")]
-        port: u16,
-    },
-
     /// Open the control plane UI (alias for `serve --api`, auto-opens browser)
     Ui {
         /// HTTP server port
@@ -79,9 +66,6 @@ enum Commands {
         no_open: bool,
     },
 
-    /// Process hook payload from stdin
-    Ingest,
-
     /// Run memory consolidation cycles
     Consolidate {
         /// Cycle type: decay, creative, cluster, forget
@@ -91,17 +75,6 @@ enum Commands {
         /// Show last run status for each consolidation cycle
         #[arg(long)]
         status: bool,
-    },
-
-    /// Index a codebase for structural analysis
-    Index {
-        /// Path to index (defaults to current directory)
-        #[arg(short, long)]
-        path: Option<PathBuf>,
-
-        /// Show detailed symbol output
-        #[arg(short, long)]
-        verbose: bool,
     },
 
     /// Full analysis pipeline: index → enrich → PageRank → clusters
@@ -175,13 +148,6 @@ enum Commands {
         skip_duplicates: bool,
     },
 
-    /// Watch a directory for file changes and re-index
-    Watch {
-        /// Directory to watch (defaults to current directory)
-        #[arg(short, long)]
-        path: Option<PathBuf>,
-    },
-
     /// Manage memory sessions
     Sessions {
         #[command(subcommand)]
@@ -199,6 +165,92 @@ enum Commands {
 
     /// Run pending database schema migrations
     Migrate,
+
+    /// MCP server, hooks, and integration commands
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+
+    // ── Hidden backward-compat aliases ──────────────────────────────
+    /// (hidden) Alias for `mcp serve`
+    #[command(hide = true)]
+    Serve {
+        #[arg(long)]
+        api: bool,
+        #[arg(long)]
+        http: bool,
+        #[arg(long, default_value = "4242")]
+        port: u16,
+    },
+
+    /// (hidden) Alias for `mcp ingest`
+    #[command(hide = true)]
+    Ingest,
+
+    /// (hidden) Alias for `mcp context`
+    #[command(hide = true)]
+    Context,
+
+    /// (hidden) Alias for `mcp prompt`
+    #[command(hide = true)]
+    Prompt,
+
+    /// (hidden) Alias for `mcp summarize`
+    #[command(hide = true)]
+    Summarize,
+
+    /// (hidden) Alias for `mcp agent-result`
+    #[command(hide = true)]
+    AgentResult,
+
+    /// (hidden) Alias for `mcp agent-start`
+    #[command(hide = true)]
+    AgentStart,
+
+    /// (hidden) Alias for `mcp tool-error`
+    #[command(hide = true)]
+    ToolError,
+
+    /// (hidden) Alias for `mcp session-close`
+    #[command(hide = true)]
+    SessionClose,
+
+    /// (hidden) Alias for `mcp checkpoint`
+    #[command(hide = true)]
+    Checkpoint,
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Get a configuration value by dot-separated key path
+    Get {
+        /// Key path (e.g. "scoring.vector_similarity")
+        key: String,
+    },
+    /// Set a configuration value
+    Set {
+        /// Key path (e.g. "scoring.vector_similarity")
+        key: String,
+        /// Value to set (JSON-compatible)
+        value: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// Start MCP server (stdio by default, or --http for HTTP transport)
+    Serve {
+        /// Use HTTP transport for MCP (instead of stdio)
+        #[arg(long)]
+        http: bool,
+        /// HTTP server port (used when --http is set)
+        #[arg(long, default_value = "4242")]
+        port: u16,
+    },
+
+    /// Process hook payload from stdin
+    Ingest,
 
     /// SessionStart hook: inject prior context into a new session (reads JSON from stdin)
     Context,
@@ -223,22 +275,6 @@ enum Commands {
 
     /// PreCompact hook: checkpoint before context compaction (reads JSON from stdin)
     Checkpoint,
-}
-
-#[derive(Subcommand)]
-enum ConfigAction {
-    /// Get a configuration value by dot-separated key path
-    Get {
-        /// Key path (e.g. "scoring.vector_similarity")
-        key: String,
-    },
-    /// Set a configuration value
-    Set {
-        /// Key path (e.g. "scoring.vector_similarity")
-        key: String,
-        /// Value to set (JSON-compatible)
-        value: String,
-    },
 }
 
 #[derive(Subcommand)]
@@ -296,14 +332,8 @@ pub fn run() -> anyhow::Result<()> {
         Commands::Stats => {
             commands_search::cmd_stats()?;
         }
-        Commands::Serve { api, http, port } => {
-            commands_data::cmd_serve(api, http, port)?;
-        }
         Commands::Ui { port, no_open } => {
             commands_data::cmd_ui(port, no_open)?;
-        }
-        Commands::Ingest => {
-            commands_data::cmd_ingest()?;
         }
         Commands::Consolidate { cycle, status } => {
             if status {
@@ -311,13 +341,6 @@ pub fn run() -> anyhow::Result<()> {
             } else {
                 commands_consolidation::cmd_consolidate(&cycle)?;
             }
-        }
-        Commands::Index { path, verbose } => {
-            let project_dir = match path {
-                Some(p) => p,
-                None => std::env::current_dir()?,
-            };
-            commands_export::cmd_index(&project_dir, verbose)?;
         }
         Commands::Analyze {
             path,
@@ -368,13 +391,6 @@ pub fn run() -> anyhow::Result<()> {
         } => {
             commands_export::cmd_import(input.as_deref(), skip_duplicates)?;
         }
-        Commands::Watch { path } => {
-            let watch_dir = match path {
-                Some(p) => p,
-                None => std::env::current_dir()?,
-            };
-            commands_data::cmd_watch(&watch_dir)?;
-        }
         Commands::Doctor => {
             commands_doctor::cmd_doctor()?;
         }
@@ -388,6 +404,9 @@ pub fn run() -> anyhow::Result<()> {
         },
         Commands::Migrate => {
             commands_migrate::cmd_migrate()?;
+        }
+        Commands::Mcp { action } => {
+            run_mcp_action(action)?;
         }
         Commands::Sessions { action } => {
             // H3: Open lightweight storage instead of the full engine
@@ -406,17 +425,63 @@ pub fn run() -> anyhow::Result<()> {
                 }
             }
         }
+
+        // ── Hidden backward-compat aliases → delegate to mcp subcommand ──
+        Commands::Serve { api, http, port } => {
+            if api {
+                // Old `codemem serve --api` → now `codemem ui`
+                commands_data::cmd_ui(port, false)?;
+            } else {
+                run_mcp_action(McpAction::Serve { http, port })?;
+            }
+        }
+        Commands::Ingest => {
+            run_mcp_action(McpAction::Ingest)?;
+        }
         Commands::Context => {
-            // H3: Open lightweight storage instead of the full engine.
+            run_mcp_action(McpAction::Context)?;
+        }
+        Commands::Prompt => {
+            run_mcp_action(McpAction::Prompt)?;
+        }
+        Commands::Summarize => {
+            run_mcp_action(McpAction::Summarize)?;
+        }
+        Commands::AgentResult => {
+            run_mcp_action(McpAction::AgentResult)?;
+        }
+        Commands::AgentStart => {
+            run_mcp_action(McpAction::AgentStart)?;
+        }
+        Commands::ToolError => {
+            run_mcp_action(McpAction::ToolError)?;
+        }
+        Commands::SessionClose => {
+            run_mcp_action(McpAction::SessionClose)?;
+        }
+        Commands::Checkpoint => {
+            run_mcp_action(McpAction::Checkpoint)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_mcp_action(action: McpAction) -> anyhow::Result<()> {
+    match action {
+        McpAction::Serve { http, port } => {
+            commands_data::cmd_serve(false, http, port)?;
+        }
+        McpAction::Ingest => {
+            commands_data::cmd_ingest()?;
+        }
+        McpAction::Context => {
             let db_path = codemem_db_path();
             match codemem_engine::Storage::open_without_migrations(&db_path) {
                 Ok(storage) => {
                     commands_lifecycle::cmd_context(&storage)?;
                 }
                 Err(e) => {
-                    // H2: Only suppress missing-file errors (DB doesn't exist yet).
-                    // Log other errors (corruption, permission denied, lock poisoning)
-                    // so they're visible in traces rather than silently swallowed.
                     if db_path.exists() {
                         tracing::warn!("Failed to open storage for context: {e}");
                     }
@@ -424,29 +489,28 @@ pub fn run() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Prompt => {
+        McpAction::Prompt => {
             commands_lifecycle::cmd_prompt()?;
         }
-        Commands::Summarize => {
+        McpAction::Summarize => {
             commands_lifecycle::cmd_summarize()?;
         }
-        Commands::AgentResult => {
+        McpAction::AgentResult => {
             commands_lifecycle::cmd_agent_result()?;
         }
-        Commands::AgentStart => {
+        McpAction::AgentStart => {
             commands_lifecycle::cmd_agent_start()?;
         }
-        Commands::ToolError => {
+        McpAction::ToolError => {
             commands_lifecycle::cmd_tool_error()?;
         }
-        Commands::SessionClose => {
+        McpAction::SessionClose => {
             commands_lifecycle::cmd_session_close()?;
         }
-        Commands::Checkpoint => {
+        McpAction::Checkpoint => {
             commands_lifecycle::cmd_checkpoint()?;
         }
     }
-
     Ok(())
 }
 

@@ -250,6 +250,8 @@ export CODEMEM_EMBED_PROVIDER=gemini
 export CODEMEM_EMBED_API_KEY=AIza...
 ```
 
+Running with Ollama (e.g. `nomic-embed-text` or `mxbai-embed-large`) is significantly faster than the built-in Candle model, while still keeping everything local.
+
 **Configurable model, precision, and batch size:**
 
 ```toml
@@ -312,18 +314,16 @@ Although codemem is designed for code exploration memory (not generic conversati
 
 Both benchmarks use stricter conditions than published baselines: recall limit of 10 (vs 50-100), no evidence oracle, no embedding fallback. Both were run with OpenAI text-embedding-3-small. With the built-in local BERT model (BAAI/bge-base-en-v1.5), LoCoMo scores 89.58% -- a ~2% gap that graph expansion closes entirely (91.49% for both models in codemem-graph mode). Higher scores are achievable with better embedding models without any architectural changes.
 
-Running with Ollama (e.g. `nomic-embed-text` or `mxbai-embed-large`) typically yields significantly higher benchmark scores than the built-in Candle model, while still keeping everything local.
-
 See [bench/locomo/](bench/locomo/) and [bench/longmemeval/](bench/longmemeval/) for methodology, reproduction steps, and detailed breakdowns.
 
 ## How It Works
 
 ```mermaid
 graph LR
-    A[AI Assistant] -->|SessionStart hook| B[codemem context]
-    A -->|PostToolUse hooks| C[codemem ingest]
-    A -->|Stop hook| E[codemem summarize]
-    A -->|MCP tools| D[codemem serve]
+    A[AI Assistant] -->|SessionStart hook| B[codemem mcp context]
+    A -->|PostToolUse hooks| C[codemem mcp ingest]
+    A -->|Stop hook| E[codemem mcp summarize]
+    A -->|MCP tools| D[codemem mcp serve]
     B -->|Inject context| A
     C --> F[Storage + Vector + Graph]
     D --> F
@@ -357,18 +357,18 @@ graph LR
 codemem init          # Initialize project (model + hooks + MCP)
 codemem search        # Search memories
 codemem stats         # Database statistics
-codemem serve         # Start MCP server (JSON-RPC stdio, or --api/--http for HTTP)
 codemem ui            # Open control plane UI (REST API + embedded React frontend)
-codemem index         # Index codebase with tree-sitter
 codemem analyze       # Full pipeline: index + SCIP + enrich + PageRank + clusters
 codemem review        # Diff-aware blast radius analysis (reads diff from stdin)
 codemem consolidate   # Run consolidation cycles
-codemem watch         # Real-time file watcher
 codemem export/import # Backup and restore (JSONL, JSON, CSV, Markdown)
 codemem sessions      # Session management (list, start, end)
 codemem doctor        # Health checks on installation
 codemem config        # Get/set configuration values
 codemem migrate       # Run pending schema migrations
+codemem mcp serve     # Start MCP server (JSON-RPC stdio, or --http for HTTP)
+codemem mcp ingest    # Process hook payload from stdin
+codemem mcp context   # SessionStart hook (+ 7 more lifecycle hooks)
 ```
 
 See [CLI Reference](docs/cli-reference.md) for full usage.

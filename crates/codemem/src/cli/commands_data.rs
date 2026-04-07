@@ -324,20 +324,6 @@ pub(crate) fn cmd_ingest() -> anyhow::Result<()> {
     Ok(())
 }
 
-// ── Watch Command ─────────────────────────────────────────────────────────
-
-pub(crate) fn cmd_watch(watch_dir: &std::path::Path) -> anyhow::Result<()> {
-    if !watch_dir.is_dir() {
-        anyhow::bail!("Not a directory: {}", watch_dir.display());
-    }
-
-    println!(
-        "Watching {} for file changes (Ctrl+C to stop)",
-        watch_dir.display()
-    );
-    run_watcher_loop(&super::codemem_db_path(), watch_dir, false)
-}
-
 /// A single file change event with metadata collected from the filesystem.
 struct FileChange {
     relative_path: String,
