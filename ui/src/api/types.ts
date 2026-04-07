@@ -78,6 +78,20 @@ export interface GraphNode {
   payload?: Record<string, unknown>
 }
 
+export interface TemporalChangesResponse {
+  commits: number
+  entries: TemporalEntry[]
+}
+
+export interface TemporalEntry {
+  sha: string
+  message: string
+  author: string
+  timestamp: string
+  files: string[]
+  symbols: string[]
+}
+
 export interface FileContentResponse {
   path: string
   content: string

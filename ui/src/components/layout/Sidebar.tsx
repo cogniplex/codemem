@@ -3,6 +3,7 @@ import {
   Network,
   Brain,
   Lightbulb,
+  Clock,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -13,6 +14,7 @@ const navItems = [
   { key: 'graph' as const, label: 'Graph', icon: Network },
   { key: 'memories' as const, label: 'Memories', icon: Brain },
   { key: 'insights' as const, label: 'Insights', icon: Lightbulb },
+  { key: 'temporal' as const, label: 'Temporal', icon: Clock },
 ]
 
 export function Sidebar() {

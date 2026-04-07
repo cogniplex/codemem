@@ -43,6 +43,14 @@ export const useGraphBrowse = (params?: Parameters<typeof api.graphBrowse>[0]) =
 export const useVectors = (namespace?: string) =>
   useQuery({ queryKey: ['vectors', namespace], queryFn: () => api.vectors(namespace) })
 
+// Temporal
+export const useTemporalChanges = (from: string, to: string, namespace?: string, enabled = true) =>
+  useQuery({
+    queryKey: ['temporal-changes', from, to, namespace],
+    queryFn: () => api.temporalChanges({ from, to, namespace }),
+    enabled,
+  })
+
 export const useFileContent = (path: string | null, lineStart?: number, lineEnd?: number, namespace?: string) =>
   useQuery({
     queryKey: ['file-content', path, lineStart, lineEnd, namespace],

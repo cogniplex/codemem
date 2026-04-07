@@ -93,6 +93,15 @@ export const api = {
     request<import('./types').MessageResponse>(`/api/repos/${id}/index`, { method: 'POST' }),
   repo: (id: string) => request<import('./types').Repository>(`/api/repos/${id}`),
 
+  // Temporal
+  temporalChanges: (params: { from: string; to: string; namespace?: string }) => {
+    const search = new URLSearchParams({ from: params.from, to: params.to })
+    if (params.namespace) search.set('namespace', params.namespace)
+    return request<import('./types').TemporalChangesResponse>(`/api/graph/temporal/changes?${search}`)
+  },
+  temporalSnapshot: (at: string) =>
+    request<unknown>(`/api/graph/temporal/snapshot?at=${encodeURIComponent(at)}`),
+
   // Sessions
   sessions: (params?: { namespace?: string; limit?: number }) => {
     const search = new URLSearchParams()
