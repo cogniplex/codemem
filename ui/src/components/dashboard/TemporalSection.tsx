@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react'
 import {
   GitBranch, FileWarning, TrendingUp, Loader2, AlertTriangle,
-  ArrowLeftRight, FileText, Layers, Minus, Plus,
+  ArrowLeftRight, FileText,
 } from 'lucide-react'
 import { useStaleFiles, useDrift } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
-import { Card, MetricCard } from '../shared/Card'
+import { Card } from '../shared/Card'
 
 function daysAgo(n: number): string {
   const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString()
@@ -36,16 +36,6 @@ export function TemporalSection() {
 
   return (
     <div className="space-y-4">
-      {/* Drift metrics row */}
-      {driftData && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <MetricCard label="Cross-Module Edges" value={driftData.new_cross_module_edges} icon={<ArrowLeftRight size={14} className="text-violet-400" />} />
-          <MetricCard label="Files Added" value={driftData.added_files} icon={<Plus size={14} className="text-emerald-400" />} />
-          <MetricCard label="Files Removed" value={driftData.removed_files} icon={<Minus size={14} className="text-red-400" />} />
-          <MetricCard label="Coupling Pairs" value={driftData.coupling_increases?.length ?? 0} icon={<Layers size={14} className="text-amber-400" />} />
-        </div>
-      )}
-
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Drift */}
         <Card
