@@ -112,6 +112,15 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
     println!("[database] Initialized at {}", db_path.display());
     status_lines.push(format!("Database: {}", db_path.display()));
 
+    // Resolve absolute path to the current binary so hooks and MCP config
+    // work regardless of install method (cargo, brew, install.sh).
+    // /bin/sh doesn't source shell profiles, so bare "codemem" may not be on PATH.
+    let bin_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.canonicalize().ok())
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "codemem".to_string());
+
     // ── Step 3: Write lifecycle hooks into Claude Code settings ────────────
     // Register 4 hooks: SessionStart, UserPromptSubmit, PostToolUse, Stop
     // Claude Code reads hooks from .claude/settings.json in the PROJECT directory
@@ -139,103 +148,103 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
 
         // Define all codemem lifecycle hooks covering the Claude Code hooks spec.
         // matcher is a regex filtering tool names or session source. Omitted = fires for all.
-        let hook_defs: Vec<(&str, &str, serde_json::Value)> = vec![
+        let hook_defs: Vec<(&str, String, serde_json::Value)> = vec![
             (
                 "SessionStart",
-                "codemem mcp context",
+                format!("{bin_path} mcp context"),
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem mcp context",
+                        "command": format!("{bin_path} mcp context"),
                         "timeout": 10000
                     }]
                 }]),
             ),
             (
                 "UserPromptSubmit",
-                "codemem mcp prompt",
+                format!("{bin_path} mcp prompt"),
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem mcp prompt",
+                        "command": format!("{bin_path} mcp prompt"),
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "PostToolUse",
-                "codemem mcp ingest",
+                format!("{bin_path} mcp ingest"),
                 serde_json::json!([{
                     "matcher": "Edit|Write|MultiEdit",
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem mcp ingest",
+                        "command": format!("{bin_path} mcp ingest"),
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "PostToolUseFailure",
-                "codemem mcp tool-error",
+                format!("{bin_path} mcp tool-error"),
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem mcp tool-error",
+                        "command": format!("{bin_path} mcp tool-error"),
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "Stop",
-                "codemem mcp summarize",
+                format!("{bin_path} mcp summarize"),
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem mcp summarize",
+                        "command": format!("{bin_path} mcp summarize"),
                         "timeout": 10000
                     }]
                 }]),
             ),
             (
                 "SubagentStop",
-                "codemem mcp agent-result",
+                format!("{bin_path} mcp agent-result"),
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem mcp agent-result",
+                        "command": format!("{bin_path} mcp agent-result"),
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "SubagentStart",
-                "codemem mcp agent-start",
+                format!("{bin_path} mcp agent-start"),
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem mcp agent-start",
+                        "command": format!("{bin_path} mcp agent-start"),
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "SessionEnd",
-                "codemem mcp session-close",
+                format!("{bin_path} mcp session-close"),
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem mcp session-close",
+                        "command": format!("{bin_path} mcp session-close"),
                         "timeout": 5000
                     }]
                 }]),
             ),
             (
                 "PreCompact",
-                "codemem mcp checkpoint",
+                format!("{bin_path} mcp checkpoint"),
                 serde_json::json!([{
                     "hooks": [{
                         "type": "command",
-                        "command": "codemem mcp checkpoint",
+                        "command": format!("{bin_path} mcp checkpoint"),
                         "timeout": 5000
                     }]
                 }]),
@@ -257,6 +266,14 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                 *event_hooks = serde_json::json!([]);
             }
 
+            // Helper: check if a hook command string belongs to codemem.
+            // Matches both bare "codemem ..." and absolute paths like
+            // "/usr/local/bin/codemem ..." or "/home/user/.cargo/bin/codemem ...".
+            let is_codemem_cmd = |c: &str| {
+                c.starts_with("codemem ") || c.contains("/codemem ") || c.contains("\\codemem ")
+            };
+            let is_codemem_mcp_cmd = |c: &str| is_codemem_cmd(c) && c.contains(" mcp ");
+
             // Check if a codemem hook already exists for this event.
             // Also detect old-style hooks (e.g. "codemem context") and migrate
             // them to the new "codemem mcp context" form.
@@ -272,7 +289,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                             entry
                                 .get("command")
                                 .and_then(|c| c.as_str())
-                                .map(|c| c.starts_with("codemem mcp "))
+                                .map(|c| is_codemem_mcp_cmd(c))
                                 .unwrap_or(false)
                         })
                     })
@@ -293,10 +310,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
                                     entry
                                         .get("command")
                                         .and_then(|c| c.as_str())
-                                        .map(|c| {
-                                            c.starts_with("codemem ")
-                                                && !c.starts_with("codemem mcp ")
-                                        })
+                                        .map(|c| is_codemem_cmd(c) && !is_codemem_mcp_cmd(c))
                                         .unwrap_or(false)
                                 })
                             })
@@ -483,7 +497,7 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
             servers_map.insert(
                 "codemem".to_string(),
                 serde_json::json!({
-                    "command": "codemem",
+                    "command": bin_path,
                     "args": ["mcp", "serve"]
                 }),
             );
