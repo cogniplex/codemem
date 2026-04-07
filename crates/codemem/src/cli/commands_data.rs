@@ -36,19 +36,10 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
             );
             server.run()?;
         }
-        // REST API + embedded frontend + stdio MCP
+        // REST API + embedded frontend (no stdio MCP — UI doesn't need it)
         (true, false) => {
             let server = Arc::new(server);
             let api_server = crate::api::ApiServer::new(Arc::clone(&server));
-
-            // Run stdio in a background thread, HTTP in the main tokio runtime
-            let server_for_stdio = Arc::clone(&server);
-            std::thread::spawn(move || {
-                tracing::info!("stdio MCP transport running in background");
-                if let Err(e) = server_for_stdio.run() {
-                    tracing::warn!("stdio transport stopped: {e}");
-                }
-            });
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
