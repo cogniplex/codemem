@@ -127,6 +127,32 @@ pub(crate) fn cmd_init(project_dir: &std::path::Path, skip_model: bool) -> anyho
             serde_json::json!({})
         };
 
+        // Auto-allow all codemem MCP tools so agents don't prompt for each one
+        let permissions = settings
+            .as_object_mut()
+            .expect("settings initialized as JSON object")
+            .entry("permissions")
+            .or_insert_with(|| serde_json::json!({}));
+        if !permissions.is_object() {
+            *permissions = serde_json::json!({});
+        }
+        let allow_list = permissions
+            .as_object_mut()
+            .unwrap()
+            .entry("allow")
+            .or_insert_with(|| serde_json::json!([]));
+        if let Some(arr) = allow_list.as_array() {
+            let already_has = arr
+                .iter()
+                .any(|v| v.as_str().map(|s| s == "mcp__codemem__*").unwrap_or(false));
+            if !already_has {
+                if let Some(arr) = allow_list.as_array_mut() {
+                    arr.push(serde_json::json!("mcp__codemem__*"));
+                }
+                println!("[permissions] Added mcp__codemem__* to allow list");
+            }
+        }
+
         let hooks = settings
             .as_object_mut()
             .expect("settings initialized as JSON object")
