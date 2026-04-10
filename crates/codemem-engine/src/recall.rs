@@ -109,30 +109,7 @@ impl CodememEngine {
         let mut results: Vec<SearchResult> = Vec::new();
         let weights = self.scoring_weights()?;
 
-        if vector_results.is_empty() {
-            // Fallback: batch-load all memories matching filters in one query
-            let type_str = q.memory_type_filter.as_ref().map(|t| t.to_string());
-            let all_memories = self
-                .storage
-                .list_memories_filtered(q.namespace_filter, type_str.as_deref())?;
-
-            for memory in all_memories {
-                if !Self::passes_quality_filters(&memory, q) {
-                    continue;
-                }
-
-                let breakdown =
-                    compute_score(&memory, &query_token_refs, 0.0, &**graph, &bm25, now);
-                let score = breakdown.total_with_weights(&weights);
-                if score > 0.01 {
-                    results.push(SearchResult {
-                        memory,
-                        score,
-                        score_breakdown: breakdown,
-                    });
-                }
-            }
-        } else {
+        if !vector_results.is_empty() {
             // Vector search path: batch-fetch all candidate memories + entity-connected memories
             let mut all_candidate_ids: HashSet<&str> =
                 vector_results.iter().map(|(id, _)| id.as_str()).collect();
@@ -171,6 +148,33 @@ impl CodememEngine {
                 let similarity = sim_map.get(memory.id.as_str()).copied().unwrap_or(0.0);
                 let breakdown =
                     compute_score(&memory, &query_token_refs, similarity, &**graph, &bm25, now);
+                let score = breakdown.total_with_weights(&weights);
+                if score > 0.01 {
+                    results.push(SearchResult {
+                        memory,
+                        score,
+                        score_breakdown: breakdown,
+                    });
+                }
+            }
+        }
+
+        // If vector search produced no results (either unavailable or all
+        // candidates filtered out by namespace/type), fall back to BM25
+        // full-scan so we still return matches.
+        if results.is_empty() {
+            let type_str = q.memory_type_filter.as_ref().map(|t| t.to_string());
+            let all_memories = self
+                .storage
+                .list_memories_filtered(q.namespace_filter, type_str.as_deref())?;
+
+            for memory in all_memories {
+                if !Self::passes_quality_filters(&memory, q) {
+                    continue;
+                }
+
+                let breakdown =
+                    compute_score(&memory, &query_token_refs, 0.0, &**graph, &bm25, now);
                 let score = breakdown.total_with_weights(&weights);
                 if score > 0.01 {
                     results.push(SearchResult {

@@ -44,6 +44,14 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
         // REST API + embedded frontend (no stdio MCP — UI doesn't need it)
         (true, false) => {
             let server = Arc::new(server);
+            // Eagerly initialize the embedding provider BEFORE the tokio
+            // runtime starts. Remote providers (Ollama, OpenAI, Gemini) use
+            // reqwest::blocking::Client which creates an internal tokio
+            // runtime — this panics if created or dropped inside an existing
+            // tokio async context.  Initializing here (on the main thread)
+            // avoids both problems, and the OnceLock ensures later async
+            // callers reuse the already-initialized provider.
+            let _ = server.engine.lock_embeddings();
             let api_server = crate::api::ApiServer::new(Arc::clone(&server));
 
             let rt = tokio::runtime::Runtime::new()?;
@@ -57,6 +65,7 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
         // HTTP MCP + REST API + embedded frontend (no stdio)
         (true, true) => {
             let server = Arc::new(server);
+            let _ = server.engine.lock_embeddings();
             let api_server = crate::api::ApiServer::new(Arc::clone(&server));
 
             let rt = tokio::runtime::Runtime::new()?;
@@ -70,6 +79,7 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
         // HTTP MCP only (for remote MCP clients) — use the API server with MCP mounted
         (false, true) => {
             let server = Arc::new(server);
+            let _ = server.engine.lock_embeddings();
             let api_server = crate::api::ApiServer::new(Arc::clone(&server));
 
             tracing::info!("Codemem MCP HTTP transport on http://localhost:{port}/mcp");

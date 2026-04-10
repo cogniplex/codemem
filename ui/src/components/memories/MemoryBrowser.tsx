@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useDeferredValue } from 'react'
 import { Search, ChevronLeft, ChevronRight, Brain } from 'lucide-react'
 import { useMemories, useSearch } from '../../api/hooks'
 import { useNamespaceStore } from '../../stores/namespace'
@@ -12,18 +12,19 @@ export function MemoryBrowser() {
   const activeNamespace = useNamespaceStore((s) => s.active) ?? undefined
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
+  const deferredQuery = useDeferredValue(searchQuery.trim())
   const [page, setPage] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedBreakdown, setSelectedBreakdown] = useState<ScoreBreakdown | undefined>()
 
-  const isSearching = searchQuery.trim().length > 0
+  const isSearching = deferredQuery.length > 0
 
   const { data: listData, isLoading: listLoading } = useMemories({
     namespace: activeNamespace, type: typeFilter || undefined, offset: page * PAGE_SIZE, limit: PAGE_SIZE,
   })
 
   const { data: searchData, isLoading: searchLoading } = useSearch(
-    { q: searchQuery.trim(), namespace: activeNamespace, type: typeFilter || undefined, k: PAGE_SIZE },
+    { q: deferredQuery, namespace: activeNamespace, type: typeFilter || undefined, k: PAGE_SIZE },
     isSearching,
   )
 

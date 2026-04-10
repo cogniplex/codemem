@@ -14,6 +14,24 @@ use axum::{
 use codemem_core::{MemoryNode, MemoryType, SearchResult};
 use std::sync::Arc;
 
+/// Run a closure on a plain OS thread (no tokio runtime in TLS).
+///
+/// `tokio::task::spawn_blocking` threads still carry the runtime Handle,
+/// which causes `reqwest::blocking::Client::send()` to detect a nested
+/// runtime and panic.  A plain `std::thread` has no tokio context so
+/// `reqwest::blocking` works correctly.
+pub(crate) fn run_blocking<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv().expect("blocking thread panicked")
+}
+
 pub async fn list_memories(
     State(state): State<Arc<AppState>>,
     Query(query): Query<MemoryListQuery>,
@@ -70,8 +88,10 @@ pub async fn store_memory(
     memory.tags = req.tags.unwrap_or_default();
     memory.namespace = req.namespace;
 
-    // Use the engine's full persist pipeline: storage → BM25 → graph → embedding → vector
-    if let Err(e) = state.server.engine.persist_memory(&memory) {
+    let server = Arc::clone(&state.server);
+    let result = run_blocking(move || server.engine.persist_memory(&memory));
+
+    if let Err(e) = result {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(MessageResponse {
@@ -111,30 +131,26 @@ pub async fn update_memory(
         }
     }
 
-    if let Some(ref content) = req.content {
-        // Use engine's full update pipeline: storage → BM25 → graph → re-embed → vector
-        if let Err(e) = state
-            .server
-            .engine
-            .update_memory(&id, content, req.importance)
-        {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(MessageResponse {
-                    message: e.to_string(),
-                }),
-            ));
+    let server = Arc::clone(&state.server);
+    let content = req.content.clone();
+    let importance = req.importance;
+    let result = run_blocking(move || {
+        if let Some(ref content) = content {
+            server.engine.update_memory(&id, content, importance)
+        } else if let Some(importance) = importance {
+            server.engine.update_importance(&id, importance)
+        } else {
+            Ok(())
         }
-    } else if let Some(importance) = req.importance {
-        // Only importance changed — route through engine to maintain domain boundary
-        if let Err(e) = state.server.engine.update_importance(&id, importance) {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(MessageResponse {
-                    message: e.to_string(),
-                }),
-            ));
-        }
+    });
+
+    if let Err(e) = result {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(MessageResponse {
+                message: e.to_string(),
+            }),
+        ));
     }
 
     Ok(Json(MessageResponse {
@@ -161,19 +177,26 @@ pub async fn search_memories(
     Query(query): Query<SearchQuery>,
 ) -> Json<SearchResponse> {
     let k = query.k.unwrap_or(10);
-    let memory_type_filter = query
+    let q_str = query.q.clone();
+    let ns = query.namespace.clone();
+    let mt = query
         .memory_type
         .as_deref()
         .and_then(|t| t.parse::<MemoryType>().ok());
 
-    let rq = codemem_engine::RecallQuery {
-        query: &query.q,
-        k,
-        memory_type_filter,
-        namespace_filter: query.namespace.as_deref(),
-        ..codemem_engine::RecallQuery::new(&query.q, k)
-    };
-    let results = match state.server.recall(&rq) {
+    let server = Arc::clone(&state.server);
+    let results = run_blocking(move || {
+        let rq = codemem_engine::RecallQuery {
+            query: &q_str,
+            k,
+            memory_type_filter: mt,
+            namespace_filter: ns.as_deref(),
+            ..codemem_engine::RecallQuery::new(&q_str, k)
+        };
+        server.recall(&rq)
+    });
+
+    let results = match results {
         Ok(results) => results.into_iter().map(search_result_to_item).collect(),
         Err(e) => {
             tracing::warn!("Search failed: {e}");

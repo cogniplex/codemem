@@ -52,13 +52,11 @@ export function DashboardView() {
         <MetricCard label="Co-Changed" value={drift?.coupling_increases?.length ?? 0} icon={<Layers size={13} className="text-amber-400" />} isLoading={dL} />
       </div>
 
-      {/* ── Activity + Consolidation ── */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <RecentActivity />
-        </div>
-        <ConsolidationSection />
-      </div>
+      {/* ── Consolidation (horizontal) ── */}
+      <ConsolidationSection />
+
+      {/* ── Recent Activity (full width) ── */}
+      <RecentActivity />
 
       {/* ── Insights: charts + feeds ── */}
       <InsightsSection />

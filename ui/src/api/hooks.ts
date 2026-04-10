@@ -25,7 +25,12 @@ export const useDeleteMemory = () => {
 
 // Search
 export const useSearch = (params: Parameters<typeof api.search>[0], enabled = true) =>
-  useQuery({ queryKey: ['search', params], queryFn: () => api.search(params), enabled })
+  useQuery({
+    queryKey: ['search', params],
+    queryFn: () => api.search(params),
+    enabled,
+    placeholderData: (prev: unknown) => prev,  // keep previous results while new query loads
+  })
 
 // Graph
 export const useSubgraph = (params?: Parameters<typeof api.subgraph>[0]) =>

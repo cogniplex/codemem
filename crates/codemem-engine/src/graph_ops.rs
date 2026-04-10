@@ -533,6 +533,21 @@ impl CodememEngine {
             path.split('/').next().unwrap_or("root").to_string()
         };
 
+        // When namespace filtering, build the set of node IDs that belong to it
+        // so we can restrict edge-based metrics to relevant nodes.
+        let ns_node_ids: Option<HashSet<&str>> = namespace.map(|_| {
+            all_nodes
+                .iter()
+                .filter(|n| n.namespace.as_deref() == namespace)
+                .map(|n| n.id.as_str())
+                .collect()
+        });
+        let in_ns = |id: &str| -> bool {
+            ns_node_ids
+                .as_ref()
+                .is_none_or(|ids| ids.contains(id))
+        };
+
         let new_cross_module = all_edges
             .iter()
             .filter(|e| {
@@ -542,6 +557,7 @@ impl CodememEngine {
                         e.relationship,
                         RelationshipType::ModifiedBy | RelationshipType::PartOf
                     )
+                    && in_ns(&e.src)
             })
             .count();
 
@@ -551,6 +567,7 @@ impl CodememEngine {
             if edge.relationship == RelationshipType::ModifiedBy
                 && edge.src.starts_with("file:")
                 && edge.valid_from.is_some_and(|vf| vf >= from && vf <= to)
+                && in_ns(&edge.src)
             {
                 *file_commit_count
                     .entry(
@@ -576,6 +593,7 @@ impl CodememEngine {
                     || (edge.valid_from.is_none()
                         && edge.created_at >= from
                         && edge.created_at <= to))
+                && in_ns(&edge.src)
             {
                 let pair = if edge.src < edge.dst {
                     (edge.src.clone(), edge.dst.clone())
