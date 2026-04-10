@@ -94,8 +94,14 @@ impl ApiServer {
             .route("/api/graph/impact/{id}", get(routes::graph::get_impact))
             .route("/api/graph/reload", post(routes::graph::reload_graph))
             .route("/api/graph/browse", get(routes::graph::get_graph_browse))
-            .route("/api/graph/file-content", get(routes::graph::get_file_content))
-            .route("/api/graph/stale-files", get(routes::graph::get_stale_files))
+            .route(
+                "/api/graph/file-content",
+                get(routes::graph::get_file_content),
+            )
+            .route(
+                "/api/graph/stale-files",
+                get(routes::graph::get_stale_files),
+            )
             .route("/api/graph/drift", get(routes::graph::get_drift))
             // Temporal
             .route(

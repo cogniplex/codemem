@@ -409,11 +409,7 @@ impl Storage {
     // ── Namespace Roots ──────────────────────────────────────────────────
 
     /// Store or update the root path for a namespace.
-    pub fn set_namespace_root(
-        &self,
-        namespace: &str,
-        root_path: &str,
-    ) -> Result<(), CodememError> {
+    pub fn set_namespace_root(&self, namespace: &str, root_path: &str) -> Result<(), CodememError> {
         let conn = self.conn()?;
         conn.execute(
             "INSERT INTO namespace_roots (namespace, root_path, updated_at)

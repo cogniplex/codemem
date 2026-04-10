@@ -664,11 +664,7 @@ pub async fn get_file_content(
         .map(|s| s.join("\n"))
         .unwrap_or_default();
 
-    let language = file_path
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_string();
+    let language = file_path.rsplit('.').next().unwrap_or("").to_string();
 
     Ok(Json(FileContentResponse {
         path: file_path.to_string(),

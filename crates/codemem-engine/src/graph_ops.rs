@@ -542,11 +542,7 @@ impl CodememEngine {
                 .map(|n| n.id.as_str())
                 .collect()
         });
-        let in_ns = |id: &str| -> bool {
-            ns_node_ids
-                .as_ref()
-                .is_none_or(|ids| ids.contains(id))
-        };
+        let in_ns = |id: &str| -> bool { ns_node_ids.as_ref().is_none_or(|ids| ids.contains(id)) };
 
         let new_cross_module = all_edges
             .iter()
