@@ -9,3 +9,32 @@ html, body, #root {
   height: 100%;
   margin: 0;
 }
+
+/* Custom scrollbar — thin, subtle */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #27272a transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+/* Smooth transitions for panel resizing */
+.transition-panel {
+  transition: width 200ms ease, opacity 150ms ease;
+}

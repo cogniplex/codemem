@@ -1,40 +1,29 @@
-import { Sidebar } from './Sidebar'
-import { Header } from './Header'
+import { Navbar } from './Navbar'
 import { SearchModal } from './SearchModal'
 import { useUiStore } from '../../stores/ui'
 import { DashboardView } from '../dashboard/DashboardView'
 import { GraphView } from '../graph/GraphView'
 import { MemoryBrowser } from '../memories/MemoryBrowser'
-import { RepoManager } from '../repos/RepoManager'
-import { TimelineView } from '../timeline/TimelineView'
-import { AgentRunner } from '../agents/AgentRunner'
-import { InsightsView } from '../insights/InsightsView'
-import { SettingsView } from '../settings/SettingsView'
 
 const views: Record<string, React.FC> = {
   dashboard: DashboardView,
-  repos: RepoManager,
   graph: GraphView,
   memories: MemoryBrowser,
-  timeline: TimelineView,
-  agents: AgentRunner,
-  insights: InsightsView,
-  settings: SettingsView,
 }
+
+const fullBleedViews = new Set(['graph'])
 
 export function Shell() {
   const { activeView } = useUiStore()
   const View = views[activeView] ?? views.dashboard
+  const isFullBleed = fullBleedViews.has(activeView)
 
   return (
-    <div className="flex h-screen bg-zinc-900 text-zinc-200">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6">
-          <View />
-        </main>
-      </div>
+    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-300 antialiased">
+      <Navbar />
+      <main className={`flex-1 overflow-y-auto ${isFullBleed ? '' : 'p-6'}`}>
+        <View />
+      </main>
       <SearchModal />
     </div>
   )

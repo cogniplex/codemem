@@ -82,22 +82,54 @@ impl CodememEngine {
             .list_memories_by_tag("track:activity", namespace, limit)
             .unwrap_or_default();
 
+        // Count annotated files = file nodes that have MODIFIED_BY edges to commits.
+        // Extract authors from commit node payloads (hash field present).
         let git_summary = match self.lock_graph() {
             Ok(graph) => {
                 let all_nodes = graph.get_all_nodes();
-                let mut annotated = 0;
+                let all_edges = self.storage.all_graph_edges().unwrap_or_default();
+
+                // Files with MODIFIED_BY edges (filtered by namespace if set)
+                let file_ids_with_commits: HashSet<String> = all_edges
+                    .iter()
+                    .filter(|e| e.relationship == codemem_core::RelationshipType::ModifiedBy)
+                    .filter(|e| e.src.starts_with("file:"))
+                    .map(|e| e.src.clone())
+                    .collect();
+
+                let annotated = if let Some(ns) = namespace {
+                    all_nodes
+                        .iter()
+                        .filter(|n| {
+                            n.kind == codemem_core::NodeKind::File
+                                && n.namespace.as_deref() == Some(ns)
+                                && file_ids_with_commits.contains(&n.id)
+                        })
+                        .count()
+                } else {
+                    file_ids_with_commits.len()
+                };
+
+                // Authors from commit nodes
                 let mut author_set: HashSet<String> = HashSet::new();
                 for node in &all_nodes {
-                    if node.payload.contains_key("git_commit_count") {
-                        annotated += 1;
-                        if let Some(authors) =
-                            node.payload.get("git_authors").and_then(|a| a.as_array())
-                        {
-                            for a in authors {
-                                if let Some(name) = a.as_str() {
-                                    author_set.insert(name.to_string());
-                                }
-                            }
+                    if node.kind != codemem_core::NodeKind::Commit {
+                        continue;
+                    }
+                    if let Some(ns) = namespace {
+                        if node.namespace.as_deref() != Some(ns) {
+                            continue;
+                        }
+                    }
+                    // Author stored in commit label (format: "author: message")
+                    // or in payload
+                    if let Some(author) = node.payload.get("author").and_then(|a| a.as_str()) {
+                        author_set.insert(author.to_string());
+                    } else if let Some(label) = node.label.split(':').next() {
+                        // Some commit labels start with author name
+                        let trimmed = label.trim();
+                        if !trimmed.is_empty() && !trimmed.starts_with("commit") {
+                            author_set.insert(trimmed.to_string());
                         }
                     }
                 }

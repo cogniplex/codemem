@@ -406,6 +406,32 @@ impl Storage {
 
         Ok(edges)
     }
+    // ── Namespace Roots ──────────────────────────────────────────────────
+
+    /// Store or update the root path for a namespace.
+    pub fn set_namespace_root(&self, namespace: &str, root_path: &str) -> Result<(), CodememError> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO namespace_roots (namespace, root_path, updated_at)
+             VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(namespace) DO UPDATE SET root_path = ?2, updated_at = datetime('now')",
+            rusqlite::params![namespace, root_path],
+        )
+        .storage_err()?;
+        Ok(())
+    }
+
+    /// Get the root path for a namespace.
+    pub fn get_namespace_root(&self, namespace: &str) -> Result<Option<String>, CodememError> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT root_path FROM namespace_roots WHERE namespace = ?1",
+            rusqlite::params![namespace],
+            |row| row.get(0),
+        )
+        .optional()
+        .storage_err()
+    }
 }
 
 #[cfg(test)]

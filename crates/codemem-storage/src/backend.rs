@@ -1027,6 +1027,14 @@ impl StorageBackend for Storage {
             })
             .collect())
     }
+
+    fn get_namespace_root(&self, namespace: &str) -> Result<Option<String>, CodememError> {
+        Storage::get_namespace_root(self, namespace)
+    }
+
+    fn set_namespace_root(&self, namespace: &str, root_path: &str) -> Result<(), CodememError> {
+        Storage::set_namespace_root(self, namespace, root_path)
+    }
 }
 
 #[cfg(test)]

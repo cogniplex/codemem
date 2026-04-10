@@ -12,6 +12,7 @@ use axum::{
     Json,
 };
 use codemem_core::{GraphBackend, NodeKind};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -69,6 +70,7 @@ fn collect_subgraph(
             centrality: n.centrality,
             memory_id: n.memory_id,
             namespace: n.namespace,
+            payload: n.payload,
         })
         .collect();
 
@@ -95,6 +97,7 @@ fn build_subgraph_response(
             centrality: n.centrality,
             memory_id: n.memory_id,
             namespace: n.namespace,
+            payload: n.payload,
         })
         .collect();
 
@@ -474,4 +477,201 @@ pub async fn get_temporal_snapshot(
     })?;
 
     Ok(Json(serde_json::to_value(snapshot).unwrap_or_default()))
+}
+
+// ── Stale Files & Drift ────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct StaleFilesQuery {
+    pub namespace: Option<String>,
+    pub stale_days: Option<u64>,
+}
+
+pub async fn get_stale_files(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<StaleFilesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let stale_days = query.stale_days.unwrap_or(30);
+    let files = state
+        .server
+        .engine
+        .find_stale_files(query.namespace.as_deref(), stale_days)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+
+    Ok(Json(serde_json::json!({
+        "stale_days": stale_days,
+        "stale_files": files.len(),
+        "files": files,
+    })))
+}
+
+pub async fn get_drift(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<crate::api::types::TemporalChangesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let from = chrono::DateTime::parse_from_rfc3339(&query.from)
+        .map(|dt| dt.to_utc())
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid 'from' date: {e}")})),
+            )
+        })?;
+    let to = chrono::DateTime::parse_from_rfc3339(&query.to)
+        .map(|dt| dt.to_utc())
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid 'to' date: {e}")})),
+            )
+        })?;
+
+    let report = state
+        .server
+        .engine
+        .detect_drift(from, to, query.namespace.as_deref())
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+
+    Ok(Json(serde_json::to_value(report).unwrap_or_default()))
+}
+
+// ── File Content ────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct FileContentQuery {
+    pub path: String,
+    pub line_start: Option<usize>,
+    pub line_end: Option<usize>,
+    /// Optional project root to resolve relative paths against.
+    pub root: Option<String>,
+    /// Namespace to look up the stored root path.
+    pub namespace: Option<String>,
+}
+
+/// Try to resolve a relative file path to an absolute one.
+/// Priority: explicit root → namespace root from DB → CWD → as-is.
+fn resolve_file_path(
+    path: &str,
+    root: Option<&str>,
+    storage: &dyn codemem_core::StorageBackend,
+    namespace: Option<&str>,
+) -> std::path::PathBuf {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() && p.exists() {
+        return p.to_path_buf();
+    }
+
+    // If explicit root provided, try that first
+    if let Some(root) = root {
+        let candidate = std::path::Path::new(root).join(path);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    // Try namespace root from DB (stored by `codemem analyze`)
+    if let Some(ns) = namespace {
+        if let Ok(Some(ns_root)) = storage.get_namespace_root(ns) {
+            let candidate = std::path::Path::new(&ns_root).join(path);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    // Try CWD
+    if let Ok(cwd) = std::env::current_dir() {
+        let candidate = cwd.join(path);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    // Fallback: return as-is
+    p.to_path_buf()
+}
+
+#[derive(Debug, Serialize)]
+pub struct FileContentResponse {
+    pub path: String,
+    pub content: String,
+    pub total_lines: usize,
+    pub line_start: usize,
+    pub line_end: usize,
+    pub language: String,
+}
+
+/// Serve file content for the code viewer. Resolves relative paths
+/// against CWD (the directory `codemem ui` was launched from).
+/// Only serves files that exist as graph nodes to prevent arbitrary reads.
+pub async fn get_file_content(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FileContentQuery>,
+) -> Result<Json<FileContentResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let file_path = &query.path;
+
+    // Security: verify the file exists as a graph node
+    let node_id = format!("file:{file_path}");
+    let exists = state
+        .server
+        .engine
+        .storage()
+        .get_graph_node(&node_id)
+        .ok()
+        .flatten()
+        .is_some();
+    if !exists {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "File not found in graph"})),
+        ));
+    }
+
+    // Resolve relative paths using stored namespace root, explicit root, or CWD.
+    let resolved = resolve_file_path(
+        file_path,
+        query.root.as_deref(),
+        state.server.engine.storage(),
+        query.namespace.as_deref(),
+    );
+
+    // Read the file
+    let content = std::fs::read_to_string(&resolved).map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("Cannot read file: {e}")})),
+        )
+    })?;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
+
+    let line_start = query.line_start.unwrap_or(1).max(1);
+    let line_end = query.line_end.unwrap_or(total_lines).min(total_lines);
+
+    let sliced = lines
+        .get(line_start.saturating_sub(1)..line_end)
+        .map(|s| s.join("\n"))
+        .unwrap_or_default();
+
+    let language = file_path.rsplit('.').next().unwrap_or("").to_string();
+
+    Ok(Json(FileContentResponse {
+        path: file_path.to_string(),
+        content: sliced,
+        total_lines,
+        line_start,
+        line_end,
+        language,
+    }))
 }

@@ -70,6 +70,13 @@ export const api = {
     if (params?.limit !== undefined) search.set('limit', String(params.limit))
     return request<import('./types').BrowseResponse>(`/api/graph/browse?${search}`)
   },
+  fileContent: (params: { path: string; line_start?: number; line_end?: number; namespace?: string }) => {
+    const search = new URLSearchParams({ path: params.path })
+    if (params.line_start !== undefined) search.set('line_start', String(params.line_start))
+    if (params.line_end !== undefined) search.set('line_end', String(params.line_end))
+    if (params.namespace) search.set('namespace', params.namespace)
+    return request<import('./types').FileContentResponse>(`/api/graph/file-content?${search}`)
+  },
   vectors: (namespace?: string) => {
     const search = namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''
     return request<import('./types').VectorPoint[]>(`/api/vectors${search}`)
@@ -85,6 +92,26 @@ export const api = {
   indexRepo: (id: string) =>
     request<import('./types').MessageResponse>(`/api/repos/${id}/index`, { method: 'POST' }),
   repo: (id: string) => request<import('./types').Repository>(`/api/repos/${id}`),
+
+  // Temporal
+  temporalChanges: (params: { from: string; to: string; namespace?: string }) => {
+    const search = new URLSearchParams({ from: params.from, to: params.to })
+    if (params.namespace) search.set('namespace', params.namespace)
+    return request<import('./types').TemporalChangesResponse>(`/api/graph/temporal/changes?${search}`)
+  },
+  temporalSnapshot: (at: string) =>
+    request<unknown>(`/api/graph/temporal/snapshot?at=${encodeURIComponent(at)}`),
+  staleFiles: (params?: { namespace?: string; stale_days?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.namespace) search.set('namespace', params.namespace)
+    if (params?.stale_days !== undefined) search.set('stale_days', String(params.stale_days))
+    return request<import('./types').StaleFilesResponse>(`/api/graph/stale-files?${search}`)
+  },
+  drift: (params: { from: string; to: string; namespace?: string }) => {
+    const search = new URLSearchParams({ from: params.from, to: params.to })
+    if (params.namespace) search.set('namespace', params.namespace)
+    return request<import('./types').DriftResponse>(`/api/graph/drift?${search}`)
+  },
 
   // Sessions
   sessions: (params?: { namespace?: string; limit?: number }) => {

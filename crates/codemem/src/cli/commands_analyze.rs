@@ -25,6 +25,13 @@ pub(crate) fn cmd_analyze(
             .unwrap_or(path_str)
     });
 
+    // Store the namespace → root path mapping for the UI file content viewer
+    if let Ok(canonical) = root.canonicalize() {
+        let _ = engine
+            .storage()
+            .set_namespace_root(ns, &canonical.to_string_lossy());
+    }
+
     // Load incremental state (skip when forcing full re-index)
     let change_detector = if force {
         None

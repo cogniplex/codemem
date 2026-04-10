@@ -143,27 +143,33 @@ pub async fn run_consolidation(
         ));
     }
 
-    let params = serde_json::json!({
-        "name": "consolidate",
-        "arguments": {"mode": cycle},
+    // Run on a plain OS thread: the "summarize" cycle creates a
+    // CompressProvider with reqwest::blocking::Client, which panics
+    // if any tokio runtime handle exists in thread-local storage.
+    let server = Arc::clone(&state.server);
+    let message = super::memories::run_blocking(move || {
+        let params = serde_json::json!({
+            "name": "consolidate",
+            "arguments": {"mode": cycle},
+        });
+
+        let response = server.handle_request(
+            "tools/call",
+            Some(&params),
+            serde_json::Value::Number(0.into()),
+        );
+
+        response
+            .result
+            .and_then(|r| {
+                r.get("content")?
+                    .get(0)?
+                    .get("text")?
+                    .as_str()
+                    .map(String::from)
+            })
+            .unwrap_or_else(|| "Consolidation completed".to_string())
     });
-
-    let response = state.server.handle_request(
-        "tools/call",
-        Some(&params),
-        serde_json::Value::Number(0.into()),
-    );
-
-    let message = response
-        .result
-        .and_then(|r| {
-            r.get("content")?
-                .get(0)?
-                .get("text")?
-                .as_str()
-                .map(String::from)
-        })
-        .unwrap_or_else(|| "Consolidation completed".to_string());
 
     Ok(Json(MessageResponse { message }))
 }

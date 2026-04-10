@@ -25,7 +25,12 @@ fn start_background_watcher() {
 
 pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> {
     let server = build_server()?;
-    start_background_watcher();
+    // Only start the background watcher for MCP stdio mode.
+    // In UI/API mode the watcher's CodememEngine can create a nested
+    // tokio runtime (via embedding provider) that panics on drop.
+    if !api {
+        start_background_watcher();
+    }
 
     match (api, http) {
         // Pure stdio mode (backwards compatible)
@@ -36,19 +41,18 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
             );
             server.run()?;
         }
-        // REST API + embedded frontend + stdio MCP
+        // REST API + embedded frontend (no stdio MCP — UI doesn't need it)
         (true, false) => {
             let server = Arc::new(server);
+            // Eagerly initialize the embedding provider BEFORE the tokio
+            // runtime starts. Remote providers (Ollama, OpenAI, Gemini) use
+            // reqwest::blocking::Client which creates an internal tokio
+            // runtime — this panics if created or dropped inside an existing
+            // tokio async context.  Initializing here (on the main thread)
+            // avoids both problems, and the OnceLock ensures later async
+            // callers reuse the already-initialized provider.
+            let _ = server.engine.lock_embeddings();
             let api_server = crate::api::ApiServer::new(Arc::clone(&server));
-
-            // Run stdio in a background thread, HTTP in the main tokio runtime
-            let server_for_stdio = Arc::clone(&server);
-            std::thread::spawn(move || {
-                tracing::info!("stdio MCP transport running in background");
-                if let Err(e) = server_for_stdio.run() {
-                    tracing::warn!("stdio transport stopped: {e}");
-                }
-            });
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
@@ -61,6 +65,7 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
         // HTTP MCP + REST API + embedded frontend (no stdio)
         (true, true) => {
             let server = Arc::new(server);
+            let _ = server.engine.lock_embeddings();
             let api_server = crate::api::ApiServer::new(Arc::clone(&server));
 
             let rt = tokio::runtime::Runtime::new()?;
@@ -74,6 +79,7 @@ pub(crate) fn cmd_serve(api: bool, http: bool, port: u16) -> anyhow::Result<()> 
         // HTTP MCP only (for remote MCP clients) — use the API server with MCP mounted
         (false, true) => {
             let server = Arc::new(server);
+            let _ = server.engine.lock_embeddings();
             let api_server = crate::api::ApiServer::new(Arc::clone(&server));
 
             tracing::info!("Codemem MCP HTTP transport on http://localhost:{port}/mcp");

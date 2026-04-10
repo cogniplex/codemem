@@ -75,6 +75,53 @@ export interface GraphNode {
   centrality: number
   memory_id?: string
   namespace?: string
+  payload?: Record<string, unknown>
+}
+
+export interface TemporalChangesResponse {
+  commits: number
+  entries: TemporalEntry[]
+}
+
+export interface TemporalEntry {
+  commit_id: string
+  hash: string
+  subject: string
+  author: string
+  date: string
+  changed_files: string[]
+  changed_symbols: string[]
+}
+
+export interface StaleFilesResponse {
+  stale_days: number
+  stale_files: number
+  files: StaleFile[]
+}
+
+export interface StaleFile {
+  file_path: string
+  centrality: number
+  last_modified: string | null
+  incoming_edges: number
+}
+
+export interface DriftResponse {
+  period: string
+  new_cross_module_edges: number
+  removed_files: number
+  added_files: number
+  hotspot_files: string[]
+  coupling_increases: [string, string, number][]
+}
+
+export interface FileContentResponse {
+  path: string
+  content: string
+  total_lines: number
+  line_start: number
+  line_end: number
+  language: string
 }
 
 export interface GraphEdge {

@@ -23,6 +23,7 @@ interface Props {
   showCommunities: boolean
   showEdges: boolean
   onNodeClick?: (nodeId: string) => void
+  onBackgroundClick?: () => void
   highlightNodeId?: string | null
   searchLabel?: string
   onLayoutRunning?: (running: boolean) => void
@@ -57,6 +58,7 @@ export function SigmaGraph({
   showCommunities,
   showEdges,
   onNodeClick,
+  onBackgroundClick,
   highlightNodeId,
   searchLabel,
   onLayoutRunning,
@@ -277,6 +279,7 @@ export function SigmaGraph({
           nodeCanvasObjectMode={CANVAS_OBJECT_MODE}
           nodeVal={(node: FGNode) => node.size}
           onNodeClick={handleNodeClick}
+          onBackgroundClick={onBackgroundClick}
           nodeLabel={nodeLabel}
           linkVisibility={linkVisibility}
           linkWidth={linkWidth}
