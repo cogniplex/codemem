@@ -58,14 +58,14 @@ export function GraphExplorer() {
     if (!neighborsData?.nodes) return subgraph.nodes
     const ids = new Set(subgraph.nodes.map((n) => n.id))
     return [...subgraph.nodes, ...neighborsData.nodes.filter((n) => !ids.has(n.id))]
-  }, [subgraph?.nodes, neighborsData?.nodes])
+  }, [subgraph, neighborsData])
 
   const mergedEdges = useMemo(() => {
     if (!subgraph?.edges) return []
     if (!neighborsData?.edges) return subgraph.edges
     const ids = new Set(subgraph.edges.map((e) => e.id))
     return [...subgraph.edges, ...neighborsData.edges.filter((e) => !ids.has(e.id))]
-  }, [subgraph?.edges, neighborsData?.edges])
+  }, [subgraph, neighborsData])
 
   const displayNodes = focusMode && focusData ? focusData.nodes : mergedNodes
   const displayEdges = focusMode && focusData ? focusData.edges : mergedEdges
@@ -90,11 +90,11 @@ export function GraphExplorer() {
   }, [])
 
   const handleToggleKind = useCallback((kind: string) => {
-    setKinds((prev) => { const next = new Set(prev); next.has(kind) ? next.delete(kind) : next.add(kind); return next })
+    setKinds((prev) => { const next = new Set(prev); if (next.has(kind)) { next.delete(kind) } else { next.add(kind) } return next })
   }, [])
 
   const handleToggleRelationship = useCallback((rel: string) => {
-    setActiveRelationships((prev) => { const next = new Set(prev); next.has(rel) ? next.delete(rel) : next.add(rel); return next })
+    setActiveRelationships((prev) => { const next = new Set(prev); if (next.has(rel)) { next.delete(rel) } else { next.add(rel) } return next })
   }, [])
 
   const handleFocus = useCallback((nodeId: string) => {

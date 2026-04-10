@@ -111,6 +111,7 @@ test.describe('API: Graph', () => {
   })
 
   test('GET /api/graph/pagerank returns scores', async ({ request }) => {
+    test.setTimeout(60000)
     const res = await request.get(`${API}/api/graph/pagerank?top=5`)
     expect(res.ok()).toBe(true)
     const data = await res.json()

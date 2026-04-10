@@ -1,6 +1,6 @@
 // TanStack Query hooks for all REST endpoints
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { api } from './client'
 
 // Stats & Health
@@ -29,7 +29,7 @@ export const useSearch = (params: Parameters<typeof api.search>[0], enabled = tr
     queryKey: ['search', params],
     queryFn: () => api.search(params),
     enabled,
-    placeholderData: (prev: unknown) => prev,  // keep previous results while new query loads
+    placeholderData: keepPreviousData,
   })
 
 // Graph
