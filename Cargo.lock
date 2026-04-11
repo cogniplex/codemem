@@ -135,11 +135,11 @@ dependencies = [
 
 [[package]]
 name = "ast-grep-core"
-version = "0.42.0"
+version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bdde23a7460d533ac757b053ad37d59e33d6ca6cfc21707000e07d8cfc431e9"
+checksum = "0e4ae49b5c42878311768f4cdd576ef470c6e45c3105d558af928fd04ac8c588"
 dependencies = [
- "bit-set 0.9.1",
+ "bit-set 0.10.0",
  "regex",
  "thiserror 2.0.18",
  "tree-sitter",
@@ -147,9 +147,9 @@ dependencies = [
 
 [[package]]
 name = "ast-grep-language"
-version = "0.42.0"
+version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1325ce42de0cf5d3ffdaf8e8c41f9eb8bad3cd278849bb746594245908370572"
+checksum = "fccbced91e848baf5d25278972bfc18b2248c38e411dcfeb65e431a5b530a5c6"
 dependencies = [
  "ast-grep-core",
  "ignore",
@@ -160,6 +160,7 @@ dependencies = [
  "tree-sitter-c-sharp",
  "tree-sitter-cpp",
  "tree-sitter-css",
+ "tree-sitter-dart",
  "tree-sitter-elixir",
  "tree-sitter-go",
  "tree-sitter-haskell",
@@ -319,9 +320,9 @@ dependencies = [
 
 [[package]]
 name = "bit-set"
-version = "0.9.1"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ddef2995421ab6a5c779542c81ee77c115206f4ad9d5a8e05f4ff49716a3dd"
+checksum = "09ec2f926cc3060f09db9ebc5b52823d85268d24bb917e472c0c4bea35780a7d"
 dependencies = [
  "bit-vec 0.9.1",
 ]
@@ -4761,6 +4762,16 @@ name = "tree-sitter-css"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5cbc5e18f29a2c6d6435891f42569525cf95435a3e01c2f1947abcde178686f"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-dart"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bba6bf8675e6fe92ba6da371a5497ee5df2a04d2c503e3599c8ad771f6f1faec"
 dependencies = [
  "cc",
  "tree-sitter-language",
