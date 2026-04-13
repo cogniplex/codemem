@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/cogniplex/codemem/compare/v0.15.0...v0.16.0) (2026-04-13)
+
+
+### Features
+
+* JinaBERT support, F16 default, configurable embedding model ([#68](https://github.com/cogniplex/codemem/issues/68)) ([48f423d](https://github.com/cogniplex/codemem/commit/48f423d4f85ee0174276491ea1ace35bac37d214))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.17.0 to 0.18.0
+
 ## [0.15.0](https://github.com/cogniplex/codemem/compare/v0.14.0...v0.15.0) (2026-04-07)
 
 

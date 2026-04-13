@@ -1,6 +1,6 @@
 [package]
 name = "codemem-engine"
-version = "0.17.0"
+version = "0.18.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -14,9 +14,9 @@ cuda = ["codemem-embeddings/cuda"]
 accelerate = ["codemem-embeddings/accelerate"]
 
 [dependencies]
-codemem-core = { path = "../codemem-core", version = "0.17.0" }
-codemem-storage = { path = "../codemem-storage", version = "0.15.1" }
-codemem-embeddings = { path = "../codemem-embeddings", version = "0.15.0" }
+codemem-core = { path = "../codemem-core", version = "0.18.0" }
+codemem-storage = { path = "../codemem-storage", version = "0.16.0" }
+codemem-embeddings = { path = "../codemem-embeddings", version = "0.16.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
