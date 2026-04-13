@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.17.0](https://github.com/cogniplex/codemem/compare/v0.16.0...v0.17.0) (2026-04-13)
+
+
+### Features
+
+* CLI UX overhaul — mcp subcommand group ([#72](https://github.com/cogniplex/codemem/issues/72)) ([e5fd074](https://github.com/cogniplex/codemem/commit/e5fd07401c2dda67e764f49da516d375f04abca7))
+* UI overhaul — 3-page layout, graph code viewer ([#78](https://github.com/cogniplex/codemem/issues/78)) ([6e22545](https://github.com/cogniplex/codemem/commit/6e225452aff3ef85e6e9cfbfc45c2ca0c909a071))
+
+
+### Bug Fixes
+
+* code-mapper pkg: fallback + auto-allow codemem MCP tools ([#73](https://github.com/cogniplex/codemem/issues/73)) ([0cd7e9c](https://github.com/cogniplex/codemem/commit/0cd7e9cfc5f065041c269b5a3d3fbc8d1588c207))
+* filter orphan edges + resolve SCIP indexer paths ([#74](https://github.com/cogniplex/codemem/issues/74)) ([c3e69a2](https://github.com/cogniplex/codemem/commit/c3e69a28b7269051d9cc2d131faf6998020be7a0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.17.0 to 0.18.0
+    * codemem-engine bumped from 0.17.0 to 0.18.0
+
 ## [0.16.0](https://github.com/cogniplex/codemem/compare/v0.15.0...v0.16.0) (2026-04-07)
 
 
