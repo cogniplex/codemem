@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/cogniplex/codemem/compare/v0.16.0...v0.17.0) (2026-04-13)
+
+
+### Features
+
+* UI overhaul — 3-page layout, graph code viewer ([#78](https://github.com/cogniplex/codemem/issues/78)) ([6e22545](https://github.com/cogniplex/codemem/commit/6e225452aff3ef85e6e9cfbfc45c2ca0c909a071))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.18.0 to 0.19.0
+
 ## [0.16.0](https://github.com/cogniplex/codemem/compare/v0.15.1...v0.16.0) (2026-04-13)
 
 
