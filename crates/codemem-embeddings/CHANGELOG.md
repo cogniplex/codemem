@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.17.0](https://github.com/cogniplex/codemem/compare/v0.16.1...v0.17.0) (2026-04-15)
+
+
+### Features
+
+* add Google Gemini embedding provider ([#50](https://github.com/cogniplex/codemem/issues/50)) ([007f0d4](https://github.com/cogniplex/codemem/commit/007f0d45bbc6fc84e629ae0c668840e26206d515))
+* configurable embedding model, dtype, and batch size ([#31](https://github.com/cogniplex/codemem/issues/31)) ([6dfbfce](https://github.com/cogniplex/codemem/commit/6dfbfce0377b5e46c0a2de8907ac11a53f19e490))
+* JinaBERT support, F16 default, configurable embedding model ([#68](https://github.com/cogniplex/codemem/issues/68)) ([48f423d](https://github.com/cogniplex/codemem/commit/48f423d4f85ee0174276491ea1ace35bac37d214))
+* v0.4.0 production hardening — zero unwraps, safe concurrency, config persistence, schema migrations ([7a81665](https://github.com/cogniplex/codemem/commit/7a816651580ff7b891a40a9bc41322373fcddb15))
+* v0.6.0 — 8 new language parsers, operational metrics, CLI commands, test coverage ([917d940](https://github.com/cogniplex/codemem/commit/917d940da2770b052e6f65b618df5bbd95ca75db))
+
+
+### Bug Fixes
+
+* **ci:** resolve all formatting, clippy, and eslint failures ([80cd400](https://github.com/cogniplex/codemem/commit/80cd400d02904c15de8937604b53abe733b05386))
+* **ci:** use explicit crate versions for release-please compatibility ([cc54698](https://github.com/cogniplex/codemem/commit/cc54698870e3a2d69904859ff032fbd1ccc224a2))
+* **ci:** use explicit path+version for internal deps instead of workspace inheritance ([cc3f43c](https://github.com/cogniplex/codemem/commit/cc3f43c82b7eb8593e69b5f78baf5cf6fe5201bb))
+* embedding memory leaks, silent batch drops, HNSW ghost compaction, BM25 persistence ([7a41a36](https://github.com/cogniplex/codemem/commit/7a41a367d7031ac423743f6a36bb317fca0fb054))
+* post-review fixes for temporal graph, Gemini provider, and migration safety ([#56](https://github.com/cogniplex/codemem/issues/56)) ([f345dc6](https://github.com/cogniplex/codemem/commit/f345dc65550d2281d204856b1757a901f0a1f338))
+* restore batch size 32 and remove redundant device.synchronize() ([b0469d3](https://github.com/cogniplex/codemem/commit/b0469d351e40a248dd04d59d2e3da4545ddbc6ba))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.19.0 to 0.20.0
+
 ## [0.16.1](https://github.com/cogniplex/codemem/compare/v0.16.0...v0.16.1) (2026-04-13)
 
 
