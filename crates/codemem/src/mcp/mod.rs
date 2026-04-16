@@ -237,6 +237,7 @@ impl McpServer {
             "merge_memories" => self.tool_merge_memories(args),
 
             // ── Graph & Structure ───────────────────────────────────────
+            "index_codebase" => self.tool_index_codebase(args),
             "graph_traverse" => self.tool_graph_traverse(args),
             "summary_tree" => self.tool_summary_tree(args),
             "codemem_status" => self.tool_codemem_status(args),

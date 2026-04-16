@@ -254,11 +254,13 @@ impl CodememEngine {
                 total_symbols: parse_result.symbols.len(),
                 total_references: parse_result.references.len(),
                 total_chunks: parse_result.chunks.len(),
+                total_documents: 0,
                 parse_results: Vec::new(),
             },
             symbols: parse_result.symbols,
             references: parse_result.references,
             chunks: parse_result.chunks,
+            doc_nodes: Vec::new(),
             file_paths,
             edges: resolve_result.edges,
             unresolved: resolve_result.unresolved,
@@ -415,6 +417,12 @@ impl CodememEngine {
         let chunk_prefix = format!("chunk:{file_path}:");
         if let Err(e) = self.storage.delete_graph_nodes_by_prefix(&chunk_prefix) {
             tracing::warn!("Failed to delete chunk nodes for {file_path}: {e}");
+        }
+
+        // Remove all document nodes for this file
+        let doc_prefix = crate::index::document_indexer::doc_prefix_for_file(file_path);
+        if let Err(e) = self.storage.delete_graph_nodes_by_prefix(&doc_prefix) {
+            tracing::warn!("Failed to delete doc nodes for {file_path}: {e}");
         }
 
         // Remove symbol nodes for this file by checking graph
