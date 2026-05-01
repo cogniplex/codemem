@@ -349,10 +349,11 @@ impl ScipOrchestrator {
         if !output_path.exists() {
             let default_output = project_root.join(lang.default_output_file());
             if default_output.exists() {
-                std::fs::rename(&default_output, output_path).map_err(|e| {
+                move_across_filesystems(&default_output, output_path).map_err(|e| {
                     CodememError::ScipOrchestration(format!(
-                        "Failed to move {}: {e}",
-                        default_output.display()
+                        "Failed to move {} to {}: {e}",
+                        default_output.display(),
+                        output_path.display()
                     ))
                 })?;
             }
@@ -411,6 +412,23 @@ impl ScipOrchestrator {
         merged.covered_files.dedup();
 
         Ok(merged)
+    }
+}
+
+/// Move a file from `src` to `dst`, falling back to copy+delete when the two
+/// paths live on different filesystems. `std::fs::rename` maps to the
+/// `rename(2)` syscall which returns `EXDEV` ("Invalid cross-device link")
+/// across mount points — common on Linux when `/tmp` is `tmpfs` and the
+/// project lives under `$HOME` on another filesystem.
+fn move_across_filesystems(src: &Path, dst: &Path) -> std::io::Result<()> {
+    match std::fs::rename(src, dst) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            std::fs::copy(src, dst)?;
+            std::fs::remove_file(src)?;
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
 }
 
