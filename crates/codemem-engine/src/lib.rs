@@ -418,8 +418,41 @@ impl CodememEngine {
     // ── Lazy Initialization ────────────────────────────────────────────
 
     /// Initialize the HNSW vector index: load from disk, run consistency check.
+    ///
+    /// Resolves the vector dimension from the embedding provider (or existing DB
+    /// embeddings) rather than blindly trusting `config.vector.dimensions`. This
+    /// fixes a class of bugs where the HNSW index is allocated with the default
+    /// 768 dims while the actual embeddings are a different size (e.g. 384 for
+    /// bge-small, 1024 for bge-large), causing every insert to fail with a
+    /// dimension-mismatch error.
+    ///
+    /// Source-of-truth priority for the dimension:
+    ///   1. An existing embedding stored in SQLite (the established DB wins —
+    ///      its dim is authoritative because every embedding stored there must
+    ///      match it).
+    ///   2. The embedding provider's `dimensions()` (Candle reads the model's
+    ///      `config.json:hidden_size`; remote providers use
+    ///      `CODEMEM_EMBED_DIMENSIONS` / `config.embedding.dimensions`).
+    ///   3. `config.vector.dimensions` (last-resort default, often 768).
     fn init_vector(&self) -> Mutex<Box<dyn VectorBackend>> {
-        let vector_config = self.config.vector.clone();
+        let mut vector_config = self.config.vector.clone();
+        let configured_dim = vector_config.dimensions;
+
+        if let Some(resolved_dim) = self
+            .peek_db_embedding_dim()
+            .or_else(|| self.peek_provider_dim())
+        {
+            if resolved_dim != configured_dim {
+                tracing::info!(
+                    "Resolved vector dimension to {} (config.vector.dimensions = {})",
+                    resolved_dim,
+                    configured_dim
+                );
+                vector_config.dimensions = resolved_dim;
+            }
+        }
+        let target_dim = vector_config.dimensions;
+
         let mut vector = HnswIndex::new(vector_config.clone())
             .unwrap_or_else(|_| HnswIndex::with_defaults().expect("default vector index"));
 
@@ -428,6 +461,17 @@ impl CodememEngine {
             if index_path.exists() {
                 if let Err(e) = vector.load(&index_path) {
                     tracing::warn!("Stale or corrupt vector index, will rebuild: {e}");
+                } else if vector.actual_dimensions() != target_dim {
+                    tracing::warn!(
+                        "Persisted vector index dim ({}) does not match target dim ({}), rebuilding from DB",
+                        vector.actual_dimensions(),
+                        target_dim
+                    );
+                    // Reset to a fresh, correctly-dimensioned index; the
+                    // consistency check below will repopulate from SQLite.
+                    if let Ok(fresh) = HnswIndex::new(vector_config.clone()) {
+                        vector = fresh;
+                    }
                 }
             }
 
@@ -457,6 +501,36 @@ impl CodememEngine {
         }
 
         Mutex::new(Box::new(vector))
+    }
+
+    /// Peek at the dimension of any embedding already stored in SQLite.
+    ///
+    /// Returns `None` if storage has no embeddings or the lookup errors. This is
+    /// the most authoritative dim source for an established DB — every stored
+    /// embedding shares the same length, so the first one found is sufficient.
+    fn peek_db_embedding_dim(&self) -> Option<usize> {
+        let ids = self.storage.list_memory_ids().ok()?;
+        for id in &ids {
+            if let Ok(Some(emb)) = self.storage.get_embedding(id) {
+                if !emb.is_empty() {
+                    return Some(emb.len());
+                }
+            }
+        }
+        None
+    }
+
+    /// Ask the embedding provider what dimension it produces.
+    ///
+    /// Returns `None` if no provider is configured or initialization fails (e.g.
+    /// model not yet downloaded). This will lazily initialize the embedding
+    /// provider as a side effect — acceptable here because any caller that needs
+    /// the vector index will need embeddings shortly anyway.
+    fn peek_provider_dim(&self) -> Option<usize> {
+        self.lock_embeddings()
+            .ok()
+            .flatten()
+            .map(|p| p.dimensions())
     }
 
     /// Initialize the BM25 index: load from disk or rebuild from memories.
