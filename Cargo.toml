@@ -38,7 +38,7 @@ petgraph = "0.8"
 candle-core = { version = "0.10", default-features = false }
 candle-nn = { version = "0.10", default-features = false }
 candle-transformers = { version = "0.10", default-features = false }
-tokenizers = { version = "0.22", features = ["http"] }
+tokenizers = { version = "0.23", features = ["http"] }
 ndarray = "0.17"
 hf-hub = "0.5"
 
@@ -61,7 +61,7 @@ sha2 = "0.11"
 thiserror = "2"
 anyhow = "1"
 dirs = "6"
-lru = "0.16"
+lru = "0.18"
 chrono = { version = "0.4", features = ["serde"] }
 similar = "3"
 reqwest = { version = "0.13", features = ["blocking", "json"] }
