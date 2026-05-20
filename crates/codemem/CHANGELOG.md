@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.0](https://github.com/cogniplex/codemem/compare/v0.17.1...v0.18.0) (2026-05-20)
+
+
+### Features
+
+* index Markdown and YAML files as searchable document nodes ([#71](https://github.com/cogniplex/codemem/issues/71)) ([da0c4eb](https://github.com/cogniplex/codemem/commit/da0c4ebbedf186a75093f7343f613a5976d867df))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.19.0 to 0.20.0
+    * codemem-engine bumped from 0.19.0 to 0.20.0
+
 ## [0.17.1](https://github.com/cogniplex/codemem/compare/v0.17.0...v0.17.1) (2026-04-13)
 
 

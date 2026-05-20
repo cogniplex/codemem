@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.1](https://github.com/cogniplex/codemem/compare/v0.17.0...v0.17.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* **engine:** sync HNSW dim from provider/DB instead of trusting config default ([#85](https://github.com/cogniplex/codemem/issues/85)) ([1ac8d3d](https://github.com/cogniplex/codemem/commit/1ac8d3dab32b49aaebd02886c90776429d36137f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.19.0 to 0.20.0
+
 ## [0.17.0](https://github.com/cogniplex/codemem/compare/v0.16.0...v0.17.0) (2026-04-13)
 
 
