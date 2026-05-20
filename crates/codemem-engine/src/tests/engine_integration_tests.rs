@@ -1,5 +1,6 @@
 use crate::CodememEngine;
 use codemem_core::{Edge, GraphNode, MemoryNode, NodeKind, RelationshipType};
+use codemem_storage::Storage;
 use std::collections::HashMap;
 
 fn make_memory(id: &str, content: &str) -> MemoryNode {
@@ -199,4 +200,80 @@ fn batch_persist_then_single_save() {
         bm25.score("lifetime annotations", "batch-3") > 0.0,
         "batch-3 should be in BM25 index"
     );
+}
+
+// ── Vector dimension sync ───────────────────────────────────────────
+//
+// Regression test for the bug where the HNSW index was always allocated with
+// `VectorConfig::default().dimensions` (768) regardless of the actual embedding
+// size, causing every insert to fail with a dimension-mismatch error when using
+// non-default models (e.g. bge-small at 384, bge-large at 1024). `init_vector`
+// must resolve the dim from existing DB embeddings (or the embedding provider)
+// and rebuild on a saved-index dim mismatch.
+
+const TEST_DIM: usize = 384;
+
+#[test]
+fn init_vector_resolves_dimension_from_existing_db_embedding() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+
+    // Pre-seed: store a memory + a 384-dim embedding directly into SQLite.
+    {
+        let storage = Storage::open(&db_path).unwrap();
+        let mut mem = MemoryNode::test_default("dimension probe seed");
+        mem.id = "dim-seed".to_string();
+        storage.insert_memory(&mem).unwrap();
+        let embedding: Vec<f32> = (0..TEST_DIM).map(|i| i as f32 * 0.001).collect();
+        storage.store_embedding(&mem.id, &embedding).unwrap();
+    }
+
+    // Re-open via the engine: lazy `init_vector` should pick 384, not the
+    // 768 default in `config.vector.dimensions`.
+    let engine = CodememEngine::from_db_path(&db_path).unwrap();
+    let resolved = engine.with_vector(|v| v.stats().dimensions).unwrap();
+
+    assert_eq!(
+        resolved, TEST_DIM,
+        "init_vector should resolve dim from stored embedding ({TEST_DIM}), not default 768"
+    );
+
+    // The seed embedding should be present in the rebuilt index (count == 1).
+    let count = engine.with_vector(|v| v.stats().count).unwrap();
+    assert_eq!(
+        count, 1,
+        "consistency check should have rebuilt the index from the seeded embedding"
+    );
+}
+
+#[test]
+fn init_vector_dim_matches_provider_or_config_when_db_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+
+    // Empty DB, no pre-seeded embedding. The resolved vector dim must equal
+    // either the provider's reported dim (when a provider is available) or
+    // the configured dim (when not). Crucially, it must NEVER silently land
+    // on a value that mismatches the provider, because that's the bug.
+    let engine = CodememEngine::from_db_path(&db_path).unwrap();
+    let resolved = engine.with_vector(|v| v.stats().dimensions).unwrap();
+
+    let provider_dim = engine
+        .lock_embeddings()
+        .ok()
+        .flatten()
+        .map(|guard| guard.dimensions());
+
+    if let Some(p_dim) = provider_dim {
+        assert_eq!(
+            resolved, p_dim,
+            "vector dim must equal provider dim — that's the regression"
+        );
+    } else {
+        let configured = engine.config().vector.dimensions;
+        assert_eq!(
+            resolved, configured,
+            "with no provider, dim should fall back to config"
+        );
+    }
 }

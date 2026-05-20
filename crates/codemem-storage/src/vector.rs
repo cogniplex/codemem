@@ -133,6 +133,16 @@ impl HnswIndex {
     pub fn ghost_count(&self) -> usize {
         self.ghost_count
     }
+
+    /// Returns the dimension actually allocated by the underlying usearch index.
+    ///
+    /// This may differ from `self.config.dimensions` after `load()` if the
+    /// persisted index file was created with a different dimension. Callers
+    /// performing dimension reconciliation should compare this against the
+    /// expected dimension and rebuild on mismatch.
+    pub fn actual_dimensions(&self) -> usize {
+        self.index.dimensions()
+    }
 }
 
 impl VectorBackend for HnswIndex {
