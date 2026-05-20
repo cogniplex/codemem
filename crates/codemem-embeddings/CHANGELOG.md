@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.17.1](https://github.com/cogniplex/codemem/compare/v0.17.0...v0.17.1) (2026-05-20)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * codemem-core bumped from 0.20.0 to 0.21.0
+
 ## [0.17.0](https://github.com/cogniplex/codemem/compare/v0.16.1...v0.17.0) (2026-05-20)
 
 
