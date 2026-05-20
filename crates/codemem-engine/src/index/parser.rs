@@ -4,6 +4,7 @@
 //! and runs symbol + reference extraction via the unified engine.
 
 use crate::index::chunker::{chunk_file, ChunkConfig, CodeChunk};
+use crate::index::document_indexer::DocumentNode;
 use crate::index::engine::AstGrepEngine;
 use crate::index::symbol::{Reference, Symbol};
 use ast_grep_core::tree_sitter::LanguageExt;
@@ -22,6 +23,8 @@ pub struct ParseResult {
     pub references: Vec<Reference>,
     /// CST-aware code chunks extracted from the file.
     pub chunks: Vec<CodeChunk>,
+    /// Document nodes extracted from Markdown / YAML files (empty for code files).
+    pub doc_nodes: Vec<DocumentNode>,
 }
 
 /// Coordinates ast-grep parsing across multiple languages.
@@ -73,6 +76,7 @@ impl CodeParser {
             symbols,
             references,
             chunks,
+            doc_nodes: Vec::new(),
         })
     }
 

@@ -5,6 +5,7 @@
 use super::types::ToolResult;
 use super::McpServer;
 use codemem_core::{NodeKind, RelationshipType};
+use codemem_engine::IndexCache;
 use serde_json::{json, Value};
 
 /// Format a confidence tag for edge display.
@@ -167,6 +168,98 @@ impl McpServer {
 
         ToolResult::text(
             serde_json::to_string_pretty(&response).expect("JSON serialization of literal"),
+        )
+    }
+
+    // ── Structural Index Tools ──────────────────────────────────────────────
+
+    pub(crate) fn tool_index_codebase(&self, args: &Value) -> ToolResult {
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return ToolResult::tool_error("Missing 'path' parameter"),
+        };
+
+        let root = std::path::Path::new(path);
+        if !root.exists() {
+            return ToolResult::tool_error(format!("Path does not exist: {path}"));
+        }
+
+        // Use the directory basename as namespace (not the full path) so it
+        // matches the short names agents use when calling store_memory.
+        let namespace = root.file_name().and_then(|f| f.to_str()).unwrap_or(path);
+
+        let mut indexer = codemem_engine::Indexer::new();
+        let resolved = match indexer.index_and_resolve(root) {
+            Ok(r) => r,
+            Err(e) => return ToolResult::tool_error(format!("Indexing failed: {e}")),
+        };
+
+        let files_scanned = resolved.index.files_scanned;
+        let files_parsed = resolved.index.files_parsed;
+        let files_skipped = resolved.index.files_skipped;
+        let total_symbols = resolved.index.total_symbols;
+        let total_references = resolved.index.total_references;
+
+        // Delegate all persistence to the engine
+        let persist_result = match self
+            .engine
+            .persist_index_results(&resolved, Some(namespace))
+        {
+            Ok(r) => r,
+            Err(e) => return ToolResult::tool_error(format!("Persistence failed: {e}")),
+        };
+
+        // Cross-repo persistence: scan manifests, register packages, detect endpoints.
+        let manifests = codemem_engine::index::manifest::scan_manifests(root);
+        let cross_repo_result = self
+            .engine
+            .persist_cross_repo_data(
+                &manifests,
+                &resolved.unresolved,
+                &resolved.symbols,
+                &resolved.references,
+                namespace,
+            )
+            .unwrap_or_default();
+
+        // Cache results for structural queries
+        {
+            match self.engine.lock_index_cache() {
+                Ok(mut cache) => {
+                    *cache = Some(IndexCache {
+                        symbols: resolved.symbols,
+                        chunks: resolved.chunks,
+                        root_path: path.to_string(),
+                    });
+                }
+                Err(e) => return ToolResult::tool_error(format!("Lock error: {e}")),
+            }
+        }
+
+        ToolResult::text(
+            serde_json::to_string_pretty(&json!({
+                "files_scanned": files_scanned,
+                "files_parsed": files_parsed,
+                "files_skipped": files_skipped,
+                "files_created": persist_result.files_created,
+                "symbols": total_symbols,
+                "references": total_references,
+                "edges_resolved": persist_result.edges_resolved,
+                "symbols_embedded": persist_result.symbols_embedded,
+                "chunks": persist_result.chunks_stored,
+                "chunks_embedded": persist_result.chunks_embedded,
+                "documents": persist_result.documents_stored,
+                "documents_embedded": persist_result.documents_embedded,
+                "chunks_pruned": persist_result.chunks_pruned,
+                "symbols_pruned": persist_result.symbols_pruned,
+                "packages_created": persist_result.packages_created,
+                "packages_registered": cross_repo_result.packages_registered,
+                "unresolved_refs": cross_repo_result.unresolved_refs_stored,
+                "cross_repo_edges": cross_repo_result.forward_edges_created + cross_repo_result.backward_edges_created,
+                "endpoints_detected": cross_repo_result.endpoints_detected,
+                "client_calls_detected": cross_repo_result.client_calls_detected,
+            }))
+            .expect("JSON serialization of literal"),
         )
     }
 

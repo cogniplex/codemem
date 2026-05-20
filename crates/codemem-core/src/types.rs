@@ -265,6 +265,8 @@ pub enum NodeKind {
     Commit,
     /// A pull request (detected from merge/squash commit patterns).
     PullRequest,
+    /// A named section extracted from a document (Markdown heading, YAML resource).
+    Document,
 }
 
 impl std::fmt::Display for NodeKind {
@@ -293,6 +295,7 @@ impl std::fmt::Display for NodeKind {
             Self::Property => write!(f, "property"),
             Self::Commit => write!(f, "commit"),
             Self::PullRequest => write!(f, "pull_request"),
+            Self::Document => write!(f, "document"),
         }
     }
 }
@@ -325,6 +328,7 @@ impl std::str::FromStr for NodeKind {
             "property" => Ok(Self::Property),
             "commit" => Ok(Self::Commit),
             "pull_request" => Ok(Self::PullRequest),
+            "document" => Ok(Self::Document),
             _ => Err(CodememError::InvalidNodeKind(s.to_string())),
         }
     }
