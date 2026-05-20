@@ -192,6 +192,19 @@ fn test_merge_empty_files() {
 }
 
 #[test]
+fn test_move_across_filesystems_same_fs() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.scip");
+    let dst = dir.path().join("dst.scip");
+    std::fs::write(&src, b"payload").unwrap();
+
+    move_across_filesystems(&src, &dst).unwrap();
+
+    assert!(!src.exists());
+    assert_eq!(std::fs::read(&dst).unwrap(), b"payload");
+}
+
+#[test]
 fn test_namespace_substitution() {
     let (prog, args) = parse_shell_command("scip-python index . --project-name=myproject").unwrap();
     assert_eq!(prog, "scip-python");
