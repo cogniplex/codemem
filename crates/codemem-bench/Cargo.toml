@@ -1,6 +1,6 @@
 [package]
 name = "codemem-bench"
-version = "0.8.13"
+version = "0.8.14"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -11,8 +11,8 @@ description = "Criterion benchmarks for Codemem"
 publish = false
 
 [dependencies]
-codemem-core = { path = "../codemem-core", version = "0.20.0" }
-codemem-storage = { path = "../codemem-storage", version = "0.17.1" }
+codemem-core = { path = "../codemem-core", version = "0.21.0" }
+codemem-storage = { path = "../codemem-storage", version = "0.17.2" }
 criterion = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
