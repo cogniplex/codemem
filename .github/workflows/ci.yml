@@ -23,7 +23,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       ui: ${{ steps.filter.outputs.ui }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -42,7 +42,7 @@ jobs:
     if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -54,7 +54,7 @@ jobs:
     if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -70,7 +70,7 @@ jobs:
         os: [blacksmith-4vcpu-ubuntu-2404, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
@@ -81,7 +81,7 @@ jobs:
     if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
@@ -91,7 +91,7 @@ jobs:
       - name: Generate coverage
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
@@ -109,7 +109,7 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - run: bun run tsc --noEmit
@@ -121,7 +121,7 @@ jobs:
     if: ${{ needs.changes.outputs.ui == 'true' || needs.changes.outputs.rust == 'true' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: oven-sh/setup-bun@v2
@@ -148,7 +148,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [ui-build]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
 
       - name: Install UI dependencies
@@ -186,7 +186,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench -p codemem-bench --no-run
