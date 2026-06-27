@@ -26,7 +26,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Database
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Vector search
 usearch = "2"
@@ -35,9 +35,9 @@ usearch = "2"
 petgraph = "0.8"
 
 # Embeddings
-candle-core = { version = "0.10", default-features = false }
-candle-nn = { version = "0.10", default-features = false }
-candle-transformers = { version = "0.10", default-features = false }
+candle-core = { version = "0.11", default-features = false }
+candle-nn = { version = "0.11", default-features = false }
+candle-transformers = { version = "0.11", default-features = false }
 tokenizers = { version = "0.23", features = ["http"] }
 ndarray = "0.17"
 hf-hub = "0.5"
